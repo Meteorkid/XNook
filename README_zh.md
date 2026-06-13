@@ -1,0 +1,98 @@
+中文 | [English](README.md)
+
+<p align="center">
+  <img src="Assets/app-icon.png" width="128" alt="X Nook">
+</p>
+
+<h1 align="center">X Nook</h1>
+
+<p align="center">
+  一款 macOS 灵动岛风格的工具中心。<br>
+  X Island 的配套应用 — 媒体、日历、笔记、文件架尽在指尖。
+</p>
+
+## 演示
+
+<p align="center">
+  <img src="Assets/demo.gif" width="560" alt="X Nook 演示">
+</p>
+
+| 收起状态 | 展开状态 | 切换到 X Island |
+|:-------:|:-------:|:--------------:|
+| <img src="Assets/screenshots/collapsed.png" width="220" alt="收起状态"> | <img src="Assets/screenshots/expanded.png" width="220" alt="展开状态"> | <img src="Assets/screenshots/switch.png" width="220" alt="切换"> |
+
+## 功能介绍
+
+X Nook 以紧凑的药丸形状悬浮在屏幕顶部。鼠标悬停即可展开，访问你的工具。
+
+**核心功能：**
+
+- **媒体播放** — 控制音乐播放，显示专辑封面
+- **日历 Widget** — 一目了然查看即将到来的日程
+- **笔记 Widget** — 快速记笔记，支持 Markdown
+- **文件架** — 拖放文件，快速访问
+- **应用切换** — 双指滑动在 X Nook 和 X Island 之间切换
+- **多显示器** — 自动跟随鼠标在屏幕间切换
+- **刘海适配** — 专为 MacBook 刘海屏设计
+
+**即将推出：**
+
+- 快捷指令集成
+- 摄像头镜像 Widget
+- 蓝牙设备显示
+- 流体渐变动画
+
+## 系统要求
+
+- macOS 14.0 或更高版本
+- Xcode 15.0 或更高版本
+
+## 安装
+
+### 方式一：从源码构建
+
+1. 克隆仓库
+2. 在 Xcode 中打开 `XNook.xcodeproj`
+3. 构建并运行 (⌘R)
+
+### 方式二：Swift Package Manager
+
+```bash
+swift build
+swift run
+```
+
+## 项目结构
+
+```
+XNook/
+├── App/
+│   ├── XNookApp.swift          # 入口
+│   └── AppDelegate.swift       # 应用委托
+├── Core/
+│   ├── NotchWindow.swift       # 自定义窗口管理
+│   ├── NotchDetector.swift     # 刘海检测
+│   ├── NotchViewModel.swift    # 状态管理
+│   └── AppSwitcher.swift       # 应用切换
+├── Features/
+│   ├── NotchContentView.swift  # 主界面
+│   ├── MediaWidget/            # 媒体播放
+│   ├── CalendarWidget/         # 日历集成
+│   ├── NotesWidget/            # 笔记编辑器
+│   └── TrayWidget/             # 文件架
+└── Settings/
+    └── SettingsView.swift      # 偏好设置
+```
+
+## 相关项目
+
+- [X Island](https://github.com/Meteorkid/XIsland) — AI 编程助手监控器
+- [NotchNook](https://lo.cafe/notchnook) — 原版 Notch 工具中心（闭源）
+
+## 许可证
+
+MIT 许可证
+
+## 贡献
+
+欢迎贡献！请随时提交 Pull Request。

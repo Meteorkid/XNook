@@ -44,9 +44,7 @@
 5. 窗口在 Space 切换时保持可见
 
 **Plans:**
-1. `PLAN-1.1` — 项目框架搭建和 NotchWindow 核心实现
-2. `PLAN-1.2` — 应用切换功能实现
-3. `PLAN-1.3` — 基础 UI 和动画实现
+1. `01-PLAN.md` — Core Foundation: 窗口管理、应用切换、基础 UI
 
 ---
 
@@ -74,8 +72,7 @@
 4. 点击事件可以打开系统日历
 
 **Plans:**
-1. `PLAN-2.1` — 媒体播放 Widget 实现
-2. `PLAN-2.2` — 日历 Widget 实现
+1. `02-PLAN.md` — Media & Calendar: 媒体播放和日历 Widget
 
 ---
 
@@ -102,8 +99,7 @@
 4. 可以从文件架打开文件
 
 **Plans:**
-1. `PLAN-3.1` — 笔记 Widget 实现
-2. `PLAN-3.2` — 文件架 Tray 实现
+1. `03-PLAN.md` — Notes & Tray: 笔记和文件架 Widget
 
 ---
 
@@ -124,8 +120,7 @@
 3. 关于页面显示正确的版本信息
 
 **Plans:**
-1. `PLAN-4.1` — 设置界面实现
-2. `PLAN-4.2` — 整体优化和测试
+1. `04-PLAN.md` — Settings & Polish: 设置界面和整体优化
 
 ---
 
@@ -137,4 +132,4 @@
 
 ---
 
-*Last updated: 2026-06-13 after initialization*
+*Last updated: 2026-06-13 after planning complete*

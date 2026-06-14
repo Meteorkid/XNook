@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-06-13)
 
 **Core value:** 在屏幕顶部提供一个紧凑、可快速访问的工具中心
-**Current focus:** Phase 1 - Core Foundation
+**Current focus:** Phase 2 - Media & Calendar
 
 ## Current State
 

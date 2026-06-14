@@ -5,6 +5,8 @@ struct NotchContentView: View {
     @StateObject private var viewModel = NotchViewModel()
     @StateObject private var mediaManager = MediaManager()
     @StateObject private var calendarManager = CalendarManager()
+    @StateObject private var notesManager = NotesManager()
+    @StateObject private var trayManager = TrayManager()
     @State private var selectedWidget: WidgetType?
 
     enum WidgetType: String {
@@ -149,9 +151,9 @@ struct NotchContentView: View {
                     case .calendar:
                         CalendarWidgetView(calendarManager: calendarManager)
                     case .notes:
-                        Text("Notes Widget")
+                        NotesWidgetView(notesManager: notesManager)
                     case .tray:
-                        Text("Tray Widget")
+                        TrayWidgetView(trayManager: trayManager)
                     }
                 }
                 .transition(.scale.combined(with: .opacity))

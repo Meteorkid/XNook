@@ -3,6 +3,16 @@ import SwiftUI
 /// Notch 主内容视图
 struct NotchContentView: View {
     @StateObject private var viewModel = NotchViewModel()
+    @StateObject private var mediaManager = MediaManager()
+    @StateObject private var calendarManager = CalendarManager()
+    @State private var selectedWidget: WidgetType?
+
+    enum WidgetType: String {
+        case media
+        case calendar
+        case notes
+        case tray
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -130,7 +140,22 @@ struct NotchContentView: View {
             Divider()
 
             // 功能预览区
-            if viewModel.currentApp == .xnook {
+            if let widget = selectedWidget {
+                // 显示选中的 Widget
+                Group {
+                    switch widget {
+                    case .media:
+                        MediaWidgetView(mediaManager: mediaManager)
+                    case .calendar:
+                        CalendarWidgetView(calendarManager: calendarManager)
+                    case .notes:
+                        Text("Notes Widget")
+                    case .tray:
+                        Text("Tray Widget")
+                    }
+                }
+                .transition(.scale.combined(with: .opacity))
+            } else if viewModel.currentApp == .xnook {
                 xnookPreview
             } else {
                 xislandPreview
@@ -153,11 +178,49 @@ struct NotchContentView: View {
                 GridItem(.flexible())
             ], spacing: 8) {
                 FeatureButton(icon: "play.fill", title: "Media", color: .pink)
+                    .onTapGesture {
+                        withAnimation {
+                            selectedWidget = .media
+                        }
+                    }
                 FeatureButton(icon: "calendar", title: "Calendar", color: .blue)
+                    .onTapGesture {
+                        withAnimation {
+                            selectedWidget = .calendar
+                        }
+                    }
                 FeatureButton(icon: "note.text", title: "Notes", color: .yellow)
+                    .onTapGesture {
+                        withAnimation {
+                            selectedWidget = .notes
+                        }
+                    }
                 FeatureButton(icon: "tray.full", title: "Tray", color: .green)
+                    .onTapGesture {
+                        withAnimation {
+                            selectedWidget = .tray
+                        }
+                    }
                 FeatureButton(icon: "shortcuts", title: "Shortcuts", color: .purple)
                 FeatureButton(icon: "camera.fill", title: "Mirror", color: .cyan)
+            }
+
+            // 返回按钮（当选中 Widget 时显示）
+            if selectedWidget != nil {
+                Button(action: {
+                    withAnimation {
+                        selectedWidget = nil
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 10))
+                        Text("Back")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
             }
         }
     }

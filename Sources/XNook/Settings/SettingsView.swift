@@ -7,6 +7,12 @@ struct SettingsView: View {
     @AppStorage("autoExpandOnHover") private var autoExpandOnHover = true
     @AppStorage("enableHaptics") private var enableHaptics = true
 
+    // Widget 启用/禁用设置
+    @AppStorage("enableMediaWidget") private var enableMediaWidget = true
+    @AppStorage("enableCalendarWidget") private var enableCalendarWidget = true
+    @AppStorage("enableNotesWidget") private var enableNotesWidget = true
+    @AppStorage("enableTrayWidget") private var enableTrayWidget = true
+
     var body: some View {
         TabView {
             GeneralSettingsView(
@@ -19,12 +25,22 @@ struct SettingsView: View {
                 Label("General", systemImage: "gear")
             }
 
+            WidgetSettingsView(
+                enableMediaWidget: $enableMediaWidget,
+                enableCalendarWidget: $enableCalendarWidget,
+                enableNotesWidget: $enableNotesWidget,
+                enableTrayWidget: $enableTrayWidget
+            )
+            .tabItem {
+                Label("Widgets", systemImage: "square.grid.2x2")
+            }
+
             AboutView()
             .tabItem {
                 Label("About", systemImage: "info.circle")
             }
         }
-        .frame(width: 500, height: 350)
+        .frame(width: 500, height: 400)
     }
 }
 
@@ -72,6 +88,68 @@ struct GeneralSettingsView: View {
     }
 }
 
+// MARK: - Widget Settings
+
+struct WidgetSettingsView: View {
+    @Binding var enableMediaWidget: Bool
+    @Binding var enableCalendarWidget: Bool
+    @Binding var enableNotesWidget: Bool
+    @Binding var enableTrayWidget: Bool
+
+    var body: some View {
+        Form {
+            Section("Enable Widgets") {
+                Toggle(isOn: $enableMediaWidget) {
+                    HStack {
+                        Image(systemName: "play.fill")
+                            .foregroundColor(.pink)
+                        Text("Media Widget")
+                    }
+                }
+
+                Toggle(isOn: $enableCalendarWidget) {
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundColor(.blue)
+                        Text("Calendar Widget")
+                    }
+                }
+
+                Toggle(isOn: $enableNotesWidget) {
+                    HStack {
+                        Image(systemName: "note.text")
+                            .foregroundColor(.yellow)
+                        Text("Notes Widget")
+                    }
+                }
+
+                Toggle(isOn: $enableTrayWidget) {
+                    HStack {
+                        Image(systemName: "tray.full")
+                            .foregroundColor(.green)
+                        Text("Tray Widget")
+                    }
+                }
+            }
+
+            Section("Info") {
+                HStack {
+                    Text("Enabled widgets")
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Text("\(enabledCount) of 4")
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(20)
+    }
+
+    private var enabledCount: Int {
+        [enableMediaWidget, enableCalendarWidget, enableNotesWidget, enableTrayWidget].filter { $0 }.count
+    }
+}
+
 // MARK: - About View
 
 struct AboutView: View {
@@ -88,18 +166,31 @@ struct AboutView: View {
             Text("A macOS Dynamic Island-style tool center")
                 .foregroundColor(.secondary)
 
-            Text("Version 1.0.0")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+               let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+                Text("Version \(version) (\(build))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Text("Version 1.0.0")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
             Divider()
 
-            HStack(spacing: 20) {
-                Link("GitHub", destination: URL(string: "https://github.com/Meteorkid/XNook")!)
-                    .foregroundColor(.accentColor)
+            VStack(spacing: 8) {
+                Text("Created by Meteorkid")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
-                Link("X Island", destination: URL(string: "https://github.com/Meteorkid/XIsland")!)
-                    .foregroundColor(.accentColor)
+                HStack(spacing: 20) {
+                    Link("GitHub", destination: URL(string: "https://github.com/Meteorkid/XNook")!)
+                        .foregroundColor(.accentColor)
+
+                    Link("X Island", destination: URL(string: "https://github.com/Meteorkid/XIsland")!)
+                        .foregroundColor(.accentColor)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

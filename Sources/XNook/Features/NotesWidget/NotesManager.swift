@@ -9,6 +9,8 @@ final class NotesManager: ObservableObject {
     @Published var currentNote: Note?
     @Published var isEditing = false
 
+    private let storageKey = "xnook_notes"
+
     // MARK: - Note Model
 
     struct Note: Identifiable, Codable {
@@ -38,14 +40,17 @@ final class NotesManager: ObservableObject {
     // MARK: - Public Methods
 
     func loadNotes() {
-        // TODO: 从 UserDefaults 或文件系统加载
-        if notes.isEmpty {
-            // 创建示例笔记
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode([Note].self, from: data) else {
+            // 首次启动：创建示例笔记
             notes = [
                 Note(title: "Welcome", content: "# Welcome to X Nook\n\nThis is your notes widget.", isMarkdown: true),
                 Note(title: "Quick Note", content: "Type your notes here...", isMarkdown: false)
             ]
+            persist()
+            return
         }
+        notes = decoded
     }
 
     func createNote() {
@@ -59,7 +64,7 @@ final class NotesManager: ObservableObject {
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
             notes[index] = note
         }
-        // TODO: 保存到 UserDefaults 或文件系统
+        persist()
     }
 
     func deleteNote(_ note: Note) {
@@ -67,7 +72,7 @@ final class NotesManager: ObservableObject {
         if currentNote?.id == note.id {
             currentNote = nil
         }
-        // TODO: 从 UserDefaults 或文件系统删除
+        persist()
     }
 
     func selectNote(_ note: Note) {
@@ -78,5 +83,12 @@ final class NotesManager: ObservableObject {
     func closeEditor() {
         isEditing = false
         currentNote = nil
+    }
+
+    // MARK: - Private
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(notes) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
     }
 }

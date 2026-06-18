@@ -22,8 +22,11 @@ mkdir -p "${RESOURCES}"
 # Copy executable
 cp "${BUILD_DIR}/release/XNook" "${MACOS}/${APP_NAME}"
 
-# Copy Info.plist
-cp "Info.plist" "${CONTENTS}/Info.plist"
+# Copy and process Info.plist (replace placeholders)
+sed -e "s/\$(EXECUTABLE_NAME)/${APP_NAME}/g" \
+    -e "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/com.meteorkid.xnook/g" \
+    -e "s/\$(MACOSX_DEPLOYMENT_TARGET)/14.0/g" \
+    "Info.plist" > "${CONTENTS}/Info.plist"
 
 # Copy icon if exists
 if [ -f "Resources/AppIcon.icns" ]; then

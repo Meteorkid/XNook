@@ -21,36 +21,28 @@ final class AppSwitcher {
 
     /// 切换到 X Island
     func switchToXIsland() {
-        // 尝试 URL Scheme
-        if let url = URL(string: "xisland://activate") {
-            NSWorkspace.shared.open(url)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let script = """
+            tell application "X Island"
+                activate
+            end tell
+            """
+            var error: NSDictionary?
+            NSAppleScript(source: script)?.executeAndReturnError(&error)
         }
-
-        // 备选：AppleScript
-        let script = """
-        tell application "X Island"
-            activate
-        end tell
-        """
-        var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
     }
 
     /// 切换到 X Nook
     func switchToXNook() {
-        // 尝试 URL Scheme
-        if let url = URL(string: "xnook://activate") {
-            NSWorkspace.shared.open(url)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let script = """
+            tell application "X Nook"
+                activate
+            end tell
+            """
+            var error: NSDictionary?
+            NSAppleScript(source: script)?.executeAndReturnError(&error)
         }
-
-        // 备选：AppleScript
-        let script = """
-        tell application "X Nook"
-            activate
-        end tell
-        """
-        var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
     }
 
     /// 检查另一个应用是否在运行

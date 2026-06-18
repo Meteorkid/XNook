@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import QuartzCore
 
 final class NotchWindow: NSPanel {
@@ -8,10 +7,11 @@ final class NotchWindow: NSPanel {
 
     private static let expandedPadding: CGFloat = 8
     private static let collapsedHitHeight: CGFloat = 32
+    /// 双指下滑展开的最小滚动距离，过滤触控板惯性残余
+    private static let scrollExpandMinDelta: CGFloat = 2
 
     static func islandTopOffset(for _: NSScreen) -> CGFloat { 0 }
 
-    /// True when the island sits in the built-in display's top-center notch band
     func isObscuredByPhysicalNotch() -> Bool {
         guard let screen = self.screen else { return false }
         if #available(macOS 14.0, *) {
@@ -27,6 +27,7 @@ final class NotchWindow: NSPanel {
     }
 
     var customX: CGFloat?
+    var keyEquivalentHandler: ((NSEvent) -> Bool)?
     private(set) var isDragging = false
     private var dragTracking = false
     private var dragStartWindowX: CGFloat = 0
@@ -94,21 +95,9 @@ final class NotchWindow: NSPanel {
 
     // MARK: - Window Visibility
 
-    func showWindow() {
-        orderFrontRegardless()
-    }
-
-    func hideWindow() {
-        orderOut(nil)
-    }
-
-    func toggleVisibility() {
-        if isVisible {
-            hideWindow()
-        } else {
-            showWindow()
-        }
-    }
+    func showWindow() { orderFrontRegardless() }
+    func hideWindow() { orderOut(nil) }
+    func toggleVisibility() { isVisible ? hideWindow() : showWindow() }
 
     // MARK: - Screen Tracking
 
@@ -123,6 +112,18 @@ final class NotchWindow: NSPanel {
             cachedBestScreen = mouseScreen
             guard !dragTracking else { return }
             repositionOnScreen(mouseScreen)
+        }
+    }
+
+    private func pauseMouseTracking() {
+        mouseTrackingTimer?.invalidate()
+        mouseTrackingTimer = nil
+    }
+
+    private func resumeMouseTracking() {
+        guard mouseTrackingTimer == nil else { return }
+        mouseTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.followMouseIfScreenChanged()
         }
     }
 
@@ -155,41 +156,52 @@ final class NotchWindow: NSPanel {
         let hideInFullscreen = UserDefaults.standard.bool(forKey: "hideInFullscreen")
         guard hideInFullscreen else {
             if !isVisible {
+                resumeMouseTracking()
                 orderFrontRegardless()
             }
             return
         }
-
-        let screen = NSScreen.main
-        let windowSnapshots: [(screen: NSScreen?, styleMask: NSWindow.StyleMask)] =
-            NSApplication.shared.windows.map { ($0.screen, $0.styleMask) }
+        // 主线程：提取所有 NSScreen 属性为值类型（CGRect, NSWindow.StyleMask）
+        let mainScreenFrame = NSScreen.main?.frame
+        let windowSnapshots: [(screenFrame: CGRect?, styleMask: NSWindow.StyleMask)] =
+            NSApplication.shared.windows.map { ($0.screen?.frame, $0.styleMask) }
         let frontApp = NSWorkspace.shared.frontmostApplication
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            let inFullscreen = screen.map {
-                Self.isScreenInFullscreenOffMain($0, windowSnapshots: windowSnapshots, frontApp: frontApp)
-            } ?? false
+            let inFullscreen = Self.isScreenInFullscreenOffMain(
+                mainScreenFrame: mainScreenFrame,
+                windowSnapshots: windowSnapshots,
+                frontApp: frontApp
+            )
             await MainActor.run {
                 if inFullscreen {
+                    self.pauseMouseTracking()
                     self.orderOut(nil)
                 } else {
+                    self.resumeMouseTracking()
                     self.orderFrontRegardless()
                 }
             }
         }
     }
 
+    /// 后台线程安全：仅使用值类型（CGRect），不引用 NSScreen 对象
     private nonisolated static func isScreenInFullscreenOffMain(
-        _ screen: NSScreen,
-        windowSnapshots: [(screen: NSScreen?, styleMask: NSWindow.StyleMask)],
+        mainScreenFrame: CGRect?,
+        windowSnapshots: [(screenFrame: CGRect?, styleMask: NSWindow.StyleMask)],
         frontApp: NSRunningApplication?
     ) -> Bool {
-        for (winScreen, styleMask) in windowSnapshots {
-            if styleMask.contains(.fullScreen) && winScreen == screen {
+        guard let mainScreenFrame else { return false }
+        // 检查是否有全屏窗口在主屏幕上（通过 frame origin 判断同一屏幕）
+        for (winFrame, styleMask) in windowSnapshots {
+            if styleMask.contains(.fullScreen),
+               let winFrame,
+               winFrame.origin == mainScreenFrame.origin {
                 return true
             }
         }
+        // 检查前台应用窗口是否覆盖整个屏幕
         if let frontApp,
            frontApp.bundleIdentifier != Bundle.main.bundleIdentifier {
             let opts = CGWindowListOption([.optionOnScreenOnly, .excludeDesktopElements])
@@ -201,7 +213,7 @@ final class NotchWindow: NSPanel {
                    pid == frontApp.processIdentifier,
                    let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
                    let w = bounds["Width"], let h = bounds["Height"],
-                   w >= screen.frame.width && h >= screen.frame.height {
+                   w >= mainScreenFrame.width && h >= mainScreenFrame.height {
                     return true
                 }
             }
@@ -212,7 +224,7 @@ final class NotchWindow: NSPanel {
     // MARK: - Frame Management
 
     func resizeToFit(contentWidth: CGFloat, contentHeight: CGFloat, display: Bool = true) {
-        let screen = Self.bestScreen()
+        let screen = cachedOrRefreshScreen()
         let normalizedContentHeight = max(contentHeight, Self.collapsedHitHeight)
         let padding = Self.padding(forContentHeight: normalizedContentHeight)
         let w = contentWidth + padding * 2
@@ -234,7 +246,7 @@ final class NotchWindow: NSPanel {
     }
 
     func resizeToFitCollapse(contentWidth: CGFloat, contentHeight: CGFloat) {
-        let screen = Self.bestScreen()
+        let screen = cachedOrRefreshScreen()
         let targetW = max(1, contentWidth.isFinite ? contentWidth : 180)
         let targetH = max(contentHeight, Self.collapsedHitHeight)
         let targetX: CGFloat
@@ -290,7 +302,7 @@ final class NotchWindow: NSPanel {
         }) {
             return builtIn
         }
-        return NSScreen.screens.first ?? NSScreen()
+        return NSScreen.main ?? NSScreen.screens.first!
     }
 
     private func cachedOrRefreshScreen() -> NSScreen {
@@ -370,6 +382,16 @@ final class NotchWindow: NSPanel {
                 super.sendEvent(event)
             }
 
+        case .scrollWheel:
+            // 触控板双指下滑展开面板
+            let scrollEnabled = UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel")
+            if scrollEnabled,
+               event.hasPreciseScrollingDeltas,
+               event.scrollingDeltaY > Self.scrollExpandMinDelta {
+                NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
+            }
+            super.sendEvent(event)
+
         default:
             super.sendEvent(event)
         }
@@ -389,54 +411,17 @@ final class NotchWindow: NSPanel {
         super.setFrame(normalized, display: display)
     }
 
-    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
-        guard frameRect.width.isFinite, frameRect.height.isFinite else { return }
-        let clampedHeight = max(frameRect.height, Self.collapsedHitHeight)
-        let screen = cachedOrRefreshScreen()
-        let topY = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen) - clampedHeight
-        let x: CGFloat
-        if isDragging || dragTracking {
-            x = frame.origin.x
-        } else if let cx = customX, cx.isFinite {
-            x = max(screen.frame.origin.x,
-                    min(cx - frameRect.width / 2,
-                        screen.frame.origin.x + screen.frame.width - frameRect.width))
-        } else {
-            x = screen.frame.origin.x + (screen.frame.width - frameRect.width) / 2
-        }
-        let pinned = Self.safeFrame(
-            NSRect(x: x, y: topY, width: frameRect.width, height: clampedHeight),
-            screen: screen
-        )
-        super.setFrame(pinned, display: flag)
-    }
-
-    override func setFrame(_ frameRect: NSRect, display displayFlag: Bool, animate animateFlag: Bool) {
-        guard frameRect.width.isFinite, frameRect.height.isFinite else { return }
-        let clampedHeight = max(frameRect.height, Self.collapsedHitHeight)
-        let screen = cachedOrRefreshScreen()
-        let topY = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen) - clampedHeight
-        let x: CGFloat
-        if isDragging || dragTracking {
-            x = frame.origin.x
-        } else if let cx = customX, cx.isFinite {
-            x = max(screen.frame.origin.x,
-                    min(cx - frameRect.width / 2,
-                        screen.frame.origin.x + screen.frame.width - frameRect.width))
-        } else {
-            x = screen.frame.origin.x + (screen.frame.width - frameRect.width) / 2
-        }
-        let pinned = Self.safeFrame(
-            NSRect(x: x, y: topY, width: frameRect.width, height: clampedHeight),
-            screen: screen
-        )
-        super.setFrame(pinned, display: displayFlag, animate: animateFlag)
-    }
-
     // MARK: - Window Properties
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let handler = keyEquivalentHandler, handler(event) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 // MARK: - FlippedView

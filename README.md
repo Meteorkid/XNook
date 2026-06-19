@@ -34,6 +34,8 @@ X Nook sits at the top of your screen as a compact pill. Hover to expand and acc
 - **App Switcher** — Double-finger swipe to switch between X Nook and X Island
 - **Multi-display** — Automatically follows your mouse between screens
 - **Notch-aware** — Designed for MacBook notch displays
+- **Trackpad Gesture** — Two-finger scroll down to expand (configurable)
+- **Preferences** — Customize behavior in the settings window (⌘,)
 
 **Coming soon:**
 

@@ -123,6 +123,15 @@ enum L10n {
         zh: "禁用展开/收起过渡的弹簧动画。",
         en: "Disable spring animations for the expand/collapse transitions.") }
 
+    static var jellyIntensity: String { localized(zh: "果冻动画强度", en: "Jelly animation intensity") }
+    static var jellyIntensityDesc: String { localized(
+        zh: "鼠标进入灵动岛时的弹跳动画强度。",
+        en: "Intensity of the bounce animation when cursor enters the pill.") }
+
+    static var jellyWeak: String { localized(zh: "弱", en: "Weak") }
+    static var jellyMedium: String { localized(zh: "中", en: "Medium") }
+    static var jellyStrong: String { localized(zh: "强", en: "Strong") }
+
     // MARK: - 灵动岛尺寸
 
     static var islandWidth: String { localized(zh: "岛宽度", en: "Island width") }

@@ -159,7 +159,14 @@ struct SettingsView: View {
 
     // MARK: - Display 面板
 
-    @State private var enabledWidgets: Set<String> = ["media", "calendar", "notes", "tray"]
+    /// 每次访问都从 UserDefaults 读取，确保始终与实际值同步
+    private var enabledWidgets: Set<String> {
+        if let data = UserDefaults.standard.data(forKey: "enabledWidgets"),
+           let widgets = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            return widgets
+        }
+        return ["media", "calendar", "notes", "tray"]
+    }
 
     private var displayPane: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -232,12 +239,15 @@ struct SettingsView: View {
                             Toggle("", isOn: Binding(
                                 get: { enabledWidgets.contains(widget.rawValue) },
                                 set: { newValue in
+                                    var current = enabledWidgets
                                     if newValue {
-                                        enabledWidgets.insert(widget.rawValue)
+                                        current.insert(widget.rawValue)
                                     } else {
-                                        enabledWidgets.remove(widget.rawValue)
+                                        current.remove(widget.rawValue)
                                     }
-                                    saveEnabledWidgets()
+                                    if let data = try? JSONEncoder().encode(current) {
+                                        UserDefaults.standard.set(data, forKey: "enabledWidgets")
+                                    }
                                 }
                             ))
                             .toggleStyle(.switch)
@@ -254,22 +264,22 @@ struct SettingsView: View {
                               description: L10n.reduceMotionDesc) {
                         AppStorageToggle(key: "reduceMotion", defaultValue: false)
                     }
+                    dividerLine
+                    settingRow(L10n.jellyIntensity, id: "jellyIntensity",
+                              description: L10n.jellyIntensityDesc) {
+                        Picker("", selection: Binding(
+                            get: { UserDefaults.standard.string(forKey: "jellyIntensity") ?? "medium" },
+                            set: { UserDefaults.standard.set($0, forKey: "jellyIntensity") }
+                        )) {
+                            Text(L10n.jellyWeak).tag("weak")
+                            Text(L10n.jellyMedium).tag("medium")
+                            Text(L10n.jellyStrong).tag("strong")
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 180)
+                    }
                 }
             }
-        }
-        .onAppear { loadEnabledWidgets() }
-    }
-
-    private func loadEnabledWidgets() {
-        if let data = UserDefaults.standard.data(forKey: "enabledWidgets"),
-           let widgets = try? JSONDecoder().decode(Set<String>.self, from: data) {
-            enabledWidgets = widgets
-        }
-    }
-
-    private func saveEnabledWidgets() {
-        if let data = try? JSONEncoder().encode(enabledWidgets) {
-            UserDefaults.standard.set(data, forKey: "enabledWidgets")
         }
     }
 

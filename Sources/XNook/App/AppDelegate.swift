@@ -43,7 +43,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: [
             "showOnAllSpaces": true,
             "hideInFullscreen": true,
-            "autoCollapseDelay": 3.0,
             "expandedInactivityAutoHideDelay": 10.0,
             "hoverExitCollapseDelay": 0.5,
             "panelWidth": 420.0,
@@ -53,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "hoverToExpandPanel": true,
             "scrollDownToExpandPanel": false,
             "reduceMotion": false,
+            "jellyIntensity": "medium",
             "launchAtLogin": false,
             "showTickerLine": true,
             "showLyrics": true,
@@ -86,32 +86,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Setup
 
     private func setupScrollMonitor() {
-        // 全局事件监听器：捕获刘海区域的滚动事件
-        // 当窗口无法接收 scrollWheel 事件时（如刘海区域），此监听器作为备用
         scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self,
-                  let window = self.notchWindow,
-                  UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel"),
-                  event.hasPreciseScrollingDeltas,
-                  event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta
-            else { return }
-
-            // 检查鼠标是否在屏幕顶部区域（灵动岛区域）
-            let mouseLocation = NSEvent.mouseLocation
-            guard let screen = window.screen else { return }
-
-            // 灵动岛区域：屏幕顶部 100pt 范围内，且在屏幕水平中心 60% 范围内
-            let screenTop = screen.frame.origin.y + screen.frame.height
-            let isInTopRegion = mouseLocation.y > screenTop - 100
-            let isInCenterRegion = abs(mouseLocation.x - screen.frame.midX) < screen.frame.width * 0.3
-
-            let log = "[XNook Scroll] mouse=\(mouseLocation) screenTop=\(screenTop) windowFrame=\(window.frame) top=\(isInTopRegion) center=\(isInCenterRegion) deltaY=\(event.scrollingDeltaY)\n"
-            try? log.appendToFile(path: "/tmp/xnook-scroll.log")
-
-            guard isInTopRegion && isInCenterRegion else { return }
-
-            NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
+            // Global monitor 回调不一定在主线程，确保后续 UI 操作安全
+            DispatchQueue.main.async {
+                self?.handleScrollEvent(event)
+            }
         }
+    }
+
+    private func handleScrollEvent(_ event: NSEvent) {
+        guard let window = notchWindow,
+              UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel"),
+              event.hasPreciseScrollingDeltas,
+              event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta
+        else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+        guard let screen = window.screen else { return }
+
+        let screenTop = screen.frame.origin.y + screen.frame.height
+        let wf = window.frame
+
+        // 扩展检测区域：覆盖药丸水平范围 + 屏幕顶端
+        let hitFrame = NSRect(
+            x: wf.minX,
+            y: wf.minY,
+            width: wf.width,
+            height: max(wf.height, screenTop - wf.minY)
+        )
+
+        guard hitFrame.contains(mouseLocation) else { return }
+
+        NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
     }
 
     private func setupNotchWindow() {
@@ -208,21 +214,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 final class NotchHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}
-
-// MARK: - Debug Logging
-
-extension String {
-    func appendToFile(path: String) throws {
-        let url = URL(fileURLWithPath: path)
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            if let data = self.data(using: .utf8) {
-                handle.write(data)
-            }
-            handle.closeFile()
-        } else {
-            try self.write(to: url, atomically: true, encoding: .utf8)
-        }
-    }
 }

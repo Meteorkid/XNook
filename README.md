@@ -35,6 +35,9 @@ X Nook sits at the top of your screen as a compact pill. Hover to expand and acc
 - **Multi-display** — Automatically follows your mouse between screens
 - **Notch-aware** — Designed for MacBook notch displays
 - **Trackpad Gesture** — Two-finger scroll down to expand (configurable)
+- **Jelly Animation** — Bounce animation when cursor enters the pill, with configurable intensity (weak/medium/strong)
+- **Magnetic Effect** — Pill attracts toward cursor within proximity range
+- **Invisible Cursor** — System cursor hidden while hovering the pill, restored on exit
 - **Preferences** — Customize behavior in the settings window (⌘,)
 
 **Coming soon:**

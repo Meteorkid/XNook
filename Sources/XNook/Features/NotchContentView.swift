@@ -27,9 +27,43 @@ struct NotchContentView: View {
     @State private var expandPending = false
     @State private var calendarRecenterTrigger = 0
 
+    // 鼠标进入动效
+    @State private var isHoveringPill = false
+    @State private var jellyTrigger = false
+    @State private var jellySettled = false
+    @State private var previousMouseY: CGFloat = 0
+
+    // 防止快速晃动鼠标导致果冻动画错乱
+    @State private var jellyGeneration: UInt = 0
+
+    // 吸附效果
+    @State private var magneticOffset: CGSize = .zero
+    private static let magneticMaxOffset: CGFloat = 8
+    private static let magneticRange: CGFloat = 80
+
+    /// 透明光标：推入后隐藏系统光标
+    private static let invisibleCursor: NSCursor = {
+        let size = NSSize(width: 16, height: 16)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.clear.set()
+        NSRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return NSCursor(image: image, hotSpot: .zero)
+    }()
+
     @AppStorage("panelWidth") private var panelWidth = 420.0
     @AppStorage("panelMaxHeight") private var panelMaxHeight = 480.0
-    @AppStorage("autoCollapseDelay") private var autoCollapseDelay = 3.0
+    @AppStorage("jellyIntensity") private var jellyIntensity = "medium"
+
+    /// 根据强度设置返回果冻缩放值
+    private var jellyScale: (xPop: CGFloat, xSettle: CGFloat, yPop: CGFloat, ySettle: CGFloat) {
+        switch jellyIntensity {
+        case "weak":   return (0.97, 0.99, 1.10, 1.03)
+        case "strong": return (0.90, 0.96, 1.40, 1.12)
+        default:       return (0.94, 0.98, 1.25, 1.08) // medium
+        }
+    }
     @AppStorage("expandedInactivityAutoHideDelay") private var expandedInactivityAutoHideDelay = 10.0
     @AppStorage("hoverExitCollapseDelay") private var hoverExitCollapseDelay = 0.5
     @AppStorage("hoverToExpandPanel") private var hoverToExpandPanel = true
@@ -180,10 +214,14 @@ struct NotchContentView: View {
                 )
                 .strokeBorder(
                     IslandStyle.strokeColor(for: colorScheme)
-                        .opacity(pillStrokeOpacity),
+                        .opacity(pillStrokeOpacity + (isHoveringPill ? 0.15 : 0)),
                     lineWidth: 0.5
                 )
             }
+            .scaleEffect(
+                x: jellyTrigger ? (jellySettled ? jellyScale.xSettle : jellyScale.xPop) : 1.0,
+                y: jellyTrigger ? (jellySettled ? jellyScale.ySettle : jellyScale.yPop) : 1.0
+            )
             .frame(width: shapeWidth, height: shapeHeight)
 
             // 展开内容
@@ -215,6 +253,7 @@ struct NotchContentView: View {
                             }
                         }
                 )
+                .offset(magneticOffset)
                 .frame(width: shapeWidth, height: collapsedShapeHeight)
 
                 // Ticker 行
@@ -292,6 +331,17 @@ struct NotchContentView: View {
                 )
             }
             startHoverPolling()
+
+            // 应用退出时恢复光标（防止崩溃导致光标残留隐藏）
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification,
+                object: nil,
+                queue: .main
+            ) { [self] _ in
+                if self.isHoveringPill {
+                    Self.invisibleCursor.pop()
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookScrollDown)) { _ in
             // 双指下滑展开面板（由 scrollDownToExpandPanel 开关控制）
@@ -316,6 +366,15 @@ struct NotchContentView: View {
         expandPending = true
         expandedAt = Date()
         calendarRecenterTrigger += 1
+
+        // 展开时恢复光标和果冻状态
+        if isHoveringPill {
+            isHoveringPill = false
+            jellyTrigger = false
+            jellySettled = false
+            jellyGeneration += 1
+            Self.invisibleCursor.pop()
+        }
 
         let target = targetSize(for: newState)
         if case .expanded = newState {
@@ -356,6 +415,15 @@ struct NotchContentView: View {
         let generation = collapseGeneration
         lastCollapseAt = Date()
         collapseAnimating = true
+
+        // 收起时恢复光标和果冻状态
+        if isHoveringPill {
+            isHoveringPill = false
+            jellyTrigger = false
+            jellySettled = false
+            jellyGeneration += 1
+            Self.invisibleCursor.pop()
+        }
 
         // 1. 形状动画收起
         if reduceMotion {
@@ -402,7 +470,7 @@ struct NotchContentView: View {
 
     private func startHoverPolling() {
         stopHoverPolling()
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { _ in
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.008, repeats: true) { _ in
             Task { @MainActor in
                 pollMousePosition()
             }
@@ -446,6 +514,64 @@ struct NotchContentView: View {
         var inside = hitFrame.contains(mouse)
 
         if collapseAnimating { inside = false }
+
+        // 检测鼠标从下方进入药丸（仅收起状态且无动画时）
+        if inside, !isExpanded, !collapseAnimating, previousMouseY < mouse.y {
+            if !isHoveringPill {
+                isHoveringPill = true
+                jellySettled = false
+                jellyGeneration += 1  // 新一代动画，废弃旧的 asyncAfter
+                let gen = jellyGeneration
+                Self.invisibleCursor.push()
+                // 果冻弹跳：先大幅弹起
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.3)) {
+                    jellyTrigger = true
+                }
+                // 回弹到稍大状态（检查 generation，防止旧计时器干扰）
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [self] in
+                    guard gen == self.jellyGeneration else { return }
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.4)) {
+                        self.jellySettled = true
+                    }
+                }
+            }
+        } else if !inside || isExpanded || collapseAnimating {
+            if isHoveringPill {
+                isHoveringPill = false
+                jellyGeneration += 1  // 废弃所有进行中的果冻计时器
+                Self.invisibleCursor.pop()
+                withAnimation(.easeOut(duration: 0.2)) {
+                    jellyTrigger = false
+                    jellySettled = false
+                }
+            }
+        }
+
+        previousMouseY = mouse.y
+
+        // 吸附效果：鼠标靠近药丸时水平偏移
+        if !isExpanded, !collapseAnimating {
+            let pillCenterX = window.frame.midX
+            let pillCenterY = window.frame.minY + collapsedShapeHeight / 2
+            let dx = mouse.x - pillCenterX
+            let dy = mouse.y - pillCenterY
+            let distance = sqrt(dx * dx + dy * dy)
+
+            if distance < Self.magneticRange, distance > 1 {
+                let strength = 1.0 - distance / Self.magneticRange
+                let offsetX = dx * strength * 0.15
+                let clamped = max(-Self.magneticMaxOffset, min(Self.magneticMaxOffset, offsetX))
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    magneticOffset = CGSize(width: clamped, height: 0)
+                }
+            } else if magneticOffset != .zero {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
+                    magneticOffset = .zero
+                }
+            }
+        } else if magneticOffset != .zero {
+            magneticOffset = .zero
+        }
 
         // 鼠标在展开面板内时，重置自动隐藏计时器
         if inside && isExpanded {
@@ -675,8 +801,6 @@ struct CollapsedPillView: View {
                         .fill(Color.white.opacity(0.1))
                         .frame(width: 20, height: 20)
                 }
-
-                Spacer(minLength: 6)
 
                 Spacer(minLength: 6)
 

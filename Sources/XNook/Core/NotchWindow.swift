@@ -12,6 +12,9 @@ final class NotchWindow: NSPanel {
 
     static func islandTopOffset(for _: NSScreen) -> CGFloat { 0 }
 
+    /// 窗口向上延伸的像素数，使屏幕顶端在窗口内部而非边缘
+    static let windowTopExtension: CGFloat = 6
+
     func isObscuredByPhysicalNotch() -> Bool {
         guard let screen = self.screen else { return false }
         if #available(macOS 14.0, *) {
@@ -139,7 +142,8 @@ final class NotchWindow: NSPanel {
             x = screen.frame.origin.x + (screen.frame.width - currentFrame.width) / 2
         }
         let screenTop = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen)
-        let y = screenTop - currentFrame.height
+        // 窗口向上延伸，使屏幕顶端在窗口内部
+        let y = screenTop - currentFrame.height + Self.windowTopExtension
         setFrameDirect(NSRect(x: x, y: y, width: currentFrame.width, height: currentFrame.height), display: true)
     }
 
@@ -228,7 +232,8 @@ final class NotchWindow: NSPanel {
         let normalizedContentHeight = max(contentHeight, Self.collapsedHitHeight)
         let padding = Self.padding(forContentHeight: normalizedContentHeight)
         let w = contentWidth + padding * 2
-        let h = normalizedContentHeight + padding
+        // 向上延伸窗口，使屏幕顶端在窗口内部
+        let h = normalizedContentHeight + padding + Self.windowTopExtension
         let x: CGFloat
         if let cx = customX, cx.isFinite {
             x = max(screen.frame.origin.x,
@@ -237,7 +242,8 @@ final class NotchWindow: NSPanel {
             x = screen.frame.origin.x + (screen.frame.width - w) / 2
         }
         let screenTop = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen)
-        let yComputed = screenTop - h
+        // 窗口向上延伸 windowTopExtension，使屏幕顶端在窗口内部
+        let yComputed = screenTop - h + Self.windowTopExtension
         let rect = Self.safeFrame(NSRect(x: x, y: yComputed, width: w, height: h), screen: screen)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -248,7 +254,8 @@ final class NotchWindow: NSPanel {
     func resizeToFitCollapse(contentWidth: CGFloat, contentHeight: CGFloat) {
         let screen = cachedOrRefreshScreen()
         let targetW = max(1, contentWidth.isFinite ? contentWidth : 180)
-        let targetH = max(contentHeight, Self.collapsedHitHeight)
+        // 向上延伸窗口
+        let targetH = max(contentHeight, Self.collapsedHitHeight) + Self.windowTopExtension
         let targetX: CGFloat
         if let cx = customX, cx.isFinite {
             targetX = max(screen.frame.origin.x,
@@ -257,7 +264,7 @@ final class NotchWindow: NSPanel {
             targetX = screen.frame.origin.x + (screen.frame.width - targetW) / 2
         }
         let screenTop = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen)
-        let targetY = screenTop - targetH
+        let targetY = screenTop - targetH + Self.windowTopExtension
 
         isDragging = false
         dragTracking = false
@@ -287,7 +294,8 @@ final class NotchWindow: NSPanel {
         w = min(w, max(minW, sf.width))
         h = min(h, max(minH, sf.height))
         x = max(sf.minX, min(x, sf.maxX - w))
-        y = max(sf.minY, min(y, sf.maxY - h))
+        // 允许窗口向上延伸 windowTopExtension 像素（超出屏幕顶端）
+        y = max(sf.minY, min(y, sf.maxY - h + Self.windowTopExtension))
         return NSRect(x: x, y: y, width: w, height: h)
     }
 
@@ -337,7 +345,8 @@ final class NotchWindow: NSPanel {
             x = screen.frame.origin.x + (screen.frame.width - frame.width) / 2
         }
         let screenTop = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen)
-        let y = screenTop - frame.height
+        // 窗口向上延伸
+        let y = screenTop - frame.height + Self.windowTopExtension
         setFrameDirect(NSRect(x: x, y: y, width: frame.width, height: frame.height), display: true)
     }
 
@@ -367,7 +376,7 @@ final class NotchWindow: NSPanel {
                 let newX = max(screen.frame.origin.x,
                                min(dragStartWindowX + dx,
                                    screen.frame.origin.x + screen.frame.width - frame.width))
-                let topY = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen) - frame.height
+                let topY = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen) - frame.height + Self.windowTopExtension
                 setFrameDirect(NSRect(x: newX, y: topY, width: frame.width, height: frame.height))
             } else {
                 super.sendEvent(event)
@@ -383,15 +392,7 @@ final class NotchWindow: NSPanel {
             }
 
         case .scrollWheel:
-            // 触控板双指下滑展开面板
-            let scrollEnabled = UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel")
-            let log = "[XNook sendEvent] scrollWheel enabled=\(scrollEnabled) precise=\(event.hasPreciseScrollingDeltas) deltaY=\(event.scrollingDeltaY) windowFrame=\(frame) mouseLocation=\(NSEvent.mouseLocation)\n"
-            try? log.appendToFile(path: "/tmp/xnook-scroll.log")
-            if scrollEnabled,
-               event.hasPreciseScrollingDeltas,
-               event.scrollingDeltaY > Self.scrollExpandMinDelta {
-                NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
-            }
+            // 触控板双指下滑展开面板（由 AppDelegate 的全局监听器处理）
             super.sendEvent(event)
 
         default:
@@ -431,4 +432,14 @@ final class NotchWindow: NSPanel {
 private class FlippedView: NSView {
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func scrollWheel(with event: NSEvent) {
+        let scrollEnabled = UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel")
+        if scrollEnabled,
+           event.hasPreciseScrollingDeltas,
+           event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta {
+            NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
+        }
+        super.scrollWheel(with: event)
+    }
 }

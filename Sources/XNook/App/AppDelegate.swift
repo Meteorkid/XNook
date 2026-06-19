@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var notchWindow: NotchWindow?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var scrollMonitor: Any?
 
     /// 悬停自动展开是否关闭
     private var hoverToExpandDisabled: Bool {
@@ -59,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupNotchWindow()
         setupMenuBarItem()
+        setupScrollMonitor()
 
         NotificationCenter.default.addObserver(
             self,
@@ -81,6 +83,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Setup
+
+    private func setupScrollMonitor() {
+        // 全局事件监听器：捕获刘海区域的滚动事件
+        // 当窗口无法接收 scrollWheel 事件时（如刘海区域），此监听器作为备用
+        scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self,
+                  let window = self.notchWindow,
+                  UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel"),
+                  event.hasPreciseScrollingDeltas,
+                  event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta
+            else { return }
+
+            // 检查鼠标是否在窗口附近（扩大检测范围）
+            let mouseLocation = NSEvent.mouseLocation
+            let expandedFrame = window.frame.insetBy(dx: -40, dy: -40)
+            guard expandedFrame.contains(mouseLocation) else { return }
+
+            NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
+        }
+    }
 
     private func setupNotchWindow() {
         let window = NotchWindow()
@@ -162,6 +184,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
+        }
     }
 }
 

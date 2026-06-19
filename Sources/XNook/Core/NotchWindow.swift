@@ -8,7 +8,7 @@ final class NotchWindow: NSPanel {
     private static let expandedPadding: CGFloat = 8
     private static let collapsedHitHeight: CGFloat = 32
     /// 双指下滑展开的最小滚动距离，过滤触控板惯性残余
-    private static let scrollExpandMinDelta: CGFloat = 2
+    static let scrollExpandMinDelta: CGFloat = 2
 
     static func islandTopOffset(for _: NSScreen) -> CGFloat { 0 }
 

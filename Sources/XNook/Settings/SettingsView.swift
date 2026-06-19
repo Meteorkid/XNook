@@ -453,7 +453,7 @@ private struct AppStorageToggle: View {
 /// AppStorage 驱动的无级滑块（支持手动输入）
 private struct AppStorageSlider: View {
     @AppStorage private var value: Double
-    @State private var textValue: String
+    @State private var inputText: String = ""
     @State private var isEditing = false
 
     private let range: ClosedRange<Double>
@@ -462,34 +462,18 @@ private struct AppStorageSlider: View {
 
     /// 无级调节（不传 step）
     init(key: String, range: ClosedRange<Double>, format: String = "%.0f") {
-        let defaultVal = range.lowerBound
-        _value = AppStorage(wrappedValue: defaultVal, key)
+        _value = AppStorage(wrappedValue: range.lowerBound, key)
         self.range = range
         self.step = nil
         self.format = format
-        // 用 AppStorage 实际读取的值初始化文本（可能已有用户保存的值）
-        let actual = UserDefaults.standard.double(forKey: key)
-        let v = actual != 0 ? actual : defaultVal
-        _textValue = State(initialValue: Self.formatStatic(v, format: format))
     }
 
     /// 带步长调节
     init(key: String, range: ClosedRange<Double>, step: Double, format: String = "%.0f") {
-        let defaultVal = range.lowerBound
-        _value = AppStorage(wrappedValue: defaultVal, key)
+        _value = AppStorage(wrappedValue: range.lowerBound, key)
         self.range = range
         self.step = step
         self.format = format
-        let actual = UserDefaults.standard.double(forKey: key)
-        let v = actual != 0 ? actual : defaultVal
-        _textValue = State(initialValue: Self.formatStatic(v, format: format))
-    }
-
-    /// 纯函数：格式化数值（供 init 使用，避免实例方法在 init 中调用）
-    private static func formatStatic(_ v: Double, format: String) -> String {
-        let numFmt = format.replacingOccurrences(of: "[^%.0-9]", with: "", options: .regularExpression)
-        let suffix = format.replacingOccurrences(of: numFmt, with: "")
-        return String(format: numFmt, v) + suffix
     }
 
     var body: some View {
@@ -501,36 +485,36 @@ private struct AppStorageSlider: View {
                 Slider(value: $value, in: range)
                     .frame(width: 140)
             }
-            // 可点击编辑的数值框
-            TextField("", text: $textValue)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.secondary)
-                .frame(width: 45, alignment: .trailing)
-                .multilineTextAlignment(.trailing)
-                .onSubmit { commitInput() }
-                .onChange(of: isEditing) {
-                    if !isEditing { commitInput() }
+            if isEditing {
+                TextField("", text: $inputText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(width: 45, alignment: .trailing)
+                    .multilineTextAlignment(.trailing)
+                    .onSubmit { commitInput() }
+                    .onExitCommand { commitInput() }
+            } else {
+                Button(action: {
+                    inputText = String(format: format, value)
+                    isEditing = true
+                }) {
+                    Text(String(format: format, value))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
                 }
-                .onTapGesture { isEditing = true }
+                .buttonStyle(.plain)
+                .frame(width: 45, alignment: .trailing)
+            }
         }
-        .onChange(of: value) {
-            if !isEditing { textValue = formatValue(value) }
-        }
-    }
-
-    private func formatValue(_ v: Double) -> String {
-        Self.formatStatic(v, format: format)
     }
 
     private func commitInput() {
         isEditing = false
-        // 提取数字部分（去掉单位后缀）
-        let cleaned = textValue.filter { "0123456789.".contains($0) }
+        let cleaned = inputText.filter { "0123456789.".contains($0) }
         if let v = Double(cleaned) {
             value = min(max(v, range.lowerBound), range.upperBound)
         }
-        textValue = formatValue(value)
     }
 }
 

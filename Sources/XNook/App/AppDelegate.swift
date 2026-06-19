@@ -95,10 +95,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta
             else { return }
 
-            // 检查鼠标是否在窗口附近（扩大检测范围）
+            // 检查鼠标是否在屏幕顶部区域（灵动岛区域）
             let mouseLocation = NSEvent.mouseLocation
-            let expandedFrame = window.frame.insetBy(dx: -40, dy: -40)
-            guard expandedFrame.contains(mouseLocation) else { return }
+            guard let screen = window.screen else { return }
+
+            // 灵动岛区域：屏幕顶部 100pt 范围内，且在屏幕水平中心 60% 范围内
+            let screenTop = screen.frame.origin.y + screen.frame.height
+            let isInTopRegion = mouseLocation.y > screenTop - 100
+            let isInCenterRegion = abs(mouseLocation.x - screen.frame.midX) < screen.frame.width * 0.3
+
+            guard isInTopRegion && isInCenterRegion else { return }
 
             NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
         }

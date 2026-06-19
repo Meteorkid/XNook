@@ -385,6 +385,8 @@ final class NotchWindow: NSPanel {
         case .scrollWheel:
             // 触控板双指下滑展开面板
             let scrollEnabled = UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel")
+            let log = "[XNook sendEvent] scrollWheel enabled=\(scrollEnabled) precise=\(event.hasPreciseScrollingDeltas) deltaY=\(event.scrollingDeltaY) windowFrame=\(frame) mouseLocation=\(NSEvent.mouseLocation)\n"
+            try? log.appendToFile(path: "/tmp/xnook-scroll.log")
             if scrollEnabled,
                event.hasPreciseScrollingDeltas,
                event.scrollingDeltaY > Self.scrollExpandMinDelta {

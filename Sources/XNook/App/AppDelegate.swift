@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // 注册默认设置（与 X Island 一致）
+        // 注册默认设置
         UserDefaults.standard.register(defaults: [
             "showOnAllSpaces": true,
             "hideInFullscreen": true,
@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "reduceMotion": false,
             "launchAtLogin": false,
             "showTickerLine": true,
+            "showLyrics": true,
             "tickerSpeed": 25.0,
         ])
 
@@ -103,6 +104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let screenTop = screen.frame.origin.y + screen.frame.height
             let isInTopRegion = mouseLocation.y > screenTop - 100
             let isInCenterRegion = abs(mouseLocation.x - screen.frame.midX) < screen.frame.width * 0.3
+
+            let log = "[XNook Scroll] mouse=\(mouseLocation) screenTop=\(screenTop) windowFrame=\(window.frame) top=\(isInTopRegion) center=\(isInCenterRegion) deltaY=\(event.scrollingDeltaY)\n"
+            try? log.appendToFile(path: "/tmp/xnook-scroll.log")
 
             guard isInTopRegion && isInCenterRegion else { return }
 
@@ -204,4 +208,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 final class NotchHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+// MARK: - Debug Logging
+
+extension String {
+    func appendToFile(path: String) throws {
+        let url = URL(fileURLWithPath: path)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            if let data = self.data(using: .utf8) {
+                handle.write(data)
+            }
+            handle.closeFile()
+        } else {
+            try self.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
 }

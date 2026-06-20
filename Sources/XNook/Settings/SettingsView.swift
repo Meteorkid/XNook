@@ -138,11 +138,6 @@ struct SettingsView: View {
                         AppStorageToggle(key: "scrollDownToExpandPanel", defaultValue: false)
                     }
                     dividerLine
-                    settingRow(L10n.autoCollapseDelay, id: "autoCollapse",
-                              description: L10n.autoCollapseDelayDesc) {
-                        AppStorageSlider(key: "autoCollapseDelay", range: 0...15, step: 0.5, format: "%.1fs")
-                    }
-                    dividerLine
                     settingRow(L10n.expandedInactivityHide, id: "expandedInactivity",
                               description: L10n.expandedInactivityHideDesc) {
                         AppStorageSlider(key: "expandedInactivityAutoHideDelay", range: 0...120, step: 1, format: "%.0fs")

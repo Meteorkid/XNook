@@ -85,18 +85,26 @@ struct CalendarWidgetView: View {
         }
     }
 
-    private func monthString(for date: Date) -> String {
+    private static let monthFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
         f.dateFormat = "M"
-        return f.string(from: date)
+        return f
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private func monthString(for date: Date) -> String {
+        Self.monthFormatter.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
+        return Self.monthFormatter.string(from: date)
     }
 
     private func timeString(from date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
-        f.dateFormat = "HH:mm"
-        return f.string(from: date)
+        Self.timeFormatter.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
+        return Self.timeFormatter.string(from: date)
     }
 }
 
@@ -154,6 +162,10 @@ private struct CalendarScroller: NSViewRepresentable {
         )
 
         return scrollView
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        NotificationCenter.default.removeObserver(coordinator)
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {

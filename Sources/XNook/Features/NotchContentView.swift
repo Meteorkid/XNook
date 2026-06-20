@@ -26,6 +26,7 @@ struct NotchContentView: View {
     @State private var expandedAt: Date = .distantPast
     @State private var expandPending = false
     @State private var calendarRecenterTrigger = 0
+    @State private var terminateObserver: NSObjectProtocol?
 
     // 鼠标进入动效
     @State private var isHoveringPill = false
@@ -333,7 +334,7 @@ struct NotchContentView: View {
             startHoverPolling()
 
             // 应用退出时恢复光标（防止崩溃导致光标残留隐藏）
-            NotificationCenter.default.addObserver(
+            terminateObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.willTerminateNotification,
                 object: nil,
                 queue: .main
@@ -354,6 +355,10 @@ struct NotchContentView: View {
         .onDisappear {
             stopHoverPolling()
             cancelExpandedAutoHide()
+            if let observer = terminateObserver {
+                NotificationCenter.default.removeObserver(observer)
+                terminateObserver = nil
+            }
         }
     }
 
@@ -470,10 +475,9 @@ struct NotchContentView: View {
 
     private func startHoverPolling() {
         stopHoverPolling()
+        // Timer.scheduledTimer 回调已在主线程 RunLoop，无需额外 Task 包装
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.008, repeats: true) { _ in
-            Task { @MainActor in
-                pollMousePosition()
-            }
+            pollMousePosition()
         }
     }
 

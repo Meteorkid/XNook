@@ -55,6 +55,8 @@ final class MediaManager: ObservableObject {
     }
 
     deinit {
+        infoTimer?.invalidate()
+        progressTimer?.invalidate()
         if let obs = infoObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = playingObserver { NotificationCenter.default.removeObserver(obs) }
         MediaRemoteBridge.unregisterForNotifications()

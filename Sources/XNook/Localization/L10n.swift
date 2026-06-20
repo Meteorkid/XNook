@@ -93,11 +93,6 @@ enum L10n {
         zh: "在药丸上双指下滑展开面板。",
         en: "Two-finger scroll down on the pill to expand the panel.") }
 
-    static var autoCollapseDelay: String { localized(zh: "自动收起延迟", en: "Auto collapse delay") }
-    static var autoCollapseDelayDesc: String { localized(
-        zh: "展开面板自动收起前的等待时间（0 = 禁用）。",
-        en: "Time before the expanded panel automatically collapses (0 = disabled).") }
-
     static var expandedInactivityHide: String { localized(zh: "无操作隐藏", en: "Expanded inactivity hide") }
     static var expandedInactivityHideDesc: String { localized(
         zh: "展开后无操作自动隐藏面板（0 = 禁用）。",

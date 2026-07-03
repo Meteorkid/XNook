@@ -9,7 +9,10 @@ final class TrayManager: ObservableObject {
     @Published var files: [TrayFile] = []
     @Published var isDropTargeted = false
 
-    private let storageKey = "xnook_tray_files"
+    private static var storageURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("XNook/tray_files.json")
+    }
 
     // MARK: - TrayFile Model
 
@@ -59,7 +62,8 @@ final class TrayManager: ObservableObject {
     // MARK: - Public Methods
 
     func loadFiles() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        let url = Self.storageURL
+        guard let data = try? Data(contentsOf: url),
               let records = try? JSONDecoder().decode([FileRecord].self, from: data) else { return }
 
         var validFiles: [TrayFile] = []
@@ -124,7 +128,7 @@ final class TrayManager: ObservableObject {
         if hasUpdatedRecords {
             let mergedRecords = unresolvedRecords + validFiles.map { FileRecord(from: $0) }
             if let mergedData = try? JSONEncoder().encode(mergedRecords) {
-                UserDefaults.standard.set(mergedData, forKey: storageKey)
+                try? mergedData.write(to: Self.storageURL, options: .atomic)
             }
         }
     }
@@ -233,7 +237,12 @@ final class TrayManager: ObservableObject {
     private func saveFiles() {
         let records = files.map { FileRecord(from: $0) }
         guard let data = try? JSONEncoder().encode(records) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+        let url = Self.storageURL
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: url, options: .atomic)
     }
 
     static func formatFileSize(_ bytes: Int) -> String {

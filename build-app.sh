@@ -33,5 +33,8 @@ if [ -f "Resources/AppIcon.icns" ]; then
     cp "Resources/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
 fi
 
+# Re-sign the complete bundle after adding Info.plist and resources.
+codesign --force --deep --sign - "${APP_BUNDLE}"
+
 echo "App bundle created at: ${APP_BUNDLE}"
 echo "To run: open '${APP_BUNDLE}'"

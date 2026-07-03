@@ -754,6 +754,7 @@ struct NotchContentView: View {
             MediaWidgetView(mediaManager: mediaManager)
         case .calendar:
             CalendarWidgetView(calendarManager: calendarManager, recenterTrigger: $calendarRecenterTrigger)
+                .onAppear { calendarManager.ensureAccess() }
         case .notes:
             NotesWidgetView(notesManager: notesManager)
         case .tray:
@@ -835,6 +836,11 @@ struct NotchContentView: View {
 
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        guard accessing else {
+            cachedGifData = nil
+            return
+        }
 
         if let data = try? Data(contentsOf: url) {
             cachedGifData = data

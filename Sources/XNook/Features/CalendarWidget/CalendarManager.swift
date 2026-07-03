@@ -17,15 +17,15 @@ final class CalendarManager: ObservableObject {
     private var displayedDate = Date()
     private var hasInitializedCalendarSelection = false
 
-    // MARK: - Init
+    // MARK: - Public Methods
 
-    init() {
+    /// 首次展开日历时触发权限请求（延迟到用户需要时）
+    func ensureAccess() {
+        guard !hasAccess else { return }
         Task {
             await requestAccess()
         }
     }
-
-    // MARK: - Public Methods
 
     func requestAccess() async {
         if #available(macOS 14.0, *) {

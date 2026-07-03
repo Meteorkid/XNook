@@ -8,7 +8,7 @@ extension Notification.Name {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    static private(set) var shared: AppDelegate!
+    static private(set) weak var shared: AppDelegate?
 
     var notchWindow: NotchWindow?
     private var statusItem: NSStatusItem?
@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         Self.shared = self
+        SingleInstanceLock.acquire()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

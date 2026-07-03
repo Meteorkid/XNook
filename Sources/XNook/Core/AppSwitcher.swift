@@ -21,28 +21,22 @@ final class AppSwitcher {
 
     /// 切换到 X Island
     func switchToXIsland() {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let script = """
-            tell application "X Island"
-                activate
-            end tell
-            """
-            var error: NSDictionary?
-            NSAppleScript(source: script)?.executeAndReturnError(&error)
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: xislandBundleID) else {
+            return
         }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
 
     /// 切换到 X Nook
     func switchToXNook() {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let script = """
-            tell application "X Nook"
-                activate
-            end tell
-            """
-            var error: NSDictionary?
-            NSAppleScript(source: script)?.executeAndReturnError(&error)
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: xnookBundleID) else {
+            return
         }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
 
     /// 检查另一个应用是否在运行

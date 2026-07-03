@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 笔记管理器
+/// 笔记管理器 — 使用文件系统存储，避免 UserDefaults 大数据量问题
 @MainActor
 final class NotesManager: ObservableObject {
     // MARK: - Published Properties
@@ -8,8 +8,6 @@ final class NotesManager: ObservableObject {
     @Published var notes: [Note] = []
     @Published var currentNote: Note?
     @Published var isEditing = false
-
-    private let storageKey = "xnook_notes"
 
     // MARK: - Note Model
 
@@ -31,6 +29,13 @@ final class NotesManager: ObservableObject {
         }
     }
 
+    // MARK: - Storage
+
+    private static var storageURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("XNook/notes.json")
+    }
+
     // MARK: - Init
 
     init() {
@@ -40,7 +45,8 @@ final class NotesManager: ObservableObject {
     // MARK: - Public Methods
 
     func loadNotes() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        let url = Self.storageURL
+        guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode([Note].self, from: data) else {
             // 首次启动：创建示例笔记
             notes = [
@@ -89,6 +95,12 @@ final class NotesManager: ObservableObject {
 
     private func persist() {
         guard let data = try? JSONEncoder().encode(notes) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+        let url = Self.storageURL
+        // 确保目录存在
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: url, options: .atomic)
     }
 }

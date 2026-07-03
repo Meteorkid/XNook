@@ -13,13 +13,19 @@ final class MediaManager: ObservableObject {
     @Published var currentArtist: String = ""
     @Published var currentAlbum: String = ""
     @Published var currentLyricLine: String = ""
-    @Published var currentArtwork: NSImage?
+    /// 仅存储原始 Data，NSImage 按需创建，避免同时持有两份图像数据
     @Published var currentArtworkData: Data?
     /// 封面版本号，每次切歌递增，用于 SwiftUI 强制刷新
     @Published var artworkVersion: Int = 0
     @Published var duration: TimeInterval = 0
     @Published var elapsedTime: TimeInterval = 0
     @Published var isAvailable = false
+
+    /// 按需从 Data 创建 NSImage，避免同时持有两份图像数据
+    var currentArtwork: NSImage? {
+        guard let data = currentArtworkData, !data.isEmpty else { return nil }
+        return NSImage(data: data)
+    }
 
     /// 歌词管理器
     let lyricsManager = LyricsManager()
@@ -148,90 +154,98 @@ final class MediaManager: ObservableObject {
     }
 
     func fetchNowPlayingInfo() {
-        // ScriptingBridge 获取（MediaRemote 在非沙盒环境中返回空）
-        let info = ScriptingBridgeHelper.getNowPlayingInfo()
+        Task.detached { [weak self] in
+            // ScriptingBridge 获取（MediaRemote 在非沙盒环境中返回空）
+            let info = await ScriptingBridgeHelper.getNowPlayingInfo()
+            guard let self else { return }
 
-        let newTitle = info["title"] as? String ?? ""
-        let newArtist = info["artist"] as? String ?? ""
-        let trackChanged = newTitle != currentTitle || newArtist != currentArtist
-        currentTitle = newTitle
-        currentArtist = newArtist
-        currentAlbum = info["album"] as? String ?? ""
+            await MainActor.run {
+                let newTitle = info["title"] as? String ?? ""
+                let newArtist = info["artist"] as? String ?? ""
+                let trackChanged = newTitle != self.currentTitle || newArtist != self.currentArtist
+                self.currentTitle = newTitle
+                self.currentArtist = newArtist
+                self.currentAlbum = info["album"] as? String ?? ""
 
-        // 封面提取 — 有新数据才更新，暂停时保留当前封面
-        let oldArtworkData = currentArtworkData
-        if let data = info["artworkData"] as? Data, !data.isEmpty {
-            currentArtworkData = data
-            currentArtwork = NSImage(data: data)
-        } else if let data = Self.extractArtwork(from: info) {
-            currentArtworkData = nil
-            currentArtwork = data
-        }
-        // 切歌或封面变化时递增版本号，强制 SwiftUI 刷新
-        if trackChanged || currentArtworkData != oldArtworkData {
-            artworkVersion += 1
-        }
+                // 封面提取 — 有新数据才更新，暂停时保留当前封面
+                let oldArtworkData = self.currentArtworkData
+                if let data = info["artworkData"] as? Data, !data.isEmpty {
+                    self.currentArtworkData = data
+                } else if let data = Self.extractArtworkData(from: info) {
+                    self.currentArtworkData = data
+                }
+                // 切歌或封面变化时递增版本号，强制 SwiftUI 刷新
+                if trackChanged || self.currentArtworkData != oldArtworkData {
+                    self.artworkVersion += 1
+                }
 
-        if let dur = info["duration"] as? TimeInterval {
-            duration = dur
-        }
-        // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
-        // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
-        if let pos = info["playerPosition"] as? TimeInterval {
-            syncedElapsedTime = pos
-            lastSyncTime = Date()
-            elapsedTime = pos
-        }
-        if let rate = info["playbackRate"] as? Double {
-            playbackRate = rate
-            // 用户手动操作后的保护期内，不覆盖状态
-            if Date() > userActionDeadline {
-                isPlaying = rate > 0
+                if let dur = info["duration"] as? TimeInterval {
+                    self.duration = dur
+                }
+                // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
+                if let pos = info["playerPosition"] as? TimeInterval {
+                    self.syncedElapsedTime = pos
+                    self.lastSyncTime = Date()
+                    self.elapsedTime = pos
+                }
+                if let rate = info["playbackRate"] as? Double {
+                    self.playbackRate = rate
+                    // 用户手动操作后的保护期内，不覆盖状态
+                    if Date() > self.userActionDeadline {
+                        self.isPlaying = rate > 0
+                    }
+                }
+
+                // 切歌或歌词开关变化时同步歌词状态
+                let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
+                if Self.shouldSyncLyrics(
+                    title: self.currentTitle,
+                    artist: self.currentArtist,
+                    isEnabled: lyricsEnabled,
+                    previousTitle: self.lastFetchedTitle,
+                    previousArtist: self.lastFetchedArtist,
+                    wasEnabled: self.lastLyricsEnabled
+                ) {
+                    self.lastFetchedTitle = self.currentTitle
+                    self.lastFetchedArtist = self.currentArtist
+                    self.lastLyricsEnabled = lyricsEnabled
+                    if lyricsEnabled && !self.currentTitle.isEmpty {
+                        self.lyricsManager.fetchLyrics(
+                            title: self.currentTitle,
+                            artist: self.currentArtist,
+                            duration: self.duration > 0 ? self.duration : nil
+                        )
+                    } else {
+                        self.lyricsManager.reset()
+                    }
+                }
+
+                // 更新歌词当前行
+                self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
             }
         }
-
-        // 切歌或歌词开关变化时同步歌词状态
-        let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
-        if Self.shouldSyncLyrics(
-            title: currentTitle,
-            artist: currentArtist,
-            isEnabled: lyricsEnabled,
-            previousTitle: lastFetchedTitle,
-            previousArtist: lastFetchedArtist,
-            wasEnabled: lastLyricsEnabled
-        ) {
-            lastFetchedTitle = currentTitle
-            lastFetchedArtist = currentArtist
-            lastLyricsEnabled = lyricsEnabled
-            if lyricsEnabled && !currentTitle.isEmpty {
-                lyricsManager.fetchLyrics(
-                    title: currentTitle,
-                    artist: currentArtist,
-                    duration: duration > 0 ? duration : nil
-                )
-            } else {
-                lyricsManager.reset()
-            }
-        }
-
-        // 更新歌词当前行
-        lyricsManager.updateCurrentLine(elapsedTime: elapsedTime)
     }
 
     private func fetchPlaybackState() {
-        let info = ScriptingBridgeHelper.getNowPlayingInfo()
-        if let rate = info["playbackRate"] as? Double {
-            playbackRate = rate
-            // 用户手动操作后的保护期内，不覆盖状态
-            if Date() > userActionDeadline {
-                isPlaying = rate > 0
+        Task.detached { [weak self] in
+            let info = await ScriptingBridgeHelper.getNowPlayingInfo()
+            guard let self else { return }
+
+            await MainActor.run {
+                if let rate = info["playbackRate"] as? Double {
+                    self.playbackRate = rate
+                    // 用户手动操作后的保护期内，不覆盖状态
+                    if Date() > self.userActionDeadline {
+                        self.isPlaying = rate > 0
+                    }
+                }
+                // 播放/暂停切换时重新校准进度
+                if let pos = info["playerPosition"] as? TimeInterval {
+                    self.syncedElapsedTime = pos
+                    self.lastSyncTime = Date()
+                    self.elapsedTime = pos
+                }
             }
-        }
-        // 播放/暂停切换时重新校准进度
-        if let pos = info["playerPosition"] as? TimeInterval {
-            syncedElapsedTime = pos
-            lastSyncTime = Date()
-            elapsedTime = pos
         }
     }
 
@@ -295,8 +309,8 @@ final class MediaManager: ObservableObject {
         return String(format: "%d:%02d", mins, secs)
     }
 
-    /// 从 Now Playing 信息中提取封面图片
-    private static func extractArtwork(from info: [String: Any]) -> NSImage? {
+    /// 从 Now Playing 信息中提取封面 Data
+    private static func extractArtworkData(from info: [String: Any]) -> Data? {
         // 尝试常见的封面键名
         let possibleKeys = [
             "artworkData",
@@ -305,11 +319,10 @@ final class MediaManager: ObservableObject {
 
         for key in possibleKeys {
             if let data = info[key] as? Data, !data.isEmpty {
-                if let img = NSImage(data: data) { return img }
+                return data
             }
             if let nsData = info[key] as? NSData {
-                let data = Data(referencing: nsData)
-                if let img = NSImage(data: data) { return img }
+                return Data(referencing: nsData)
             }
         }
         return nil

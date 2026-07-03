@@ -129,6 +129,8 @@ enum L10n {
 
     // MARK: - 灵动岛尺寸
 
+    static var sectionIslandSizeWithLyrics: String { localized(zh: "歌词灵动岛尺寸", en: "Island Size (Lyrics)") }
+
     static var islandWidth: String { localized(zh: "岛宽度", en: "Island width") }
     static var islandWidthDesc: String { localized(
         zh: "收起状态下灵动岛的宽度（单位：点）。",
@@ -138,6 +140,16 @@ enum L10n {
     static var islandHeightDesc: String { localized(
         zh: "收起状态下灵动岛的高度（单位：点）。",
         en: "Height of the collapsed island in points.") }
+
+    static var islandWidthWithLyrics: String { localized(zh: "歌词岛宽度", en: "Island width (lyrics)") }
+    static var islandWidthWithLyricsDesc: String { localized(
+        zh: "开启歌词时灵动岛的宽度（单位：点）。",
+        en: "Width of the collapsed island when lyrics are enabled (in points).") }
+
+    static var islandHeightWithLyrics: String { localized(zh: "歌词岛高度", en: "Island height (lyrics)") }
+    static var islandHeightWithLyricsDesc: String { localized(
+        zh: "开启歌词时灵动岛的高度（单位：点）。",
+        en: "Height of the collapsed island when lyrics are enabled (in points).") }
 
     // MARK: - 设置界面
 
@@ -210,4 +222,18 @@ enum L10n {
     static func fileCount(_ count: Int) -> String {
         localized(zh: "\(count) 个文件", en: "\(count) files")
     }
+
+    static func showAllFiles(_ remaining: Int) -> String {
+        localized(zh: "显示剩余 \(remaining) 个文件…", en: "Show \(remaining) more…")
+    }
+
+    static var collapseFiles: String { localized(zh: "收起", en: "Collapse") }
+
+    static var openFile: String { localized(zh: "打开", en: "Open") }
+
+    static var revealInFinder: String { localized(zh: "在 Finder 中显示", en: "Reveal in Finder") }
+
+    static var copyToClipboard: String { localized(zh: "复制到剪贴板", en: "Copy to Clipboard") }
+
+    static var removeFile: String { localized(zh: "移除", en: "Remove") }
 }

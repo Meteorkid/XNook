@@ -22,15 +22,16 @@ final class TrayManager: ObservableObject {
         let addedAt: Date
 
         /// 从 bookmark data 解析 URL（每次访问前调用）
-        func resolveURL() -> URL? {
+        /// - Returns: (url, isStale) 元组，isStale 表示 bookmark 是否过期需要重新创建
+        func resolveURL() -> (url: URL, isStale: Bool)? {
             var isStale = false
             guard let url = try? URL(
                 resolvingBookmarkData: bookmarkData,
-                options: [],
+                options: .withSecurityScope,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ) else { return nil }
-            return url
+            return (url, isStale)
         }
 
         static func iconForFile(at url: URL) -> String {
@@ -61,29 +62,80 @@ final class TrayManager: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
               let records = try? JSONDecoder().decode([FileRecord].self, from: data) else { return }
 
-        files = records.compactMap { record -> TrayFile? in
+        var validFiles: [TrayFile] = []
+        var hasUpdatedRecords = false
+        var unresolvedRecords: [FileRecord] = []  // 无法解析的记录，保留原样
+
+        for record in records {
             var isStale = false
             guard let url = try? URL(
                 resolvingBookmarkData: record.bookmarkData,
-                options: [],
+                options: .withSecurityScope,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
-            ) else { return nil }
-            let icon = TrayFile.iconForFile(at: url)
-            return TrayFile(
-                id: record.id,
-                bookmarkData: record.bookmarkData,
-                name: url.lastPathComponent,
-                icon: icon,
-                size: record.size,
-                addedAt: record.addedAt
-            )
+            ) else {
+                // bookmark 无法解析（外接盘未挂载等），保留原始记录
+                unresolvedRecords.append(record)
+                continue
+            }
+
+            if isStale {
+                // bookmark 过期，尝试重新创建
+                let isAccessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if isAccessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+                if let newBookmarkData = try? url.bookmarkData(
+                    options: .withSecurityScope,
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                ) {
+                    let icon = TrayFile.iconForFile(at: url)
+                    validFiles.append(TrayFile(
+                        id: record.id,
+                        bookmarkData: newBookmarkData,
+                        name: url.lastPathComponent,
+                        icon: icon,
+                        size: record.size,
+                        addedAt: record.addedAt
+                    ))
+                    hasUpdatedRecords = true
+                } else {
+                    // 重建失败，保留原始记录
+                    unresolvedRecords.append(record)
+                }
+            } else {
+                let icon = TrayFile.iconForFile(at: url)
+                validFiles.append(TrayFile(
+                    id: record.id,
+                    bookmarkData: record.bookmarkData,
+                    name: url.lastPathComponent,
+                    icon: icon,
+                    size: record.size,
+                    addedAt: record.addedAt
+                ))
+            }
+        }
+
+        files = validFiles
+        // 只在有更新时才保存（过期重建成功），保留未解析的原始记录
+        if hasUpdatedRecords {
+            let mergedRecords = unresolvedRecords + validFiles.map { FileRecord(from: $0) }
+            if let mergedData = try? JSONEncoder().encode(mergedRecords) {
+                UserDefaults.standard.set(mergedData, forKey: storageKey)
+            }
         }
     }
 
     func addFile(from url: URL) {
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
+        let isAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if isAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
 
         guard let bookmarkData = try? url.bookmarkData(
             options: .withSecurityScope,
@@ -119,20 +171,61 @@ final class TrayManager: ObservableObject {
     }
 
     func openFile(_ file: TrayFile) {
-        guard let url = file.resolveURL() else { return }
-        NSWorkspace.shared.open(url)
+        withResolvedURL(for: file) { url in
+            NSWorkspace.shared.open(url)
+        }
     }
 
     func revealInFinder(_ file: TrayFile) {
-        guard let url = file.resolveURL() else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        withResolvedURL(for: file) { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
     }
 
     func copyToClipboard(_ file: TrayFile) {
-        guard let url = file.resolveURL() else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([url as NSURL])
+        withResolvedURL(for: file) { url in
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.writeObjects([url as NSURL])
+        }
+    }
+
+    private func withResolvedURL(for file: TrayFile, perform action: (URL) -> Void) {
+        guard let result = file.resolveURL() else { return }
+        let isAccessing = result.url.startAccessingSecurityScopedResource()
+        defer {
+            if isAccessing {
+                result.url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        if result.isStale {
+            refreshBookmark(for: file, resolvedURL: result.url)
+        }
+        action(result.url)
+    }
+
+    /// 在 security scope 有效期间刷新过期的 bookmark
+    private func refreshBookmark(for file: TrayFile, resolvedURL: URL) {
+        guard let newBookmarkData = try? resolvedURL.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else { return }
+
+        // 更新对应文件的 bookmarkData
+        if let index = files.firstIndex(where: { $0.id == file.id }) {
+            let oldFile = files[index]
+            files[index] = TrayFile(
+                id: oldFile.id,
+                bookmarkData: newBookmarkData,
+                name: oldFile.name,
+                icon: oldFile.icon,
+                size: oldFile.size,
+                addedAt: oldFile.addedAt
+            )
+            saveFiles()
+        }
     }
 
     // MARK: - Private Methods

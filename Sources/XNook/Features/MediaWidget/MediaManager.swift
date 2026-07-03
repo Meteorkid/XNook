@@ -26,6 +26,8 @@ final class MediaManager: ObservableObject {
 
     // MARK: - Private Properties
 
+    /// 存储 MediaRemote 是否可用（不使用 @Published，避免 deinit 问题）
+    private let mediaRemoteAvailable: Bool
     private var infoObserver: NSObjectProtocol?
     private var playingObserver: NSObjectProtocol?
     /// 慢速轮询：获取歌曲信息、封面（1s 间隔，避免 IPC 卡顿）
@@ -42,15 +44,21 @@ final class MediaManager: ObservableObject {
     // MARK: - Init
 
     init() {
-        isAvailable = MediaRemoteBridge.isAvailable
-        guard isAvailable else { return }
-        registerNotifications()
-        // 立即获取一次
+        let available = MediaRemoteBridge.isAvailable
+        isAvailable = available
+        mediaRemoteAvailable = available
+        // MediaRemote 可用时注册系统通知（快速响应）
+        // 不可用时仍可通过 ScriptingBridge 轮询获取信息
+        if available {
+            registerNotifications()
+        }
+        // 立即获取一次（ScriptingBridge 不依赖 MediaRemote）
         fetchNowPlayingInfo()
         // 延迟再获取一次
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             self?.fetchNowPlayingInfo()
         }
+        // 启动定时器轮询 ScriptingBridge（始终运行）
         startTimers()
     }
 
@@ -59,13 +67,16 @@ final class MediaManager: ObservableObject {
         progressTimer?.invalidate()
         if let obs = infoObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = playingObserver { NotificationCenter.default.removeObserver(obs) }
-        MediaRemoteBridge.unregisterForNotifications()
+        if mediaRemoteAvailable {
+            MediaRemoteBridge.unregisterForNotifications()
+        }
     }
 
     // MARK: - 双定时器架构
 
     private func startTimers() {
-        // 慢速轮询：1s 拉取 ScriptingBridge（歌曲信息 + 封面 + 位置校准）
+        // 慢速轮询：拉取 ScriptingBridge（歌曲信息 + 封面 + 位置校准）
+        // 有播放器时 1s，无播放器时 5s，减少不必要的 IPC 开销
         infoTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -121,6 +132,20 @@ final class MediaManager: ObservableObject {
 
     private var lastFetchedTitle = ""
     private var lastFetchedArtist = ""
+    private var lastLyricsEnabled = false
+
+    static func shouldSyncLyrics(
+        title: String,
+        artist: String,
+        isEnabled: Bool,
+        previousTitle: String,
+        previousArtist: String,
+        wasEnabled: Bool
+    ) -> Bool {
+        title != previousTitle
+            || artist != previousArtist
+            || isEnabled != wasEnabled
+    }
 
     func fetchNowPlayingInfo() {
         // ScriptingBridge 获取（MediaRemote 在非沙盒环境中返回空）
@@ -165,12 +190,25 @@ final class MediaManager: ObservableObject {
             }
         }
 
-        // 切歌时获取歌词
-        if currentTitle != lastFetchedTitle || currentArtist != lastFetchedArtist {
+        // 切歌或歌词开关变化时同步歌词状态
+        let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
+        if Self.shouldSyncLyrics(
+            title: currentTitle,
+            artist: currentArtist,
+            isEnabled: lyricsEnabled,
+            previousTitle: lastFetchedTitle,
+            previousArtist: lastFetchedArtist,
+            wasEnabled: lastLyricsEnabled
+        ) {
             lastFetchedTitle = currentTitle
             lastFetchedArtist = currentArtist
-            if !currentTitle.isEmpty {
-                lyricsManager.fetchLyrics(title: currentTitle, artist: currentArtist)
+            lastLyricsEnabled = lyricsEnabled
+            if lyricsEnabled && !currentTitle.isEmpty {
+                lyricsManager.fetchLyrics(
+                    title: currentTitle,
+                    artist: currentArtist,
+                    duration: duration > 0 ? duration : nil
+                )
             } else {
                 lyricsManager.reset()
             }

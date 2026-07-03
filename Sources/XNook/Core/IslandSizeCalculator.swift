@@ -27,6 +27,18 @@ enum IslandSizeCalculator {
         CGFloat(UserDefaults.standard.double(forKey: "islandHeight").clamped(defaultCollapsedShapeHeight))
     }
 
+    /// 读取用户设置的收起高度（开启歌词时）
+    static var collapsedShapeHeightWithLyrics: CGFloat {
+        let saved = UserDefaults.standard.double(forKey: "islandHeightWithLyrics")
+        return saved > 0 ? CGFloat(saved) : defaultCollapsedShapeHeight + 24
+    }
+
+    /// 读取用户设置的收起宽度（开启歌词时）
+    static var collapsedPillWidthWithLyrics: CGFloat {
+        let saved = UserDefaults.standard.double(forKey: "islandWidthWithLyrics")
+        return saved > 0 ? CGFloat(saved) : defaultCollapsedPillWidth + 40
+    }
+
     /// 读取用户设置的收起宽度
     static var collapsedPillWidth: CGFloat {
         CGFloat(UserDefaults.standard.double(forKey: "islandWidth").clamped(defaultCollapsedPillWidth))

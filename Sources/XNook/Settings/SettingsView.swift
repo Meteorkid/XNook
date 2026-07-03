@@ -179,6 +179,20 @@ struct SettingsView: View {
                 }
             }
 
+            section(L10n.sectionIslandSizeWithLyrics) {
+                card {
+                    settingRow(L10n.islandWidthWithLyrics, id: "islandWidthWithLyrics",
+                              description: L10n.islandWidthWithLyricsDesc) {
+                        AppStorageSlider(key: "islandWidthWithLyrics", range: 120...400, format: "%.0fpt")
+                    }
+                    dividerLine
+                    settingRow(L10n.islandHeightWithLyrics, id: "islandHeightWithLyrics",
+                              description: L10n.islandHeightWithLyricsDesc) {
+                        AppStorageSlider(key: "islandHeightWithLyrics", range: 20...60, format: "%.0fpt")
+                    }
+                }
+            }
+
             section(L10n.sectionTicker) {
                 card {
                     settingRow(L10n.showTickerLine, id: "showTickerLine",
@@ -188,7 +202,7 @@ struct SettingsView: View {
                     dividerLine
                     settingRow(L10n.showLyrics, id: "showLyrics",
                               description: L10n.showLyricsDesc) {
-                        AppStorageToggle(key: "showLyrics", defaultValue: true)
+                        AppStorageToggle(key: "showLyrics", defaultValue: false)
                     }
                     dividerLine
                     settingRow(L10n.tickerSpeed, id: "tickerSpeed",
@@ -558,47 +572,166 @@ private struct LaunchAtLoginToggle: View {
 // MARK: - GIF 选择器
 
 private struct GifPickerButton: View {
-    @State private var gifName: String = UserDefaults.standard.string(forKey: "customGifName") ?? ""
+    @State private var gifList: [String] = UserDefaults.standard.stringArray(forKey: "customGifList") ?? []
+    @State private var selectedGif: String = UserDefaults.standard.string(forKey: "selectedGifName") ?? ""
+
+    private var gifsDirectory: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("XNook/gifs")
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            if !gifName.isEmpty {
-                Text(gifName)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 80, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            // GIF 列表
+            if !gifList.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(gifList, id: \.self) { name in
+                            GifThumbnailView(
+                                name: name,
+                                isSelected: name == selectedGif,
+                                onSelect: {
+                                    selectedGif = name
+                                    UserDefaults.standard.set(name, forKey: "selectedGifName")
+                                    NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+                                },
+                                onDelete: {
+                                    deleteGif(name: name)
+                                }
+                            )
+                        }
+                    }
+                }
+                .frame(height: 60)
             }
 
+            // 添加按钮
             Button(L10n.chooseGif) {
                 let panel = NSOpenPanel()
                 panel.title = L10n.chooseGif
                 panel.allowedContentTypes = [.gif]
-                panel.allowsMultipleSelection = false
+                panel.allowsMultipleSelection = true
                 panel.canChooseDirectories = false
 
-                if panel.runModal() == .OK, let url = panel.url {
-                    // 保存 bookmark data
-                    if let data = try? url.bookmarkData(options: .withSecurityScope) {
-                        UserDefaults.standard.set(data, forKey: "customGifBookmark")
-                        UserDefaults.standard.set(url.lastPathComponent, forKey: "customGifName")
-                        gifName = url.lastPathComponent
+                if panel.runModal() == .OK {
+                    for url in panel.urls {
+                        addGif(from: url)
                     }
                 }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+        }
+    }
 
-            if !gifName.isEmpty {
-                Button(L10n.clearGif) {
-                    UserDefaults.standard.removeObject(forKey: "customGifBookmark")
-                    UserDefaults.standard.removeObject(forKey: "customGifName")
-                    gifName = ""
+    private func addGif(from url: URL) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        guard let dir = gifsDirectory else { return }
+
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch { return }
+
+        // 生成唯一文件名（避免重名覆盖）
+        let baseName = url.lastPathComponent.replacingOccurrences(of: ".gif", with: "")
+        var fileName = "\(baseName).gif"
+        var counter = 1
+        while gifList.contains(fileName) {
+            fileName = "\(baseName)_\(counter).gif"
+            counter += 1
+        }
+
+        let gifURL = dir.appendingPathComponent(fileName)
+        do {
+            try data.write(to: gifURL)
+        } catch { return }
+
+        gifList.append(fileName)
+        UserDefaults.standard.set(gifList, forKey: "customGifList")
+
+        // 如果是第一个 GIF，自动选中
+        if selectedGif.isEmpty {
+            selectedGif = fileName
+            UserDefaults.standard.set(fileName, forKey: "selectedGifName")
+            NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+        }
+    }
+
+    private func deleteGif(name: String) {
+        guard let dir = gifsDirectory else { return }
+        let gifURL = dir.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: gifURL)
+
+        gifList.removeAll { $0 == name }
+        UserDefaults.standard.set(gifList, forKey: "customGifList")
+
+        if selectedGif == name {
+            selectedGif = gifList.first ?? ""
+            UserDefaults.standard.set(selectedGif, forKey: "selectedGifName")
+            NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+        }
+    }
+}
+
+// MARK: - GIF 缩略图
+
+private struct GifThumbnailView: View {
+    let name: String
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+
+    @State private var thumbnail: NSImage?
+
+    private var gifsDirectory: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("XNook/gifs")
+    }
+
+    var body: some View {
+        Button(action: onSelect) {
+            ZStack(alignment: .topTrailing) {
+                if let thumbnail {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 50, height: 50)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                        )
+                } else {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.secondary.opacity(0.2))
+                        .frame(width: 50, height: 50)
+                        .overlay(
+                            Image(systemName: "film")
+                                .foregroundColor(.secondary)
+                        )
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+
+                // 删除按钮
+                Button(action: onDelete) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.red)
+                        .background(Circle().fill(Color.white))
+                }
+                .buttonStyle(.plain)
+                .offset(x: 4, y: -4)
             }
         }
+        .buttonStyle(.plain)
+        .onAppear { loadThumbnail() }
+    }
+
+    private func loadThumbnail() {
+        guard let dir = gifsDirectory else { return }
+        let gifURL = dir.appendingPathComponent(name)
+
+        guard let source = CGImageSourceCreateWithURL(gifURL as CFURL, nil) else { return }
+        guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
+        thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: 50, height: 50))
     }
 }
 

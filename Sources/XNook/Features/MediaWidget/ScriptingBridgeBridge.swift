@@ -45,17 +45,17 @@ enum ScriptingBridgeHelper {
 
         // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
         // 用 AppleScript 获取播放状态
-        if let rate = fetchPlaybackRateViaAppleScript() {
+        if let rate = fetchPlaybackRateViaAppleScript(appName: "Music") {
             result["playbackRate"] = rate
         }
 
         return result.isEmpty ? nil : result
     }
 
-    /// 通过 AppleScript 获取 Music.app 播放状态
-    private static func fetchPlaybackRateViaAppleScript() -> Double? {
+    /// 通过 AppleScript 获取指定应用的播放状态（在后台线程执行，避免阻塞主线程）
+    private static func fetchPlaybackRateViaAppleScript(appName: String) -> Double? {
         let source = """
-        tell application "Music"
+        tell application "\(appName)"
             if player state is playing then
                 return 1
             else
@@ -63,14 +63,16 @@ enum ScriptingBridgeHelper {
             end if
         end tell
         """
-        var error: NSDictionary?
-        guard let script = NSAppleScript(source: source) else { return nil }
-        let result = script.executeAndReturnError(&error)
-        guard error == nil else { return nil }
-        return result.doubleValue
+        return DispatchQueue.global().sync {
+            var error: NSDictionary?
+            guard let script = NSAppleScript(source: source) else { return nil }
+            let result = script.executeAndReturnError(&error)
+            guard error == nil else { return nil }
+            return result.doubleValue
+        }
     }
 
-    /// 通过 AppleScript 获取 Music.app 当前曲目封面
+    /// 通过 AppleScript 获取 Music.app 当前曲目封面（在后台线程执行，避免阻塞主线程）
     private static func fetchMusicArtwork() -> Data? {
         let source = """
         tell application "Music"
@@ -82,12 +84,14 @@ enum ScriptingBridgeHelper {
             end if
         end tell
         """
-        var error: NSDictionary?
-        guard let script = NSAppleScript(source: source) else { return nil }
-        let result = script.executeAndReturnError(&error)
-        guard error == nil else { return nil }
-        let data = result.data
-        return data.isEmpty ? nil : data
+        return DispatchQueue.global().sync {
+            var error: NSDictionary?
+            guard let script = NSAppleScript(source: source) else { return nil }
+            let result = script.executeAndReturnError(&error)
+            guard error == nil else { return nil }
+            let data = result.data
+            return data.isEmpty ? nil : data
+        }
     }
 
     /// 从 Spotify 获取当前播放信息
@@ -112,23 +116,42 @@ enum ScriptingBridgeHelper {
             result["duration"] = duration / 1000.0
         }
 
+        // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴
+        if let pos = app.value(forKey: "playerPosition") as? Double {
+            result["playerPosition"] = pos
+        }
+
         // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
         // 用 AppleScript 获取播放状态
-        if let rate = fetchPlaybackRateViaAppleScript() {
+        if let rate = fetchPlaybackRateViaAppleScript(appName: "Spotify") {
             result["playbackRate"] = rate
         }
 
         return result.isEmpty ? nil : result
     }
 
-    /// 获取当前播放信息（优先 Music，其次 Spotify）
+    static func selectNowPlayingInfo(
+        music: [String: Any]?,
+        spotify: [String: Any]?
+    ) -> [String: Any] {
+        if let music, (music["playbackRate"] as? Double ?? 0) > 0 {
+            return music
+        }
+        if let spotify, (spotify["playbackRate"] as? Double ?? 0) > 0 {
+            return spotify
+        }
+        return music ?? spotify ?? [:]
+    }
+
+    /// 获取当前播放信息（优先选择正在播放的来源）
     static func getNowPlayingInfo() -> [String: Any] {
-        if let info = getNowPlayingFromMusic() {
-            return info
-        }
-        if let info = getNowPlayingFromSpotify() {
-            return info
-        }
-        return [:]
+        let music = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.Music"
+        ).isEmpty ? nil : getNowPlayingFromMusic()
+        let spotify = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.spotify.client"
+        ).isEmpty ? nil : getNowPlayingFromSpotify()
+
+        return selectNowPlayingInfo(music: music, spotify: spotify)
     }
 }

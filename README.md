@@ -54,17 +54,23 @@ X Nook sits at the top of your screen as a compact pill. Hover to expand and acc
 
 ## Install
 
-### Option 1: Build from Source
+### Option 1: Build the App Bundle
 
-1. Clone the repository
-2. Open `XNook.xcodeproj` in Xcode
-3. Build and run (⌘R)
+```bash
+chmod +x build-app.sh
+./build-app.sh
+open ".build/X Nook.app"
+```
 
-### Option 2: Swift Package Manager
+This is the recommended way to run X Nook locally because it includes the
+required `Info.plist` privacy descriptions in the generated app bundle.
+
+### Option 2: Development Build
+
+Open `Package.swift` in Xcode for code navigation, or run a compile-only check:
 
 ```bash
 swift build
-swift run
 ```
 
 ## Architecture
@@ -72,21 +78,26 @@ swift run
 ```
 XNook/
 ├── App/
-│   ├── XNookApp.swift          # Entry point
-│   └── AppDelegate.swift       # App delegate
+│   ├── XNookApp.swift              # Entry point
+│   └── AppDelegate.swift           # App delegate
 ├── Core/
-│   ├── NotchWindow.swift       # Custom window management
-│   ├── NotchDetector.swift     # Notch detection
-│   ├── NotchViewModel.swift    # State management
-│   └── AppSwitcher.swift       # App switching
+│   ├── NotchWindow.swift           # Custom window management
+│   ├── NotchDetector.swift         # Notch detection
+│   ├── AppSwitcher.swift           # App switching
+│   ├── IslandSizeCalculator.swift  # Island size calculation
+│   ├── IslandStyle.swift           # Island styling
+│   ├── NotchShapeGeometry.swift    # Notch shape geometry
+│   └── SingleInstanceLock.swift    # Single instance lock
 ├── Features/
-│   ├── NotchContentView.swift  # Main UI
-│   ├── MediaWidget/            # Media player
-│   ├── CalendarWidget/         # Calendar integration
-│   ├── NotesWidget/            # Notes editor
-│   └── TrayWidget/             # File tray
+│   ├── NotchContentView.swift      # Main UI
+│   ├── MediaWidget/                # Media player
+│   ├── CalendarWidget/             # Calendar integration
+│   ├── NotesWidget/                # Notes editor
+│   └── TrayWidget/                 # File tray
+├── Localization/
+│   └── L10n.swift                  # Internationalization
 └── Settings/
-    └── SettingsView.swift      # Preferences
+    └── SettingsView.swift          # Preferences
 ```
 
 ## Related Projects

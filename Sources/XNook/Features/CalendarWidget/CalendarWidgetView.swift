@@ -72,6 +72,14 @@ struct CalendarWidgetView: View {
 
             Spacer()
         }
+        .onChange(of: selectedDate) { _, date in
+            guard calendarManager.hasAccess else { return }
+            calendarManager.loadEvents(for: date)
+        }
+        .onChange(of: calendarManager.hasAccess) { _, hasAccess in
+            guard hasAccess else { return }
+            calendarManager.loadEvents(for: selectedDate)
+        }
     }
 
     private var today: Date {
@@ -169,6 +177,7 @@ private struct CalendarScroller: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
         // recenterTrigger 变化时重新居中到今天（面板重新展开）
         if recenterTrigger != context.coordinator.lastTrigger {
             context.coordinator.lastTrigger = recenterTrigger
@@ -181,9 +190,13 @@ private struct CalendarScroller: NSViewRepresentable {
     // MARK: - Coordinator
 
     class Coordinator: NSObject {
-        let parent: CalendarScroller
+        var parent: CalendarScroller
         private var lastIndex: Int = -1
         var lastTrigger: Int = 0
+        private var isProgrammaticScroll = false
+        private var programmaticScrollID = 0
+        /// 上次更新的中心索引，用于清理远距离跳转时的旧高亮
+        private var lastCenterIndex: Int = -1
 
         init(_ parent: CalendarScroller) { self.parent = parent }
 
@@ -196,6 +209,9 @@ private struct CalendarScroller: NSViewRepresentable {
             parent.centeredDate = date
 
             if let scrollView = sender.enclosingScrollView {
+                isProgrammaticScroll = true
+                lastIndex = index
+                updateAllCells(scrollView, centerIndex: index, animated: true)
                 scrollToCell(scrollView, index: index)
             }
         }
@@ -210,6 +226,8 @@ private struct CalendarScroller: NSViewRepresentable {
             guard let stackView = scrollView.documentView as? DateStackView else { return }
             let todayIndex = parent.dateRange.firstIndex(of: parent.today) ?? 14
             guard todayIndex < stackView.arrangedSubviews.count else { return }
+            programmaticScrollID += 1
+            isProgrammaticScroll = false
 
             let cell = stackView.arrangedSubviews[todayIndex]
             let offset = cell.frame.midX - scrollView.contentSize.width / 2
@@ -226,6 +244,7 @@ private struct CalendarScroller: NSViewRepresentable {
             CATransaction.commit()
 
             lastIndex = todayIndex
+            parent.selectedDate = parent.today
             parent.centeredDate = parent.today
             updateAllCells(scrollView, centerIndex: todayIndex, animated: animated)
         }
@@ -233,6 +252,8 @@ private struct CalendarScroller: NSViewRepresentable {
         func scrollToCell(_ scrollView: NSScrollView, index: Int) {
             guard let stackView = scrollView.documentView as? DateStackView,
                   index < stackView.arrangedSubviews.count else { return }
+            programmaticScrollID += 1
+            let scrollID = programmaticScrollID
 
             let cell = stackView.arrangedSubviews[index]
             let offset = cell.frame.midX - scrollView.contentSize.width / 2
@@ -245,13 +266,22 @@ private struct CalendarScroller: NSViewRepresentable {
             scrollView.reflectScrolledClipView(scrollView.contentView)
             CATransaction.commit()
 
-            // 延迟检测中心日期（滚动动画结束后）
+            // 动画结束后恢复用户滚动检测，并重新确认点击的日期。
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                self?.detectCenteredDate(scrollView, animated: true)
+                guard let self,
+                      scrollID == self.programmaticScrollID,
+                      index < self.parent.dateRange.count else { return }
+                self.isProgrammaticScroll = false
+                self.lastIndex = index
+                let date = self.parent.dateRange[index]
+                self.parent.selectedDate = date
+                self.parent.centeredDate = date
+                self.updateAllCells(scrollView, centerIndex: index, animated: true)
             }
         }
 
         func detectCenteredDate(_ scrollView: NSScrollView, animated: Bool) {
+            guard !isProgrammaticScroll else { return }
             guard let stackView = scrollView.documentView as? DateStackView else { return }
 
             let visibleCenterX = scrollView.contentView.bounds.midX
@@ -274,18 +304,30 @@ private struct CalendarScroller: NSViewRepresentable {
             updateAllCells(scrollView, centerIndex: bestIndex, animated: animated)
 
             if bestIndex < parent.dateRange.count {
-                parent.centeredDate = parent.dateRange[bestIndex]
+                let date = parent.dateRange[bestIndex]
+                parent.selectedDate = date
+                parent.centeredDate = date
             }
         }
 
-        /// 只更新受影响的 cell（中心 ±3 范围内）
+        /// 更新受影响的 cell（中心 ±3 范围内），并清理旧中心的残留高亮
         private func updateAllCells(_ scrollView: NSScrollView, centerIndex: Int, animated: Bool) {
             guard let stackView = scrollView.documentView as? DateStackView else { return }
+
+            let oldCenter = lastCenterIndex
+            lastCenterIndex = centerIndex
+
             for subview in stackView.arrangedSubviews {
                 if let cell = subview as? DateCell {
                     let dist = abs(cell.index - centerIndex)
+                    let oldDist = oldCenter >= 0 ? abs(cell.index - oldCenter) : Int.max
+
                     if dist <= 3 {
+                        // 新中心 ±3 范围内：更新放大/高亮
                         cell.updateMagnify(centerIndex: centerIndex, animated: animated)
+                    } else if oldDist <= 3 {
+                        // 旧中心 ±3 范围内但现在超出新中心范围：重置为默认状态
+                        cell.updateMagnify(centerIndex: -999, animated: false)
                     }
                 }
             }
@@ -417,11 +459,9 @@ private class DateCell: NSButton {
             ? NSColor.white.withAlphaComponent(0.15).cgColor
             : NSColor.clear.cgColor
 
-        // 字体只在 animated 时更新（滚动时跳过，避免触发布局）
-        if animated || dist == 0 {
-            dayLabel.font = .systemFont(ofSize: isCenter ? 13 : 11, weight: isCenter ? .bold : .medium)
-            weekdayLabel.font = .systemFont(ofSize: isCenter ? 9 : 8, weight: isCenter ? .semibold : .medium)
-        }
+        // 字体始终更新，确保离开中心时字号正确重置
+        dayLabel.font = .systemFont(ofSize: isCenter ? 13 : 11, weight: isCenter ? .bold : .medium)
+        weekdayLabel.font = .systemFont(ofSize: isCenter ? 9 : 8, weight: isCenter ? .semibold : .medium)
     }
 }
 

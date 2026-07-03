@@ -70,8 +70,9 @@ struct NotchContentView: View {
     @AppStorage("hoverToExpandPanel") private var hoverToExpandPanel = true
     @AppStorage("reduceMotion") private var reduceMotion = false
     @AppStorage("showTickerLine") private var showTickerLine = true
-    @AppStorage("showLyrics") private var showLyrics = true
+    @AppStorage("showLyrics") private var showLyrics = false
     @AppStorage("tickerSpeed") private var tickerSpeed = 25.0
+    @State private var cachedGifData: Data?
     @State private var islandObscuredByNotch = false
 
     private var onSizeChange: ((CGFloat, CGFloat) -> Void)?
@@ -108,14 +109,19 @@ struct NotchContentView: View {
 
     // MARK: - 尺寸计算
 
-    private var collapsedShapeHeight: CGFloat { IslandSizeCalculator.collapsedShapeHeight }
+    /// 收起高度：开启歌词时使用带歌词的高度，否则使用默认高度
+    private var collapsedShapeHeight: CGFloat {
+        showLyrics && showTicker
+            ? IslandSizeCalculator.collapsedShapeHeightWithLyrics
+            : IslandSizeCalculator.collapsedShapeHeight
+    }
 
     /// Ticker 行高度
     private let tickerLineHeight: CGFloat = 18
 
-    /// 是否显示 Ticker（播放中 + 设置开启 + 收起状态）
+    /// 是否显示 Ticker（播放中 + 曲目信息或歌词任一开启 + 收起状态）
     private var showTicker: Bool {
-        mediaManager.isPlaying && showTickerLine && !isExpanded
+        mediaManager.isPlaying && (showTickerLine || showLyrics) && !isExpanded
     }
 
     /// 收起状态总高度（含 Ticker）
@@ -153,12 +159,14 @@ struct NotchContentView: View {
         isExpanded ? expandedHeight : collapsedTotalHeight
     }
 
+    /// 收起宽度：开启歌词时使用带歌词的宽度，否则使用默认宽度
     private var pillWidth: CGFloat {
-        // 收起状态无会话，传 0（匹配 X Island 的 idle 状态）
-        IslandSizeCalculator.pillWidth(
-            islandObscuredByNotch: islandObscuredByNotch,
-            visibleSessionCount: 0
-        )
+        showLyrics && showTicker
+            ? IslandSizeCalculator.collapsedPillWidthWithLyrics
+            : IslandSizeCalculator.pillWidth(
+                islandObscuredByNotch: islandObscuredByNotch,
+                visibleSessionCount: 0
+            )
     }
 
     private var pillFillColor: Color { IslandStyle.surface(for: colorScheme) }
@@ -242,7 +250,19 @@ struct NotchContentView: View {
                     albumArt: mediaManager.currentArtwork,
                     albumArtData: mediaManager.currentArtworkData,
                     artworkVersion: mediaManager.artworkVersion,
-                    onTap: { expand(to: .expanded) }
+                    gifData: cachedGifData,
+                    containerWidth: shapeWidth,
+                    containerHeight: collapsedShapeHeight,
+                    onTap: { expand(to: .expanded) },
+                    onFileDrop: { providers in
+                        for provider in providers {
+                            provider.loadObject(ofClass: NSURL.self) { reading, _ in
+                                guard let nsurl = reading as? NSURL else { return }
+                                DispatchQueue.main.async { trayManager.addFile(from: nsurl as URL) }
+                            }
+                        }
+                        return true
+                    }
                 )
                 .gesture(
                     DragGesture(minimumDistance: 15, coordinateSpace: .global)
@@ -320,9 +340,9 @@ struct NotchContentView: View {
                 islandObscuredByNotch = window.isObscuredByPhysicalNotch()
             }
 
-            // 初始化窗口大小为收起状态
+            // 初始化窗口大小为收起状态（含 Ticker 高度）
             let targetWidth = pillWidth
-            let targetHeight = IslandSizeCalculator.collapsedShapeHeight
+            let targetHeight = collapsedTotalHeight
             onSizeChange?(targetWidth, targetHeight)
 
             if isExpanded {
@@ -332,16 +352,15 @@ struct NotchContentView: View {
                 )
             }
             startHoverPolling()
+            loadGifData()
 
             // 应用退出时恢复光标（防止崩溃导致光标残留隐藏）
             terminateObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.willTerminateNotification,
                 object: nil,
                 queue: .main
-            ) { [self] _ in
-                if self.isHoveringPill {
-                    Self.invisibleCursor.pop()
-                }
+            ) { _ in
+                NSCursor.arrow.set()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookScrollDown)) { _ in
@@ -351,6 +370,17 @@ struct NotchContentView: View {
             guard !isExpanded, !collapseAnimating,
                   Date().timeIntervalSince(expandedAt) > cooldown else { return }
             expand(to: .expanded)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            // UserDefaults 变更时更新窗口大小
+            if state == .collapsed {
+                let h = showTicker ? collapsedShapeHeight + tickerLineHeight + 4 : collapsedShapeHeight
+                onSizeChange?(pillWidth, h)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("GifDidChange"))) { _ in
+            // 仅在 GIF 选择变更时重新加载
+            loadGifData()
         }
         .onDisappear {
             stopHoverPolling()
@@ -476,7 +506,7 @@ struct NotchContentView: View {
     private func startHoverPolling() {
         stopHoverPolling()
         // Timer.scheduledTimer 回调已在主线程 RunLoop，无需额外 Task 包装
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.008, repeats: true) { _ in
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
             pollMousePosition()
         }
     }
@@ -565,8 +595,12 @@ struct NotchContentView: View {
                 let strength = 1.0 - distance / Self.magneticRange
                 let offsetX = dx * strength * 0.15
                 let clamped = max(-Self.magneticMaxOffset, min(Self.magneticMaxOffset, offsetX))
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    magneticOffset = CGSize(width: clamped, height: 0)
+                let newOffset = CGSize(width: clamped, height: 0)
+                // 仅在变化超过阈值时触发动画，避免每帧重启动画
+                if abs(newOffset.width - magneticOffset.width) > 0.5 {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        magneticOffset = newOffset
+                    }
                 }
             } else if magneticOffset != .zero {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
@@ -739,6 +773,7 @@ struct NotchContentView: View {
     }
 
     private func openSettingsWindow() {
+        collapse()
         AppDelegate.shared?.openPreferences()
     }
 
@@ -756,38 +791,80 @@ struct NotchContentView: View {
         else if title.isEmpty { return artist }
         else { return "\(title) — \(artist)" }
     }
-}
 
-// MARK: - 收起状态视图
+    private func loadGifData() {
+        let defaults = UserDefaults.standard
 
-struct CollapsedPillView: View {
-    @Environment(\.colorScheme) private var colorScheme
+        // 新版：从 gifs 目录加载选中的 GIF
+        if let selectedName = defaults.string(forKey: "selectedGifName"),
+           let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let gifURL = appSupport.appendingPathComponent("XNook/gifs/\(selectedName)")
+            if let data = try? Data(contentsOf: gifURL) {
+                cachedGifData = data
+                return
+            }
+            // selectedGifName 已设置但文件不存在，不回退到旧版
+            cachedGifData = nil
+            return
+        }
 
-    let isExpanded: Bool
-    let isPlaying: Bool
-    let albumArt: NSImage?
-    let albumArtData: Data?
-    let artworkVersion: Int
-    let onTap: () -> Void
+        // 旧版：从 custom.gif 加载（仅在未使用新版功能时）
+        if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let gifURL = appSupport.appendingPathComponent("XNook/custom.gif")
+            if let data = try? Data(contentsOf: gifURL) {
+                cachedGifData = data
+                return
+            }
+        }
 
-    /// 从 UserDefaults 加载自定义 GIF
-    private var customGifImage: NSImage? {
-        guard let bookmarkData = UserDefaults.standard.data(forKey: "customGifBookmark") else { return nil }
+        // 回退：从 bookmark 加载（兼容旧版本）
+        guard let bookmarkData = defaults.data(forKey: "customGifBookmark") else {
+            cachedGifData = nil
+            return
+        }
         var isStale = false
         guard let url = try? URL(
             resolvingBookmarkData: bookmarkData,
             options: .withSecurityScope,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
-        ) else { return nil }
+        ) else {
+            cachedGifData = nil
+            return
+        }
 
-        // 开始访问安全作用域资源
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return NSImage(data: data)
+        if let data = try? Data(contentsOf: url) {
+            cachedGifData = data
+        } else {
+            cachedGifData = nil
+        }
     }
+}
+
+// MARK: - 收起状态视图
+
+struct CollapsedPillView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isDragTargeted = false
+
+    let isExpanded: Bool
+    let isPlaying: Bool
+    let albumArt: NSImage?
+    let albumArtData: Data?
+    let artworkVersion: Int
+    let gifData: Data?
+    let containerWidth: CGFloat
+    let containerHeight: CGFloat
+    let onTap: () -> Void
+    var onFileDrop: (([NSItemProvider]) -> Bool)?
+
+    /// 内容区域的可用高度（减去上下 padding）
+    private var contentHeight: CGFloat { containerHeight - 12 }
+    /// 封面和 GIF 的尺寸（取可用高度与默认高度的较小值，保持协调比例）
+    private var iconSize: CGFloat { min(contentHeight, 24) }
 
     var body: some View {
         Button(action: onTap) {
@@ -796,22 +873,22 @@ struct CollapsedPillView: View {
                 if let artData = albumArtData, let nsImage = NSImage(data: artData) {
                     Image(nsImage: nsImage)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 20, height: 20)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: iconSize, height: iconSize)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .id(artworkVersion) // 切歌时递增，强制 SwiftUI 重建 Image
+                        .id(artworkVersion)
                 } else {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color.white.opacity(0.1))
-                        .frame(width: 20, height: 20)
+                        .frame(width: iconSize, height: iconSize)
                 }
 
                 Spacer(minLength: 6)
 
                 // 右侧：自定义 GIF 或默认音频波形
-                if let gif = customGifImage {
-                    GifView(image: gif, isPlaying: isPlaying, targetSize: NSSize(width: 20, height: 20))
-                        .frame(width: 20, height: 20)
+                if let gifData {
+                    GifView(gifData: gifData, isPlaying: isPlaying, targetSize: NSSize(width: iconSize, height: iconSize))
+                        .frame(width: iconSize, height: iconSize)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else {
                     MusicVisualizerView(
@@ -825,6 +902,11 @@ struct CollapsedPillView: View {
             .padding(.vertical, 6)
         }
         .buttonStyle(.plain)
+        .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
+            // 收起状态拖入文件：展开面板 + 接受文件
+            if !isExpanded { onTap() }
+            return onFileDrop?(providers) ?? false
+        }
     }
 }
 
@@ -832,26 +914,153 @@ struct CollapsedPillView: View {
 
 /// GIF 动画视图 — 播放时动画，暂停时冻结
 private struct GifView: NSViewRepresentable {
-    let image: NSImage
+    let gifData: Data
     let isPlaying: Bool
     let targetSize: NSSize
 
-    func makeNSView(context: Context) -> NSImageView {
-        let view = NSImageView()
-        view.imageScaling = .scaleProportionallyDown
-        view.image = image
-        return view
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
 
-    func updateNSView(_ nsView: NSImageView, context: Context) {
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView(frame: NSRect(origin: .zero, size: targetSize))
+        container.wantsLayer = true
+
+        let imageView = NSImageView(frame: container.bounds)
+        imageView.autoresizingMask = [.width, .height]
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.imageAlignment = .alignCenter
+        container.addSubview(imageView)
+
+        // 初始化 GIF 帧信息（不启动动画）
+        context.coordinator.setupAnimation(gifData: gifData, imageView: imageView)
+
+        return container
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.frame = NSRect(origin: .zero, size: targetSize)
+
+        // 检测 GIF 数据变化，重新加载动画
+        if context.coordinator.currentGifData != gifData {
+            if let imageView = nsView.subviews.first as? NSImageView {
+                context.coordinator.setupAnimation(gifData: gifData, imageView: imageView)
+            }
+        }
+
         if isPlaying {
-            nsView.image = image
+            context.coordinator.resumeAnimation()
         } else {
-            // 暂停：取第一帧作为静态图
-            if let rep = image.representations.first {
-                let staticImage = NSImage(size: image.size)
-                staticImage.addRepresentation(rep)
-                nsView.image = staticImage
+            context.coordinator.pauseAnimation()
+        }
+    }
+
+    class Coordinator {
+        private var displayLink: CVDisplayLink?
+        private var source: CGImageSource?
+        private var frameCount: Int = 0
+        private var currentFrame: Int = 0
+        private var frameDurations: [TimeInterval] = []
+        private var lastFrameTime: TimeInterval = 0
+        private var isAnimating: Bool = false
+        private weak var imageView: NSImageView?
+        private(set) var currentGifData: Data?
+
+        func setupAnimation(gifData: Data, imageView: NSImageView) {
+            self.imageView = imageView
+            self.currentGifData = gifData
+
+            guard let source = CGImageSourceCreateWithData(gifData as CFData, nil) else {
+                imageView.image = NSImage(data: gifData)
+                return
+            }
+
+            self.frameCount = CGImageSourceGetCount(source)
+
+            guard frameCount > 1 else {
+                imageView.image = NSImage(data: gifData)
+                return
+            }
+
+            var durations: [TimeInterval] = []
+            for i in 0..<frameCount {
+                if let frameProperties = CGImageSourceCopyPropertiesAtIndex(source, i, nil) as? [String: Any],
+                   let gifProperties = frameProperties[kCGImagePropertyGIFDictionary as String] as? [String: Any],
+                   let delayTime = gifProperties[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double {
+                    durations.append(delayTime > 0 ? delayTime : 0.1)
+                } else {
+                    durations.append(0.1)
+                }
+            }
+            self.frameDurations = durations
+            self.source = source
+
+            // 显示第一帧
+            if let firstImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                imageView.image = NSImage(cgImage: firstImage, size: imageView.frame.size)
+            }
+        }
+
+        func resumeAnimation() {
+            guard frameCount > 1 else { return }
+            if displayLink == nil {
+                startDisplayLink()
+            }
+            isAnimating = true
+            lastFrameTime = CACurrentMediaTime()
+        }
+
+        func pauseAnimation() {
+            isAnimating = false
+        }
+
+        private func startDisplayLink() {
+            guard displayLink == nil else { return }
+
+            CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+            guard let displayLink = displayLink else { return }
+
+            CVDisplayLinkSetOutputCallback(displayLink, { _, _, _, _, _, userInfo -> CVReturn in
+                guard let userInfo = userInfo else { return kCVReturnSuccess }
+                let coordinator = Unmanaged<Coordinator>.fromOpaque(userInfo).takeUnretainedValue()
+                // 全部在主线程处理，避免跨线程 data race
+                DispatchQueue.main.async {
+                    coordinator.tick()
+                }
+                return kCVReturnSuccess
+            }, Unmanaged.passUnretained(self).toOpaque())
+
+            CVDisplayLinkStart(displayLink)
+            isAnimating = true
+            lastFrameTime = CACurrentMediaTime()
+        }
+
+        private func tick() {
+            guard isAnimating, frameCount > 0 else { return }
+
+            let now = CACurrentMediaTime()
+            let elapsed = now - lastFrameTime
+            let duration = frameDurations[currentFrame]
+
+            if elapsed >= duration {
+                currentFrame = (currentFrame + 1) % frameCount
+                lastFrameTime = now
+                updateFrame()
+            }
+        }
+
+        private func updateFrame() {
+            guard let source = source, let imageView = imageView else { return }
+
+            if let cgImage = CGImageSourceCreateImageAtIndex(source, currentFrame, nil) {
+                let frameImage = NSImage(cgImage: cgImage, size: imageView.frame.size)
+                imageView.image = frameImage
+            }
+        }
+
+        deinit {
+            if let displayLink = displayLink {
+                CVDisplayLinkStop(displayLink)
             }
         }
     }

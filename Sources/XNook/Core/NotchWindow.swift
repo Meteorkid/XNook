@@ -56,7 +56,7 @@ final class NotchWindow: NSPanel {
         )
 
         isFloatingPanel = true
-        level = .statusBar + 1
+        level = .statusBar + 2
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false

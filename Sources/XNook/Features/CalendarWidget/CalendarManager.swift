@@ -14,6 +14,8 @@ final class CalendarManager: ObservableObject {
     // MARK: - Private Properties
 
     private let eventStore = EKEventStore()
+    private var displayedDate = Date()
+    private var hasInitializedCalendarSelection = false
 
     // MARK: - Init
 
@@ -36,19 +38,48 @@ final class CalendarManager: ObservableObject {
 
         if hasAccess {
             loadCalendars()
-            loadUpcomingEvents()
+            loadEvents(for: displayedDate)
         }
     }
 
     func loadCalendars() {
         calendars = eventStore.calendars(for: .event)
+        let availableIdentifiers = Set(calendars.map(\.calendarIdentifier))
+        if hasInitializedCalendarSelection {
+            selectedCalendars.formIntersection(availableIdentifiers)
+        } else {
+            selectedCalendars = availableIdentifiers
+            hasInitializedCalendarSelection = true
+        }
     }
 
-    func loadUpcomingEvents() {
-        let startDate = Date()
-        let endDate = Calendar.current.date(byAdding: .day, value: 7, to: startDate)!
+    static func eventInterval(
+        for date: Date,
+        calendar: Calendar = .current
+    ) -> DateInterval? {
+        calendar.dateInterval(of: .day, for: date)
+    }
 
-        let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
+    func loadEvents(for date: Date) {
+        displayedDate = date
+        guard let interval = Self.eventInterval(for: date) else {
+            upcomingEvents = []
+            return
+        }
+
+        let selected = calendars.filter {
+            selectedCalendars.contains($0.calendarIdentifier)
+        }
+        guard !selected.isEmpty else {
+            upcomingEvents = []
+            return
+        }
+
+        let predicate = eventStore.predicateForEvents(
+            withStart: interval.start,
+            end: interval.end,
+            calendars: selected
+        )
         upcomingEvents = eventStore.events(matching: predicate).sorted(by: { $0.startDate < $1.startDate })
     }
 
@@ -58,7 +89,7 @@ final class CalendarManager: ObservableObject {
         } else {
             selectedCalendars.insert(calendar.calendarIdentifier)
         }
-        loadUpcomingEvents()
+        loadEvents(for: displayedDate)
     }
 
     func createEvent(title: String, startDate: Date, endDate: Date) {
@@ -70,7 +101,7 @@ final class CalendarManager: ObservableObject {
 
         do {
             try eventStore.save(event, span: .thisEvent)
-            loadUpcomingEvents()
+            loadEvents(for: displayedDate)
         } catch {
             print("Failed to create event: \(error)")
         }
@@ -79,7 +110,7 @@ final class CalendarManager: ObservableObject {
     func deleteEvent(_ event: EKEvent) {
         do {
             try eventStore.remove(event, span: .thisEvent)
-            loadUpcomingEvents()
+            loadEvents(for: displayedDate)
         } catch {
             print("Failed to delete event: \(error)")
         }

@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "XNook",
             path: "Sources/XNook"
+        ),
+        .testTarget(
+            name: "XNookTests",
+            dependencies: ["XNook"],
+            path: "Tests/XNookTests"
         )
     ]
 )

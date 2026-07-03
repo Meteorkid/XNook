@@ -75,7 +75,7 @@ enum IslandStyle {
 
     /// 阴影
     static func shadowColor(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? .white : .black
+        scheme == .dark ? .clear : .black
     }
 
     static func shadowOpacity(for scheme: ColorScheme) -> CGFloat {

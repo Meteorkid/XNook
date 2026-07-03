@@ -6,8 +6,9 @@ struct MusicVisualizerView: View {
     var barCount: Int = 4
     var barColor: Color = .white
 
-    @State private var phases: [Double] = Array(repeating: 0, count: 4)
+    @State private var phases: [Double] = []
     @State private var animationTimer: Timer?
+    @State private var timerID = UUID()
 
     var body: some View {
         HStack(spacing: 2) {
@@ -19,6 +20,7 @@ struct MusicVisualizerView: View {
         }
         .frame(height: 14)
         .onAppear {
+            phases = Array(repeating: 0, count: barCount)
             if isPlaying { startAnimation() }
         }
         .onChange(of: isPlaying) { _, playing in
@@ -42,6 +44,7 @@ struct MusicVisualizerView: View {
 
     private func startAnimation() {
         stopAnimation()  // 先停止旧的 Timer
+        timerID = UUID()  // 生成新的 ID，旧 Timer 自动失效
 
         // 为每个 bar 设置不同的频率和相位，制造不规则跳动
         for i in 0..<barCount {
@@ -51,9 +54,10 @@ struct MusicVisualizerView: View {
             }
         }
 
-        // 用 Timer 驱动持续动画（struct 用 [self] 值拷贝，非循环引用）
+        // 用 Timer 驱动持续动画，通过 timerID 验证是否当前有效
+        let currentID = timerID
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [self] timer in
-            guard self.isPlaying else {
+            guard timerID == currentID else {
                 timer.invalidate()
                 return
             }

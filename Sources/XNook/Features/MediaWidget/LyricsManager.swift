@@ -9,6 +9,10 @@ final class LyricsManager: ObservableObject {
     private var lyrics: [LrcLine] = []
     private var currentTitle = ""
     private var currentArtist = ""
+    /// 代际标识：每次切歌递增，防止旧异步请求覆盖新状态
+    private var fetchGeneration: Int = 0
+    /// 当前歌词请求任务，用于取消旧请求
+    private var fetchTask: Task<Void, Never>?
 
     // MARK: - LRC 解析
 
@@ -36,37 +40,43 @@ final class LyricsManager: ObservableObject {
 
     // MARK: - 获取歌词
 
-    func fetchLyrics(title: String, artist: String) {
+    func fetchLyrics(title: String, artist: String, duration: TimeInterval? = nil) {
+        // 检查歌词功能是否开启（默认关闭，保护隐私）
+        let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
+        guard lyricsEnabled else {
+            lyrics = []
+            currentLine = ""
+            return
+        }
+
         guard !title.isEmpty, title != currentTitle || artist != currentArtist else { return }
         currentTitle = title
         currentArtist = artist
         lyrics = []
         currentLine = ""
         isFetching = true
+        fetchGeneration += 1  // 递增代际标识
+        let generation = fetchGeneration  // 捕获当前代际
 
-        // 使用 URLComponents 构建请求（Foundation 会正确处理 URL 编码）
-        var components = URLComponents(string: "https://lrclib.net/api/get")!
-        components.queryItems = [
-            URLQueryItem(name: "track_name", value: title),
-            URLQueryItem(name: "artist_name", value: artist)
-        ]
-        guard let url = components.url else {
-            isFetching = false
-            return
-        }
+        // 取消旧的歌词请求
+        fetchTask?.cancel()
 
-        var request = URLRequest(url: url)
-        request.setValue("XNook/1.0 (macOS Dynamic Island tool center)", forHTTPHeaderField: "User-Agent")
-
-        Task {
+        fetchTask = Task {
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                    await MainActor.run { self.isFetching = false }
+                guard let decoded = try await Self.fetchResponse(
+                    title: title,
+                    artist: artist,
+                    duration: duration
+                ) else {
+                    // 代际不匹配时不要修改状态
+                    if generation == self.fetchGeneration {
+                        self.isFetching = false
+                    }
                     return
                 }
 
-                let decoded = try JSONDecoder().decode(LrcResponse.self, from: data)
+                // 代际检查：如果切歌了，丢弃本次结果
+                guard generation == self.fetchGeneration else { return }
                 if let synced = decoded.syncedLyrics, !synced.isEmpty {
                     self.lyrics = Self.parseLrc(synced)
                 } else if let plain = decoded.plainLyrics, !plain.isEmpty {
@@ -77,15 +87,122 @@ final class LyricsManager: ObservableObject {
                 }
                 self.isFetching = false
             } catch {
-                await MainActor.run { self.isFetching = false }
+                if generation == self.fetchGeneration {
+                    self.isFetching = false
+                }
             }
         }
+    }
+
+    static func bestSearchResult(
+        from candidates: [LrcResponse],
+        title: String,
+        artist: String,
+        duration: TimeInterval?
+    ) -> LrcResponse? {
+        let normalizedTitle = normalize(title)
+        let normalizedArtist = normalize(artist)
+
+        return candidates
+            .filter { candidate in
+                guard candidate.hasLyrics else { return false }
+                let candidateTitle = normalize(candidate.trackName ?? "")
+                let candidateArtist = normalize(candidate.artistName ?? "")
+                let titleMatches = candidateTitle == normalizedTitle
+                    || candidateTitle.contains(normalizedTitle)
+                    || normalizedTitle.contains(candidateTitle)
+                let artistMatches = normalizedArtist.isEmpty
+                    || candidateArtist.contains(normalizedArtist)
+                    || normalizedArtist.contains(candidateArtist)
+                return titleMatches && artistMatches
+            }
+            .max { lhs, rhs in
+                searchScore(lhs, duration: duration) < searchScore(rhs, duration: duration)
+            }
+    }
+
+    private static func fetchResponse(
+        title: String,
+        artist: String,
+        duration: TimeInterval?
+    ) async throws -> LrcResponse? {
+        try Task.checkCancellation()
+
+        guard let exactURL = lyricsURL(path: "get", title: title, artist: artist) else {
+            return nil
+        }
+        let (exactData, exactResponse) = try await URLSession.shared.data(for: request(for: exactURL))
+        try Task.checkCancellation()
+        guard let exactHTTP = exactResponse as? HTTPURLResponse else { return nil }
+
+        if exactHTTP.statusCode == 200 {
+            return try JSONDecoder().decode(LrcResponse.self, from: exactData)
+        }
+        guard exactHTTP.statusCode == 404,
+              let searchURL = lyricsURL(path: "search", title: title, artist: artist) else {
+            return nil
+        }
+
+        try Task.checkCancellation()
+        let (searchData, searchResponse) = try await URLSession.shared.data(for: request(for: searchURL))
+        try Task.checkCancellation()
+        guard let searchHTTP = searchResponse as? HTTPURLResponse,
+              searchHTTP.statusCode == 200 else {
+            return nil
+        }
+        let candidates = try JSONDecoder().decode([LrcResponse].self, from: searchData)
+        return bestSearchResult(
+            from: candidates,
+            title: title,
+            artist: artist,
+            duration: duration
+        )
+    }
+
+    private static func lyricsURL(path: String, title: String, artist: String) -> URL? {
+        var components = URLComponents(string: "https://lrclib.net/api/\(path)")
+        components?.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist),
+        ]
+        return components?.url
+    }
+
+    private static func request(for url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("XNook/1.0 (macOS Dynamic Island tool center)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
+        return request
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value.lowercased().unicodeScalars
+            .filter(CharacterSet.alphanumerics.contains)
+            .map(String.init)
+            .joined()
+    }
+
+    private static func searchScore(
+        _ candidate: LrcResponse,
+        duration: TimeInterval?
+    ) -> Double {
+        var score = candidate.syncedLyrics?.isEmpty == false ? 100.0 : 0.0
+        if let duration, let candidateDuration = candidate.duration {
+            score += max(0, 60 - abs(candidateDuration - duration))
+        }
+        return score
     }
 
     // MARK: - 更新当前行
 
     func updateCurrentLine(elapsedTime: TimeInterval) {
         guard !lyrics.isEmpty else {
+            currentLine = ""
+            return
+        }
+
+        // 前奏阶段：早于第一句歌词时不显示
+        guard elapsedTime >= lyrics[0].time else {
             currentLine = ""
             return
         }
@@ -105,16 +222,26 @@ final class LyricsManager: ObservableObject {
 
     /// 重置（切歌时调用）
     func reset() {
+        fetchTask?.cancel()
         lyrics = []
         currentLine = ""
         currentTitle = ""
         currentArtist = ""
+        isFetching = false
+        fetchGeneration += 1  // 使旧的异步请求失效
     }
 }
 
 // MARK: - LRCLIB API Response
 
-private struct LrcResponse: Codable {
+struct LrcResponse: Codable {
+    let trackName: String?
+    let artistName: String?
+    let duration: TimeInterval?
     let syncedLyrics: String?
     let plainLyrics: String?
+
+    var hasLyrics: Bool {
+        syncedLyrics?.isEmpty == false || plainLyrics?.isEmpty == false
+    }
 }

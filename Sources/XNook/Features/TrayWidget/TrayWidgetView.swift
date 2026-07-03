@@ -4,6 +4,18 @@ import UniformTypeIdentifiers
 /// 文件托盘 Widget 视图
 struct TrayWidgetView: View {
     @ObservedObject var trayManager: TrayManager
+    @State private var showAllFiles = false
+
+    /// 当前显示的文件列表
+    private var displayFiles: ArraySlice<TrayManager.TrayFile> {
+        let maxVisible = showAllFiles ? trayManager.files.count : min(trayManager.files.count, 4)
+        return trayManager.files.prefix(maxVisible)
+    }
+
+    /// 是否有更多文件未显示
+    private var hasMoreFiles: Bool {
+        trayManager.files.count > 4 && !showAllFiles
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -38,10 +50,43 @@ struct TrayWidgetView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             } else {
-                // 文件列表
-                VStack(spacing: 4) {
-                    ForEach(trayManager.files.prefix(4)) { file in
-                        fileRow(file: file)
+                // 文件列表（可滚动）
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 4) {
+                        ForEach(displayFiles) { file in
+                            fileRow(file: file)
+                        }
+
+                        // 显示更多 / 收起按钮
+                        if hasMoreFiles {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { showAllFiles = true }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    Text(L10n.showAllFiles(trayManager.files.count - 4))
+                                        .font(.system(size: 8))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if showAllFiles && trayManager.files.count > 4 {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { showAllFiles = false }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    Text(L10n.collapseFiles)
+                                        .font(.system(size: 8))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
@@ -49,6 +94,10 @@ struct TrayWidgetView: View {
         .onDrop(of: [.fileURL], isTargeted: $trayManager.isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(trayManager.isDropTargeted ? Color.green.opacity(0.6) : Color.clear, lineWidth: 2)
+        )
     }
 
     // MARK: - 文件行
@@ -78,33 +127,67 @@ struct TrayWidgetView: View {
 
             Spacer()
 
+            // 删除按钮
+            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { trayManager.removeFile(file) } }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.removeFile)
+
+            // 打开按钮
             Button(action: { trayManager.openFile(file) }) {
                 Image(systemName: "arrow.up.right.circle.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.openFile)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(Color.secondary.opacity(0.05))
         .cornerRadius(6)
+        .contentShape(Rectangle())
+        .contextMenu { fileContextMenu(file: file) }
         .onTapGesture { trayManager.openFile(file) }
+        .onDrag { provider(for: file) }
+    }
+
+    // MARK: - 拖出文件（复制）
+
+    private func provider(for file: TrayManager.TrayFile) -> NSItemProvider {
+        let provider = NSItemProvider()
+        guard let result = file.resolveURL() else { return provider }
+        // 直接注册 URL：Finder 和其他应用通过系统 pasteboard 复制文件
+        provider.registerObject(result.url as NSURL, visibility: .all)
+        return provider
+    }
+
+    // MARK: - 右键菜单
+
+    @ViewBuilder
+    private func fileContextMenu(file: TrayManager.TrayFile) -> some View {
+        Button(L10n.openFile) { trayManager.openFile(file) }
+        Button(L10n.revealInFinder) { trayManager.revealInFinder(file) }
+        Button(L10n.copyToClipboard) { trayManager.copyToClipboard(file) }
+        Divider()
+        Button(L10n.removeFile) { withAnimation { trayManager.removeFile(file) } }
     }
 
     // MARK: - 处理拖放
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        var accepted = false
         for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                    guard let data = item as? Data,
-                          let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-                    DispatchQueue.main.async { trayManager.addFile(from: url) }
-                }
+            provider.loadObject(ofClass: NSURL.self) { reading, _ in
+                guard let nsurl = reading as? NSURL else { return }
+                DispatchQueue.main.async { trayManager.addFile(from: nsurl as URL) }
             }
+            accepted = true
         }
-        return true
+        return accepted
     }
 }
 

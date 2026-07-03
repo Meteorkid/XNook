@@ -402,6 +402,11 @@ struct NotchContentView: View {
         expandedAt = Date()
         calendarRecenterTrigger += 1
 
+        // 同步状态到窗口层
+        if let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow {
+            window.islandState = newState
+        }
+
         // 展开时恢复光标和果冻状态
         if isHoveringPill {
             isHoveringPill = false
@@ -480,8 +485,10 @@ struct NotchContentView: View {
                 guard generation == self.collapseGeneration, self.state == .collapsed else { return }
                 if let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow {
                     window.resizeToFitCollapse(contentWidth: w, contentHeight: h)
+                    window.islandState = self.state
                 }
                 self.collapseAnimating = false
+                NotificationCenter.default.post(name: .islandDidCollapse, object: nil)
             }
         }
 

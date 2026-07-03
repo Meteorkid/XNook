@@ -4,6 +4,7 @@ import SwiftUI
 extension Notification.Name {
     static let xnookShowAboutPane = Notification.Name("xnookShowAboutPane")
     static let xnookScrollDown = Notification.Name("xnookScrollDown")
+    static let islandDidCollapse = Notification.Name("islandDidCollapse")
 }
 
 @MainActor
@@ -81,9 +82,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard url.scheme == "xnook" else { continue }
-            NSApp.activate(ignoringOtherApps: true)
-            notchWindow?.orderFrontRegardless()
+            handleIslandCommand(url)
         }
+    }
+
+    private func handleIslandCommand(_ url: URL) {
+        // 解析路径: xnook://island/show
+        guard url.host == "island",
+              url.pathComponents.contains("show") else { return }
+
+        // 收起内容，重新定位到鼠标屏幕，显示窗口
+        notchWindow?.showAtMouseScreen()
     }
 
     // MARK: - Setup
@@ -98,13 +107,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleScrollEvent(_ event: NSEvent) {
-        guard let window = notchWindow,
-              UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel"),
+        guard let window = notchWindow else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+
+        // 1. 横滑切换手势（仅收起状态响应）
+        if window.islandState == .collapsed {
+            let result = window.swipeRecognizer.handleScroll(event: event)
+            if case .triggered(let direction) = result {
+                AppSwitcher.shared.switchToOtherApp(swipeDirection: direction)
+                return
+            }
+        }
+
+        // 2. 双指下滑展开面板
+        guard UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel"),
               event.hasPreciseScrollingDeltas,
               event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta
         else { return }
 
-        let mouseLocation = NSEvent.mouseLocation
         guard let screen = window.screen else { return }
 
         let screenTop = screen.frame.origin.y + screen.frame.height

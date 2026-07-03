@@ -6,37 +6,43 @@ final class AppSwitcher {
     static let shared = AppSwitcher()
 
     private let xnookBundleID = "com.meteorkid.xnook"
-    private let xislandBundleID = "com.meteorkid.xisland"
+    private let xislandBundleID = "dev.xisland.app"
 
     /// 切换到另一个应用
-    func switchToOtherApp() {
+    func switchToOtherApp(swipeDirection: SwipeDirection? = nil) {
         let currentAppBundleID = Bundle.main.bundleIdentifier
+        let targetScheme = currentAppBundleID == xnookBundleID ? "xisland" : "xnook"
 
-        if currentAppBundleID == xnookBundleID {
-            switchToXIsland()
-        } else {
-            switchToXNook()
+        // 通过 URL Scheme 唤醒目标应用
+        guard let url = URL(string: "\(targetScheme)://island/show") else { return }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false  // 不自动激活，让目标自行决定显示方式
+
+        NSWorkspace.shared.open(url, configuration: configuration) { [weak self] _, error in
+            DispatchQueue.main.async {
+                if error != nil {
+                    // 目标不存在或启动失败，保留当前岛
+                    return
+                }
+                // 指令成功交给 Launch Services，隐藏当前窗口
+                self?.hideCurrentIsland()
+            }
         }
     }
 
-    /// 切换到 X Island
-    func switchToXIsland() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: xislandBundleID) else {
-            return
-        }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    /// 隐藏当前岛窗口
+    private func hideCurrentIsland() {
+        guard let appDelegate = AppDelegate.shared,
+              let window = appDelegate.notchWindow else { return }
+        window.orderOut(nil)
     }
 
-    /// 切换到 X Nook
-    func switchToXNook() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: xnookBundleID) else {
-            return
-        }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    /// 在当前岛显示窗口（URL Scheme 收到 show 指令时调用）
+    func showCurrentIsland() {
+        guard let appDelegate = AppDelegate.shared,
+              let window = appDelegate.notchWindow else { return }
+        window.showAtMouseScreen()
     }
 
     /// 检查另一个应用是否在运行

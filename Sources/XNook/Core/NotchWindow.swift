@@ -39,6 +39,11 @@ final class NotchWindow: NSPanel {
     private var lastActiveScreenID: CGDirectDisplayID?
     private var cachedBestScreen: NSScreen?
 
+    /// 横滑切换手势识别器
+    let swipeRecognizer = SwipeGestureRecognizer()
+    /// 灵动岛当前状态（由 NotchContentView 同步）
+    var islandState: IslandState = .collapsed
+
     // MARK: - Init
 
     init() {
@@ -101,6 +106,17 @@ final class NotchWindow: NSPanel {
     func showWindow() { orderFrontRegardless() }
     func hideWindow() { orderOut(nil) }
     func toggleVisibility() { isVisible ? hideWindow() : showWindow() }
+
+    /// 在鼠标所在屏幕显示窗口（URL Scheme 唤醒时调用）
+    func showAtMouseScreen() {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) else {
+            orderFrontRegardless()
+            return
+        }
+        repositionOnScreen(mouseScreen)
+        orderFrontRegardless()
+    }
 
     // MARK: - Screen Tracking
 
@@ -392,6 +408,14 @@ final class NotchWindow: NSPanel {
             }
 
         case .scrollWheel:
+            // 横滑切换手势（仅收起状态响应）
+            if islandState == .collapsed {
+                let result = swipeRecognizer.handleScroll(event: event)
+                if case .triggered(let direction) = result {
+                    AppSwitcher.shared.switchToOtherApp(swipeDirection: direction)
+                    return
+                }
+            }
             // 触控板双指下滑展开面板（由 AppDelegate 的全局监听器处理）
             super.sendEvent(event)
 

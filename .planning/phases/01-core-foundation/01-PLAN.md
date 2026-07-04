@@ -68,10 +68,10 @@ autonomous: true
 - Sources/XNook/Core/NotchViewModel.swift
 
 **acceptance_criteria:**
-- AppSwitcher 能通过 URL Scheme（xnook://activate / xisland://activate）切换应用
-- AppSwitcher 能通过 AppleScript 备选方案切换应用
+- AppSwitcher 能通过独立 URL Scheme（xnook://island/show 与 xisland://island/show）切换应用
+- AppSwitcher 通过 DistributedNotificationCenter 协调应用隐藏
 - `isOtherAppRunning()` 正确检测另一个应用是否运行
-- `otherAppName` 返回正确的应用名称
+- `otherIslandNames` 返回其他灵动岛名称列表
 
 **action:**
 1. 在 `AppSwitcher.swift` 中验证 `switchToXIsland()` 和 `switchToXNook()` 方法
@@ -130,7 +130,8 @@ autonomous: true
 **acceptance_criteria:**
 - AppDelegate 正确设置 NotchWindow 和 NotchContentView
 - 菜单栏图标正常显示
-- URL Scheme（xnook://activate）正确处理
+- 独立 URL Scheme（xnook://island/show 与 xisland://island/show）正确处理
+- DistributedNotificationCenter 监听正确注册
 - 应用启动时自动显示 Notch 窗口
 
 **action:**
@@ -167,7 +168,8 @@ autonomous: true
 - [ ] Space 切换正常
 - [ ] 全屏隐藏正常
 - [ ] 菜单栏图标正常
-- [ ] URL Scheme（xnook://activate）正常
+- [ ] 独立 URL Scheme（xnook://island/show 与 xisland://island/show）正常
+- [ ] DistributedNotificationCenter 协调正常
 
 ## must_haves
 

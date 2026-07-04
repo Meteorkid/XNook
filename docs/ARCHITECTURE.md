@@ -230,12 +230,12 @@ XNook/
 
 ```swift
 // 切换机制
-1. URL Scheme: xnook://activate / xisland://activate
-2. AppleScript: tell application "X Island" to activate
+1. URL Scheme: xnook://island/show / xisland://island/show（每个应用独立注册）
+2. DistributedNotificationCenter: island.switch.hide.{targetAppName}（协调隐藏）
 3. 双指滑动手势触发
 
 // 切换流程
-用户双指左滑 → 检测手势 → 调用 AppSwitcher → URL Scheme 通知目标应用 → 目标应用激活
+用户双指左滑 → 检测手势 → 调用 AppSwitcher → URL Scheme 通知目标应用 → 目标应用显示 → 分布式通知来源应用隐藏
 ```
 
 #### 3. Widget 系统

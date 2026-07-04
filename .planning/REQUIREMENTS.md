@@ -13,7 +13,7 @@
 
 ### App Switcher (SWITCH)
 
-- [ ] **SWITCH-01**: 实现 URL Scheme（xnook://activate）接收切换请求
+- [ ] **SWITCH-01**: 实现独立 URL Scheme（xnook://island/show 与 xisland://island/show）接收切换请求
 - [ ] **SWITCH-02**: 实现 AppSwitcher 类，支持切换到 X Island
 - [ ] **SWITCH-03**: 双指滑动手势触发应用切换
 - [ ] **SWITCH-04**: 切换时显示过渡动画

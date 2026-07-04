@@ -371,6 +371,9 @@ struct NotchContentView: View {
                   Date().timeIntervalSince(expandedAt) > cooldown else { return }
             expand(to: .expanded)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookCollapse)) { _ in
+            collapse()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             // UserDefaults 变更时更新窗口大小
             if state == .collapsed {

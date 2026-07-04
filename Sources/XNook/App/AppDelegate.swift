@@ -4,8 +4,13 @@ import SwiftUI
 extension Notification.Name {
     static let xnookShowAboutPane = Notification.Name("xnookShowAboutPane")
     static let xnookScrollDown = Notification.Name("xnookScrollDown")
+    static let xnookCollapse = Notification.Name("xnookCollapse")
     static let islandDidCollapse = Notification.Name("islandDidCollapse")
 }
+
+/// 跨进程通知前缀：请求目标灵动岛隐藏自身
+/// 完整通知名格式：island.switch.hide.{targetAppName}
+private let hideNotificationPrefix = "island.switch.hide."
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -15,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var scrollMonitor: Any?
+    private var islandHideObserver: NSObjectProtocol?
 
     /// 悬停自动展开是否关闭
     private var hoverToExpandDisabled: Bool {
@@ -67,6 +73,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBarItem()
         setupScrollMonitor()
 
+        // 监听跨进程通知：对方应用请求本应用隐藏
+        // 通知名格式：island.switch.hide.{targetAppName}
+        if let appName = AppSwitcher.shared.currentAppName {
+            let hideNotification = "\(hideNotificationPrefix)\(appName)"
+            islandHideObserver = DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name(hideNotification),
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.hideIslandForSwitch()
+                }
+            }
+        }
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(openPreferencesFromNotification),
@@ -81,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard url.scheme == "xnook" else { continue }
+            guard url.scheme == AppSwitcher.shared.currentURLScheme else { continue }
             handleIslandCommand(url)
         }
     }
@@ -89,10 +110,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleIslandCommand(_ url: URL) {
         // 解析路径: xnook://island/show
         guard url.host == "island",
-              url.pathComponents.contains("show") else { return }
+              url.pathComponents.contains("show"),
+              let window = notchWindow else { return }
 
-        // 收起内容，重新定位到鼠标屏幕，显示窗口
-        notchWindow?.showAtMouseScreen()
+        // 立即设置切换标志（同步），防止 activeSpaceDidChange 重新显示窗口
+        window.isHiddenByIslandSwitch = false
+        window.isSwitchingApps = true
+        window.swipeRecognizer.suppress(for: 0.8)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            window.isSwitchingApps = false
+        }
+
+        // 先收起并显示自身，确认接管后再请求来源岛隐藏
+        NotificationCenter.default.post(name: .xnookCollapse, object: nil)
+        window.showAtMouseScreen()
+
+        // 发送跨进程通知让来源岛隐藏
+        // 需要找到来源岛的应用名
+        if let sourceAppName = AppSwitcher.shared.otherIslandNames.first {
+            let hideNotification = "\(hideNotificationPrefix)\(sourceAppName)"
+            postHideNotification(hideNotification)
+        }
+    }
+
+    private func hideIslandForSwitch() {
+        guard let window = notchWindow else { return }
+        window.isHiddenByIslandSwitch = true
+        window.isSwitchingApps = true
+        window.orderOut(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            window.isSwitchingApps = false
+        }
     }
 
     // MARK: - Setup
@@ -111,13 +159,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let mouseLocation = NSEvent.mouseLocation
 
-        // 1. 横滑切换手势（仅收起状态响应）
-        if window.islandState == .collapsed {
+        // 1. 横滑切换手势（仅由鼠标下最上层的收起岛响应）
+        if IslandWindowOwnership.canHandleGlobalSwipe(
+            isVisible: window.isVisible,
+            isCollapsed: window.islandState == .collapsed,
+            windowFrame: window.frame,
+            mouseLocation: mouseLocation
+        ) {
             let result = window.swipeRecognizer.handleScroll(event: event)
-            if case .triggered(let direction) = result {
-                AppSwitcher.shared.switchToOtherApp(swipeDirection: direction)
+            if case .triggered(_) = result {
+                guard window.isFrontmostIslandWindow() else {
+                    window.swipeRecognizer.reset()
+                    return
+                }
+                AppSwitcher.shared.switchToNextIsland()
                 return
             }
+        } else {
+            window.swipeRecognizer.reset()
         }
 
         // 2. 双指下滑展开面板
@@ -186,12 +245,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleNotch() {
         if let w = notchWindow {
-            w.isVisible ? w.orderOut(nil) : w.orderFrontRegardless()
+            w.toggleVisibility()
         }
     }
 
     @objc private func showNotch() {
-        notchWindow?.orderFrontRegardless()
+        notchWindow?.showWindow()
     }
 
     @objc func openPreferences() {
@@ -227,10 +286,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let observer = islandHideObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            islandHideObserver = nil
+        }
         if let monitor = scrollMonitor {
             NSEvent.removeMonitor(monitor)
             scrollMonitor = nil
         }
+    }
+
+    private func postHideNotification(_ name: String) {
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name(name),
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
     }
 }
 

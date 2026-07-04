@@ -26,7 +26,7 @@
 - CORE-04: 支持多显示器，窗口跟随鼠标所在屏幕
 - CORE-05: 支持 Space 切换，在所有 Space 可见
 - CORE-06: 支持全屏适配，全屏时自动隐藏
-- SWITCH-01: 实现 URL Scheme（xnook://activate）接收切换请求
+- SWITCH-01: 实现独立 URL Scheme（xnook://island/show 与 xisland://island/show）接收切换请求
 - SWITCH-02: 实现 AppSwitcher 类，支持切换到 X Island
 - SWITCH-03: 双指滑动手势触发应用切换
 - SWITCH-04: 切换时显示过渡动画

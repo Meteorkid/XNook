@@ -40,6 +40,8 @@ final class CalendarManager: ObservableObject {
             loadCalendars()
             loadEvents(for: displayedDate)
         }
+
+        CalendarReminderManager.shared.refreshAuthorization()
     }
 
     func loadCalendars() {

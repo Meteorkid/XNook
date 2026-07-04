@@ -53,9 +53,9 @@ struct NotchContentView: View {
         return NSCursor(image: image, hotSpot: .zero)
     }()
 
-    @AppStorage("panelWidth") private var panelWidth = 420.0
-    @AppStorage("panelMaxHeight") private var panelMaxHeight = 480.0
-    @AppStorage("jellyIntensity") private var jellyIntensity = "medium"
+    @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
+    @AppStorage("panelMaxHeight") private var panelMaxHeight = SettingsDefaults.double(for: "panelMaxHeight")
+    @AppStorage("jellyIntensity") private var jellyIntensity = SettingsDefaults.string(for: "jellyIntensity", fallback: "medium")
 
     /// 根据强度设置返回果冻缩放值
     private var jellyScale: (xPop: CGFloat, xSettle: CGFloat, yPop: CGFloat, ySettle: CGFloat) {
@@ -65,13 +65,13 @@ struct NotchContentView: View {
         default:       return (0.94, 0.98, 1.25, 1.08) // medium
         }
     }
-    @AppStorage("expandedInactivityAutoHideDelay") private var expandedInactivityAutoHideDelay = 10.0
-    @AppStorage("hoverExitCollapseDelay") private var hoverExitCollapseDelay = 0.5
-    @AppStorage("hoverToExpandPanel") private var hoverToExpandPanel = true
-    @AppStorage("reduceMotion") private var reduceMotion = false
-    @AppStorage("showTickerLine") private var showTickerLine = true
-    @AppStorage("showLyrics") private var showLyrics = false
-    @AppStorage("tickerSpeed") private var tickerSpeed = 25.0
+    @AppStorage("expandedInactivityAutoHideDelay") private var expandedInactivityAutoHideDelay = SettingsDefaults.double(for: "expandedInactivityAutoHideDelay")
+    @AppStorage("hoverExitCollapseDelay") private var hoverExitCollapseDelay = SettingsDefaults.double(for: "hoverExitCollapseDelay")
+    @AppStorage("hoverToExpandPanel") private var hoverToExpandPanel = SettingsDefaults.bool(for: "hoverToExpandPanel")
+    @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
+    @AppStorage("showTickerLine") private var showTickerLine = SettingsDefaults.bool(for: "showTickerLine", fallback: true)
+    @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
+    @AppStorage("tickerSpeed") private var tickerSpeed = SettingsDefaults.double(for: "tickerSpeed")
     @State private var cachedGifData: Data?
     @State private var islandObscuredByNotch = false
 

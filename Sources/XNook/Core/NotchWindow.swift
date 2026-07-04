@@ -109,6 +109,9 @@ final class NotchWindow: NSPanel {
 
     func showWindow() {
         isHiddenByIslandSwitch = false
+        if let currentIsland = AppSwitcher.shared.currentIsland {
+            IslandIntegrationSettings.markVisible(currentIsland)
+        }
         orderFrontRegardless()
     }
     func hideWindow() { orderOut(nil) }
@@ -117,6 +120,9 @@ final class NotchWindow: NSPanel {
     /// 在鼠标所在屏幕显示窗口（URL Scheme 唤醒时调用）
     func showAtMouseScreen() {
         isHiddenByIslandSwitch = false
+        if let currentIsland = AppSwitcher.shared.currentIsland {
+            IslandIntegrationSettings.markVisible(currentIsland)
+        }
         let mouseLocation = NSEvent.mouseLocation
         guard let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) else {
             orderFrontRegardless()

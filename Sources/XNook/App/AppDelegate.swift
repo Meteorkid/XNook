@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static private(set) weak var shared: AppDelegate?
 
     var notchWindow: NotchWindow?
+    let themeManager = ThemeManager()
+    let updateManager = UpdateManager()
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var scrollMonitor: Any?
@@ -47,27 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // 注册默认设置
-        UserDefaults.standard.register(defaults: [
-            "showOnAllSpaces": true,
-            "hideInFullscreen": true,
-            "expandedInactivityAutoHideDelay": 1.0,
-            "hoverExitCollapseDelay": 0.2,
-            "panelWidth": 800.0,
-            "panelMaxHeight": 200.0,
-            "islandWidth": 253.0,
-            "islandHeight": 40.0,
-            "islandWidthWithLyrics": 263.0,
-            "islandHeightWithLyrics": 36.0,
-            "hoverToExpandPanel": false,
-            "scrollDownToExpandPanel": true,
-            "reduceMotion": false,
-            "jellyIntensity": "medium",
-            "launchAtLogin": false,
-            "showTickerLine": true,
-            "showLyrics": true,
-            "tickerSpeed": 25.0,
-        ])
+        SettingsDefaults.register()
+        IslandIntegrationSettings.registerDefaults()
+        CalendarReminderManager.shared.startMonitoring()
 
         setupNotchWindow()
         setupMenuBarItem()
@@ -94,6 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: .xnookShowAboutPane,
             object: nil
         )
+
+        scheduleInitialVisibilityResolution()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -160,7 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mouseLocation = NSEvent.mouseLocation
 
         // 1. 横滑切换手势（仅由鼠标下最上层的收起岛响应）
-        if IslandWindowOwnership.canHandleGlobalSwipe(
+        if IslandIntegrationSettings.isSwipeSwitchEnabled,
+           IslandWindowOwnership.canHandleGlobalSwipe(
             isVisible: window.isVisible,
             isCollapsed: window.islandState == .collapsed,
             windowFrame: window.frame,
@@ -217,7 +204,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         window.contentView?.addSubview(hostView)
         notchWindow = window
-        window.orderFrontRegardless()
+        themeManager.onSchemeChange = { [weak self] in
+            guard let self else { return }
+            if let notchWindow = self.notchWindow {
+                self.updateWindowAppearance(notchWindow)
+            }
+            if let settingsWindow = self.settingsWindow {
+                self.updateWindowAppearance(settingsWindow)
+            }
+        }
+        updateWindowAppearance(window)
+        themeManager.startObservingSystemAppearance()
     }
 
     private func setupMenuBarItem() {
@@ -245,12 +242,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleNotch() {
         if let w = notchWindow {
-            w.toggleVisibility()
+            if w.isVisible {
+                w.hideWindow()
+            } else {
+                showIsland(preferMouseScreen: false, hidePeers: true)
+            }
         }
     }
 
     @objc private func showNotch() {
-        notchWindow?.showWindow()
+        showIsland(preferMouseScreen: false, hidePeers: true)
     }
 
     @objc func openPreferences() {
@@ -261,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let w = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -271,8 +272,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.title = L10n.xnookSettings
         w.center()
         w.isReleasedWhenClosed = false
-        w.contentView = NSHostingView(rootView: SettingsView())
+        w.contentView = NSHostingView(
+            rootView: SettingsView()
+                .environment(themeManager)
+                .environment(updateManager)
+        )
         settingsWindow = w
+        updateWindowAppearance(w)
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -286,6 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        CalendarReminderManager.shared.stopMonitoring()
         if let observer = islandHideObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
             islandHideObserver = nil
@@ -303,6 +310,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             userInfo: nil,
             deliverImmediately: true
         )
+    }
+
+    func updateWindowAppearance(_ window: NSWindow) {
+        let scheme = themeManager.resolvedScheme
+        window.appearance = scheme == .dark
+            ? NSAppearance(named: .darkAqua)
+            : NSAppearance(named: .aqua)
+    }
+
+    private func scheduleInitialVisibilityResolution() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.resolveInitialIslandVisibility()
+        }
+    }
+
+    private func resolveInitialIslandVisibility() {
+        guard let currentIsland = AppSwitcher.shared.currentIsland else {
+            showIsland(preferMouseScreen: false, hidePeers: false)
+            return
+        }
+
+        let otherInstalled = AppSwitcher.shared.otherIslandNames.contains { AppSwitcher.shared.isIslandInstalled(named: $0) }
+        let preferredIsland = IslandIntegrationSettings.preferredStartupIsland(
+            currentApp: currentIsland,
+            otherAppInstalled: otherInstalled
+        )
+        let preferredRunning = AppSwitcher.shared.isIslandRunning(named: preferredIsland.rawValue)
+        let shouldShow = IslandIntegrationSettings.shouldShowOnLaunch(
+            currentApp: currentIsland,
+            preferredApp: preferredIsland,
+            preferredAppRunning: preferredRunning
+        )
+
+        guard shouldShow else { return }
+
+        showIsland(preferMouseScreen: false, hidePeers: preferredIsland == currentIsland)
+    }
+
+    private func showIsland(preferMouseScreen: Bool, hidePeers: Bool) {
+        guard let window = notchWindow else { return }
+
+        if preferMouseScreen {
+            window.showAtMouseScreen()
+        } else {
+            window.showWindow()
+        }
+
+        guard hidePeers else { return }
+        requestOtherIslandsToHide()
+    }
+
+    private func requestOtherIslandsToHide() {
+        for otherIslandName in AppSwitcher.shared.otherIslandNames {
+            let hideNotification = "\(hideNotificationPrefix)\(otherIslandName)"
+            postHideNotification(hideNotification)
+        }
     }
 }
 

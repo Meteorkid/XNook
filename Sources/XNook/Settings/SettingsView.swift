@@ -522,6 +522,22 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     dividerLine
+                    settingRow(L10n.autoCheckForUpdates, id: "autoCheckForUpdates",
+                              description: L10n.autoCheckForUpdatesDesc) {
+                        Toggle("", isOn: Binding(
+                            get: { updateManager.autoCheckForUpdates },
+                            set: { newValue in
+                                updateManager.autoCheckForUpdates = newValue
+                                if newValue {
+                                    updateManager.startAutoCheck()
+                                } else {
+                                    updateManager.stopAutoCheck()
+                                }
+                            }
+                        ))
+                        .toggleStyle(.switch)
+                    }
+                    dividerLine
                     settingRow(L10n.checkForUpdates, id: "checkForUpdates",
                               description: L10n.checkForUpdatesDesc) {
                         Button(updateCheckButtonTitle) {

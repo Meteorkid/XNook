@@ -80,6 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         scheduleInitialVisibilityResolution()
+
+        // 启动自动检查更新
+        updateManager.startAutoCheck()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

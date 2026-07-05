@@ -233,6 +233,13 @@ enum L10n {
     static var checkForUpdatesDesc: String { localized(
         zh: "从 GitHub 查询 X Nook 的最新发布版本。",
         en: "Query GitHub for the latest X Nook release.") }
+    static var autoCheckForUpdates: String { localized(zh: "自动检查更新", en: "Auto check for updates") }
+    static var autoCheckForUpdatesDesc: String { localized(
+        zh: "启动应用时自动检查是否有新版本。",
+        en: automaticallyCheckForUpdatesDescription) }
+    private static var automaticallyCheckForUpdatesDescription: String {
+        localized(zh: "启动应用时自动检查是否有新版本。", en: "Automatically check for new versions when the app starts.")
+    }
     static var openLatestRelease: String { localized(zh: "打开发布页", en: "Open release page") }
     static var openLatestReleaseDesc: String { localized(
         zh: "在浏览器中打开最新发布页，下载或查看更新说明。",

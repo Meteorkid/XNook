@@ -60,10 +60,46 @@ final class UpdateManager {
     var latestRelease: ReleaseInfo?
     var lastCheckedAt: Date?
 
+    /// 是否开启自动检查更新
+    var autoCheckForUpdates: Bool {
+        get { UserDefaults.standard.bool(forKey: "autoCheckForUpdates") }
+        set { UserDefaults.standard.set(newValue, forKey: "autoCheckForUpdates") }
+    }
+
     @ObservationIgnored private let fetchReleaseData: ReleaseFetcher
+    @ObservationIgnored private var autoCheckTimer: Timer?
 
     init(fetchReleaseData: @escaping ReleaseFetcher = UpdateManager.fetchLatestReleaseData) {
         self.fetchReleaseData = fetchReleaseData
+        // 注册默认设置
+        UserDefaults.standard.register(defaults: [
+            "autoCheckForUpdates": true
+        ])
+    }
+
+    /// 启动自动检查更新（应用启动时调用）
+    func startAutoCheck() {
+        stopAutoCheck()
+        guard autoCheckForUpdates else { return }
+
+        // 启动时立即检查一次
+        Task { @MainActor in
+            await checkForUpdates()
+        }
+
+        // 每 24 小时检查一次
+        autoCheckTimer = Timer.scheduledTimer(withTimeInterval: 86400, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.autoCheckForUpdates else { return }
+                await self.checkForUpdates()
+            }
+        }
+    }
+
+    /// 停止自动检查
+    func stopAutoCheck() {
+        autoCheckTimer?.invalidate()
+        autoCheckTimer = nil
     }
 
     var currentVersion: String {

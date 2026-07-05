@@ -10,7 +10,9 @@ final class TrayManager: ObservableObject {
     @Published var isDropTargeted = false
 
     private static var storageURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            fatalError("[XNook] Unable to locate application support directory")
+        }
         return appSupport.appendingPathComponent("XNook/tray_files.json")
     }
 

@@ -21,10 +21,18 @@ final class MediaManager: ObservableObject {
     @Published var elapsedTime: TimeInterval = 0
     @Published var isAvailable = false
 
-    /// 按需从 Data 创建 NSImage，避免同时持有两份图像数据
+    /// 缓存的 NSImage 实例，仅在 currentArtworkData 变化时重建
+    private var cachedArtworkImage: NSImage?
+    private var cachedArtworkDataHash: Int = 0
+
+    /// 获取封面 NSImage（带缓存，避免每次访问都从 Data 重建）
     var currentArtwork: NSImage? {
-        guard let data = currentArtworkData, !data.isEmpty else { return nil }
-        return NSImage(data: data)
+        let dataHash = currentArtworkData.map { $0.hashValue } ?? 0
+        if dataHash != cachedArtworkDataHash {
+            cachedArtworkDataHash = dataHash
+            cachedArtworkImage = currentArtworkData.flatMap { NSImage(data: $0) }
+        }
+        return cachedArtworkImage
     }
 
     /// 歌词管理器
@@ -82,7 +90,6 @@ final class MediaManager: ObservableObject {
 
     private func startTimers() {
         // 慢速轮询：拉取 ScriptingBridge（歌曲信息 + 封面 + 位置校准）
-        // 有播放器时 1s，无播放器时 5s，减少不必要的 IPC 开销
         infoTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -90,24 +97,44 @@ final class MediaManager: ObservableObject {
             }
         }
         // 快速轮询：0.05s 本地计时，更新歌词（无 IPC 开销）
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                let now = Date()
-                if self.isPlaying {
-                    // 播放中：根据 playbackRate 推算进度
-                    let delta = now.timeIntervalSince(self.lastSyncTime) * self.playbackRate
-                    self.elapsedTime = self.syncedElapsedTime + delta
-                } else {
-                    // 暂停中：保持 elapsedTime 在同步点，不推进
-                    self.elapsedTime = self.syncedElapsedTime
+        // 仅在有播放内容时启动，节省 CPU 和电量
+        startProgressTimerIfNeeded()
+    }
+
+    /// 根据当前播放状态决定是否启动/停止 progressTimer
+    private func startProgressTimerIfNeeded() {
+        let hasContent = !currentTitle.isEmpty || !currentArtist.isEmpty
+        let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
+        let needsTimer = isPlaying || (hasContent && lyricsEnabled && !lyricsManager.currentLine.isEmpty)
+
+        if needsTimer && progressTimer == nil {
+            progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    let now = Date()
+                    if self.isPlaying {
+                        let delta = now.timeIntervalSince(self.lastSyncTime) * self.playbackRate
+                        self.elapsedTime = self.syncedElapsedTime + delta
+                    } else {
+                        self.elapsedTime = self.syncedElapsedTime
+                    }
+                    // 仅在有歌词内容时更新歌词行，避免无意义赋值触发重绘
+                    if self.lyricsManager.currentLine != self.currentLyricLine {
+                        self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
+                        self.currentLyricLine = self.lyricsManager.currentLine
+                    }
                 }
-                // 始终更新歌词当前行
-                self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
-                // 同步到 @Published 属性，触发 SwiftUI 重绘
-                self.currentLyricLine = self.lyricsManager.currentLine
             }
+        } else if !needsTimer && progressTimer != nil {
+            progressTimer?.invalidate()
+            progressTimer = nil
         }
+    }
+
+    /// 停止 progressTimer（用于无播放内容时彻底停止）
+    private func stopProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
     }
 
     // MARK: - 通知注册
@@ -222,6 +249,9 @@ final class MediaManager: ObservableObject {
 
                 // 更新歌词当前行
                 self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
+
+                // 根据当前状态决定是否需要 progressTimer
+                self.startProgressTimerIfNeeded()
             }
         }
     }
@@ -245,6 +275,7 @@ final class MediaManager: ObservableObject {
                     self.lastSyncTime = Date()
                     self.elapsedTime = pos
                 }
+                self.startProgressTimerIfNeeded()
             }
         }
     }
@@ -255,18 +286,21 @@ final class MediaManager: ObservableObject {
         MediaRemoteBridge.sendCommand(.play)
         isPlaying = true
         userActionDeadline = Date().addingTimeInterval(2.0) // 2s 保护期
+        startProgressTimerIfNeeded()
     }
 
     func pause() {
         MediaRemoteBridge.sendCommand(.pause)
         isPlaying = false
         userActionDeadline = Date().addingTimeInterval(2.0)
+        startProgressTimerIfNeeded()
     }
 
     func togglePlayPause() {
         MediaRemoteBridge.sendCommand(.togglePlayPause)
         isPlaying.toggle()
         userActionDeadline = Date().addingTimeInterval(2.0)
+        startProgressTimerIfNeeded()
     }
 
     func nextTrack() {

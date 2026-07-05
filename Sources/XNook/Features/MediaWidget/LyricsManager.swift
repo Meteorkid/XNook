@@ -159,8 +159,10 @@ final class LyricsManager: ObservableObject {
         )
     }
 
+    private static let lyricsAPIBaseURL = "https://lrclib.net/api"
+
     private static func lyricsURL(path: String, title: String, artist: String) -> URL? {
-        var components = URLComponents(string: "https://lrclib.net/api/\(path)")
+        var components = URLComponents(string: "\(lyricsAPIBaseURL)/\(path)")
         components?.queryItems = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist),

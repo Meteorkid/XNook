@@ -96,23 +96,23 @@ struct CalendarWidgetView: View {
     private static let monthFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "M"
+        f.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
         return f
     }()
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
+        f.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
         return f
     }()
 
     private func monthString(for date: Date) -> String {
-        Self.monthFormatter.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
-        return Self.monthFormatter.string(from: date)
+        Self.monthFormatter.string(from: date)
     }
 
     private func timeString(from date: Date) -> String {
-        Self.timeFormatter.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
-        return Self.timeFormatter.string(from: date)
+        Self.timeFormatter.string(from: date)
     }
 }
 

@@ -192,7 +192,7 @@ final class UpdateManager {
                 "/usr/bin/hdiutil",
                 arguments: ["attach", destURL.path, "-nobrowse", "-quiet"]
             )
-            let mountPath = parseMountPath(from: mountOutput)
+            let mountPath = try parseMountPath(from: mountOutput)
 
             // 验证应用代码签名
             let appSource = mountPath.appendingPathComponent("X Nook.app")
@@ -224,7 +224,7 @@ final class UpdateManager {
             try await workspace.openApplication(at: appDest, configuration: config)
 
             // 退出当前应用
-            NSApp.terminate(self)
+            NSApp.terminate(nil)
 
         } catch {
             state = .failed(message: error.localizedDescription)
@@ -252,13 +252,22 @@ final class UpdateManager {
         return output.components(separatedBy: " ").first ?? ""
     }
 
-    /// 验证代码签名
+    /// 验证代码签名（结构完整性 + 签发身份）
     private func verifyCodeSignature(at appURL: URL) throws {
-        let output = try runCommand(
+        // 第一步：验证签名结构完整性
+        _ = try runCommand(
             "/usr/bin/codesign",
             arguments: ["--verify", "--deep", "--strict", appURL.path]
         )
-        // codesign 在验证成功时返回空输出
+
+        // 第二步：验证签名身份，确保是可信开发者签发
+        let identOutput = try runCommand(
+            "/usr/bin/codesign",
+            arguments: ["-dv", "--verbose=4", appURL.path]
+        )
+        guard identOutput.contains("Identifier=X Nook") || identOutput.contains("Identifier=com.xnook") else {
+            throw UpdateError.verificationFailed("签名身份不匹配：更新包的 Identifier 不是 X Nook。")
+        }
     }
 
     func applyCheckResult(_ release: ReleaseInfo) {
@@ -312,9 +321,10 @@ final class UpdateManager {
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
         try process.run()
         process.waitUntilExit()
@@ -323,11 +333,11 @@ final class UpdateManager {
             throw UpdateError.commandFailed(path: path, status: process.terminationStatus)
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    private func parseMountPath(from output: String) -> URL {
+    private func parseMountPath(from output: String) throws -> URL {
         let lines = output.components(separatedBy: .newlines)
         for line in lines where line.contains("/Volumes/") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -336,16 +346,19 @@ final class UpdateManager {
                 return URL(fileURLWithPath: path)
             }
         }
-        return URL(fileURLWithPath: "/Volumes/X Nook")
+        throw UpdateError.verificationFailed("无法从 hdiutil 输出中解析挂载路径，安装已中止。")
     }
 
     enum UpdateError: LocalizedError {
         case commandFailed(path: String, status: Int32)
+        case verificationFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .commandFailed(let path, let status):
                 return "Command \(path) failed with status \(status)"
+            case .verificationFailed(let reason):
+                return reason
             }
         }
     }

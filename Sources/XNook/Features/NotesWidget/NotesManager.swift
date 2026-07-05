@@ -29,10 +29,17 @@ final class NotesManager: ObservableObject {
         }
     }
 
+    // MARK: - Private Properties
+
+    /// 防抖保存任务，连续编辑时延迟写入磁盘
+    private var debounceSaveTask: Task<Void, Never>?
+
     // MARK: - Storage
 
     private static var storageURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            fatalError("[XNook] Unable to locate application support directory")
+        }
         return appSupport.appendingPathComponent("XNook/notes.json")
     }
 
@@ -71,6 +78,19 @@ final class NotesManager: ObservableObject {
             notes[index] = note
         }
         persist()
+    }
+
+    /// 防抖保存：连续编辑时延迟 0.5s 写入磁盘，避免每次按键都 I/O
+    func saveNoteDebounced(_ note: Note) {
+        debounceSaveTask?.cancel()
+        debounceSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+            guard !Task.isCancelled, let self else { return }
+            if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                self.notes[index] = note
+            }
+            self.persist()
+        }
     }
 
     func deleteNote(_ note: Note) {

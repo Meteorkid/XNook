@@ -12,9 +12,14 @@ extension Notification.Name {
 /// 完整通知名格式：island.switch.hide.{targetAppName}
 private let hideNotificationPrefix = "island.switch.hide."
 
+/// 校验应用名是否安全用于通知名拼接（仅允许字母、数字、连字符、下划线、点）
+private func isValidNotificationAppName(_ name: String) -> Bool {
+    name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-._".contains($0)) }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    static private(set) var shared: AppDelegate!
+    static weak var shared: AppDelegate?
 
     var notchWindow: NotchWindow?
     let themeManager = ThemeManager()
@@ -121,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 发送跨进程通知让其他所有岛隐藏
         for islandName in AppSwitcher.shared.otherIslandNames {
+            guard isValidNotificationAppName(islandName) else { continue }
             let hideNotification = "\(hideNotificationPrefix)\(islandName)"
             postHideNotification(hideNotification)
         }
@@ -352,6 +358,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func postHideNotification(_ name: String) {
+        guard name.hasPrefix(hideNotificationPrefix) else { return }
+        let appName = String(name.dropFirst(hideNotificationPrefix.count))
+        guard isValidNotificationAppName(appName) else { return }
         DistributedNotificationCenter.default().postNotificationName(
             Notification.Name(name),
             object: nil,

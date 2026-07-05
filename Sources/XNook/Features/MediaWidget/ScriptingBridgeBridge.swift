@@ -5,6 +5,12 @@ import ScriptingBridge
 
 enum ScriptingBridgeHelper {
 
+    /// 支持的媒体应用枚举，从类型系统层面防止 AppleScript 注入
+    enum SupportedApp: String {
+        case music = "Music"
+        case spotify = "Spotify"
+    }
+
     /// 安全获取 NSObject 的值
     private static func safeValue(_ object: NSObject?, key: String) -> Any? {
         guard let obj = object, obj.responds(to: NSSelectorFromString(key)) else { return nil }
@@ -45,7 +51,7 @@ enum ScriptingBridgeHelper {
 
         // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
         // 用 AppleScript 获取播放状态
-        if let rate = await fetchPlaybackRateViaAppleScript(appName: "Music") {
+        if let rate = await fetchPlaybackRateViaAppleScript(app: .music) {
             result["playbackRate"] = rate
         }
 
@@ -53,7 +59,8 @@ enum ScriptingBridgeHelper {
     }
 
     /// 通过 AppleScript 获取指定应用的播放状态（异步执行，不阻塞调用线程）
-    private static func fetchPlaybackRateViaAppleScript(appName: String) async -> Double? {
+    private static func fetchPlaybackRateViaAppleScript(app: SupportedApp) async -> Double? {
+        let appName = app.rawValue
         let source = """
         tell application "\(appName)"
             if player state is playing then
@@ -139,7 +146,7 @@ enum ScriptingBridgeHelper {
 
         // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
         // 用 AppleScript 获取播放状态
-        if let rate = await fetchPlaybackRateViaAppleScript(appName: "Spotify") {
+        if let rate = await fetchPlaybackRateViaAppleScript(app: .spotify) {
             result["playbackRate"] = rate
         }
 

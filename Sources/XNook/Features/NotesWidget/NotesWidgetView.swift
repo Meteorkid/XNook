@@ -141,7 +141,7 @@ struct NotesWidgetView: View {
                     var updatedNote = note
                     updatedNote.content = editingContent
                     updatedNote.updatedAt = Date()
-                    notesManager.saveNote(updatedNote)
+                    notesManager.saveNoteDebounced(updatedNote)
                 }
 
             // 保存按钮

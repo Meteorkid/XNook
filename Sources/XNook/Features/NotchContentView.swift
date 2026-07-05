@@ -19,6 +19,7 @@ struct NotchContentView: View {
     @State private var cachedExpandedShapeHeight: CGFloat = 220
     @State private var selectedWidget: WidgetType?
     @State private var hoverTimer: Timer?
+    @State private var hoverPollingFast = false
     @State private var lastCollapseAt: Date = .distantPast
     @State private var collapseAnimating = false
     @State private var collapseGeneration = 0
@@ -511,14 +512,20 @@ struct NotchContentView: View {
         )
     }
 
-    // MARK: - 鼠标悬停轮询
+    // MARK: - 鼠标悬停检测
+
+    /// 低频轮询间隔（鼠标远离时），仅检测进入/离开，大幅节省 CPU
+    private static let hoverPollIntervalSlow: TimeInterval = 0.25
+    /// 高频轮询间隔（鼠标靠近时），保证吸附和果冻动画流畅
+    private static let hoverPollIntervalFast: TimeInterval = 0.016
+    /// 鼠标接近判定距离（屏幕宽度的一定比例）
+    private static let hoverProximityRange: CGFloat = 300
 
     private func startHoverPolling() {
         stopHoverPolling()
-        // Timer.scheduledTimer 回调已在主线程 RunLoop，无需额外 Task 包装
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
-            pollMousePosition()
-        }
+        // 默认从低频开始，鼠标接近 notch 区域时自动加速
+        hoverPollingFast = false
+        scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
     }
 
     private func stopHoverPolling() {
@@ -526,9 +533,33 @@ struct NotchContentView: View {
         hoverTimer = nil
     }
 
+    /// 调度单次轮询，完成后根据鼠标距离决定下次频率
+    private func scheduleHoverPoll(interval: TimeInterval) {
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { _ in
+            pollMousePosition()
+        }
+    }
+
+    /// 轮询后根据鼠标距离动态切换频率
+    private func adjustHoverPollingSpeed(mouseNear: Bool) {
+        let shouldFast = mouseNear || isHoveringPill || isExpanded
+        if shouldFast != hoverPollingFast {
+            hoverPollingFast = shouldFast
+            // 当前 Timer 是 non-repeating，下次 pollMousePosition 末尾会用新间隔重新调度
+        }
+        let interval = hoverPollingFast ? Self.hoverPollIntervalFast : Self.hoverPollIntervalSlow
+        scheduleHoverPoll(interval: interval)
+    }
+
     private func pollMousePosition() {
-        guard let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow else { return }
-        guard !window.isDragging else { return }
+        guard let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow else {
+            scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
+            return
+        }
+        guard !window.isDragging else {
+            scheduleHoverPoll(interval: Self.hoverPollIntervalFast)
+            return
+        }
 
         // 更新 notch 遮挡状态
         let obscured = window.isObscuredByPhysicalNotch()
@@ -640,6 +671,14 @@ struct NotchContentView: View {
                 collapse()
             }
         }
+
+        // 根据鼠标距离动态调整下次轮询频率
+        let pillCenterX = window.frame.midX
+        let pillCenterY = window.frame.minY + collapsedShapeHeight / 2
+        let dx = mouse.x - pillCenterX
+        let dy = mouse.y - pillCenterY
+        let distance = sqrt(dx * dx + dy * dy)
+        adjustHoverPollingSpeed(mouseNear: distance < Self.hoverProximityRange)
     }
 
     // MARK: - 自动隐藏
@@ -983,6 +1022,15 @@ private struct GifView: NSViewRepresentable {
         private(set) var currentGifData: Data?
 
         func setupAnimation(gifData: Data, imageView: NSImageView) {
+            // 暂停当前动画，避免 tick() 读取中间状态
+            let wasAnimating = isAnimating
+            if wasAnimating, let displayLink = displayLink {
+                CVDisplayLinkStop(displayLink)
+                Unmanaged.passUnretained(self).release()
+                self.displayLink = nil
+            }
+            isAnimating = false
+
             self.imageView = imageView
             self.currentGifData = gifData
 
@@ -1044,7 +1092,7 @@ private struct GifView: NSViewRepresentable {
                     coordinator.tick()
                 }
                 return kCVReturnSuccess
-            }, Unmanaged.passUnretained(self).toOpaque())
+            }, Unmanaged.passRetained(self).toOpaque())
 
             CVDisplayLinkStart(displayLink)
             isAnimating = true
@@ -1077,6 +1125,8 @@ private struct GifView: NSViewRepresentable {
         deinit {
             if let displayLink = displayLink {
                 CVDisplayLinkStop(displayLink)
+                // 释放 setupAnimation 和 startDisplayLink 中通过 passRetained 增加的引用计数
+                Unmanaged.passUnretained(self).release()
             }
         }
     }

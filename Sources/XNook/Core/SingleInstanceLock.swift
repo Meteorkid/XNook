@@ -8,7 +8,10 @@ enum SingleInstanceLock {
 
     /// 尝试获取单实例锁，失败则退出
     static func acquire() {
-        let dir = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first!
+        guard let dir = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first else {
+            print("[XNook] Unable to locate application support directory, skipping instance lock.")
+            return
+        }
         let lockPath = (dir as NSString).appendingPathComponent("xnook_instance.lock")
 
         // 确保目录存在

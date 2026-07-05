@@ -97,8 +97,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleIslandCommand(_ url: URL) {
-        // 解析路径: xnook://island/show
-        guard url.host == "island",
+        // 解析路径: island://xnook/show
+        // url.host 是目标应用名，检查是否是发给自己的
+        guard let targetName = url.host,
+              targetName == AppSwitcher.shared.currentAppName,
               url.pathComponents.contains("show"),
               let window = notchWindow else { return }
 

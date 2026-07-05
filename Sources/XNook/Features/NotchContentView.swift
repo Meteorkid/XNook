@@ -28,6 +28,8 @@ struct NotchContentView: View {
     @State private var expandPending = false
     @State private var calendarRecenterTrigger = 0
     @State private var terminateObserver: NSObjectProtocol?
+    /// 缓存 NotchWindow 引用，避免每次事件都全局查找
+    @State private var notchWindow: NotchWindow?
 
     // 鼠标进入动效
     @State private var isHoveringPill = false
@@ -336,8 +338,11 @@ struct NotchContentView: View {
             }
         }
         .onAppear {
+            // 缓存 NotchWindow 引用，后续直接使用
+            notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
+
             // 检查是否被物理 Notch 遮挡
-            if let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow {
+            if let window = notchWindow {
                 islandObscuredByNotch = window.isObscuredByPhysicalNotch()
             }
 
@@ -407,7 +412,7 @@ struct NotchContentView: View {
         calendarRecenterTrigger += 1
 
         // 同步状态到窗口层
-        if let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow {
+        if let window = notchWindow {
             window.islandState = newState
         }
 
@@ -487,7 +492,7 @@ struct NotchContentView: View {
             let h = self.collapsedTotalHeight
             DispatchQueue.main.async {
                 guard generation == self.collapseGeneration, self.state == .collapsed else { return }
-                if let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow {
+                if let window = notchWindow {
                     window.resizeToFitCollapse(contentWidth: w, contentHeight: h)
                     window.islandState = self.state
                 }
@@ -552,7 +557,7 @@ struct NotchContentView: View {
     }
 
     private func pollMousePosition() {
-        guard let window = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow else {
+        guard let window = notchWindow else {
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
             return
         }

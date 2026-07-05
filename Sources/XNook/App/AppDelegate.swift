@@ -276,11 +276,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let w = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 550),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
+        w.minSize = NSSize(width: 560, height: 400)
+        w.maxSize = NSSize(width: 560, height: 700)
         w.isFloatingPanel = true
         w.hidesOnDeactivate = false
         w.title = L10n.xnookSettings

@@ -55,7 +55,11 @@ enum IslandStartupDisplayMode: String, CaseIterable, Identifiable {
 }
 
 enum IslandIntegrationSettings {
+    /// 当前共享配置协议版本号，双方应用同步升级时递增
+    static let protocolVersion = 1
+
     enum Key {
+        static let protocolVersion = "island.integration.protocolVersion"
         static let swipeSwitchEnabled = "island.integration.swipeSwitchEnabled"
         static let swipeSensitivity = "island.integration.swipeSensitivity"
         static let startupDisplayMode = "island.integration.startupDisplayMode"
@@ -67,10 +71,18 @@ enum IslandIntegrationSettings {
 
     static func registerDefaults() {
         sharedDefaults.register(defaults: [
+            Key.protocolVersion: protocolVersion,
             Key.swipeSwitchEnabled: true,
             Key.swipeSensitivity: IslandSwitchSensitivity.medium.rawValue,
             Key.startupDisplayMode: IslandStartupDisplayMode.lastUsed.rawValue,
         ])
+    }
+
+    /// 检查对方应用的协议版本是否兼容（版本号相同或更高才兼容）
+    static func isPeerProtocolCompatible() -> Bool {
+        let peerVersion = sharedDefaults.integer(forKey: Key.protocolVersion)
+        // peerVersion == 0 表示对方未写入版本号（旧版应用），视为兼容
+        return peerVersion == 0 || peerVersion >= protocolVersion
     }
 
     static var isSwipeSwitchEnabled: Bool {

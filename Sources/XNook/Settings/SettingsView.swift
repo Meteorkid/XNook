@@ -53,7 +53,8 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(width: 560, height: 500)
+        .frame(width: 560)
+        .frame(minHeight: 400, maxHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

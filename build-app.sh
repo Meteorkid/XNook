@@ -10,7 +10,10 @@ CONTENTS="${APP_BUNDLE}/Contents"
 MACOS="${CONTENTS}/MacOS"
 RESOURCES="${CONTENTS}/Resources"
 
-echo "Building ${APP_NAME}..."
+# 从 VERSION 文件读取版本号（单一版本源）
+VERSION=$(cat "$(dirname "$0")/VERSION" | tr -d '[:space:]')
+
+echo "Building ${APP_NAME} v${VERSION}..."
 
 # Build the executable
 swift build -c release 2>&1
@@ -26,6 +29,7 @@ cp "${BUILD_DIR}/release/XNook" "${MACOS}/${APP_NAME}"
 sed -e "s/\$(EXECUTABLE_NAME)/${APP_NAME}/g" \
     -e "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/com.meteorkid.xnook/g" \
     -e "s/\$(MACOSX_DEPLOYMENT_TARGET)/14.0/g" \
+    -e "s/\$(MARKETING_VERSION)/${VERSION}/g" \
     "Info.plist" > "${CONTENTS}/Info.plist"
 
 # Copy icon if exists
@@ -44,9 +48,9 @@ if [[ "${XNOOK_BUILD_DMG:-0}" == "1" ]]; then
     echo ""
     echo "==> Packaging DMG..."
 
-    # 从 Info.plist 读取版本号
-    VERSION=$(grep -A1 "CFBundleShortVersionString" "${CONTENTS}/Info.plist" | grep string | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
-    DMG_FILENAME="XNook-${VERSION}.dmg"
+    # 规范化版本号：去掉预发布后缀（如 -beta, -rc1）用于 DMG 文件名
+    NORMALIZED_VERSION=$(echo "$VERSION" | sed -E 's/-[a-zA-Z0-9.]+$//')
+    DMG_FILENAME="XNook-${NORMALIZED_VERSION}.dmg"
     DMG_PATH="${BUILD_DIR}/${DMG_FILENAME}"
     TEMP_DMG_DIR="${BUILD_DIR}/dmg-staging"
 

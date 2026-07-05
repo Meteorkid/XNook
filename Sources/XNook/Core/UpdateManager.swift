@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -10,15 +11,31 @@ final class UpdateManager {
         let tagName: String
         let htmlURL: URL
         let publishedAt: Date
+        let assets: [Asset]
+
+        struct Asset: Codable, Equatable {
+            let name: String
+            let browserDownloadURL: URL
+
+            private enum CodingKeys: String, CodingKey {
+                case name
+                case browserDownloadURL = "browser_download_url"
+            }
+        }
 
         private enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case htmlURL = "html_url"
             case publishedAt = "published_at"
+            case assets
         }
 
         var normalizedVersion: String {
             UpdateManager.normalize(version: tagName)
+        }
+
+        var dmgURL: URL? {
+            assets.first(where: { $0.name.hasSuffix(".dmg") })?.browserDownloadURL
         }
     }
 
@@ -27,6 +44,7 @@ final class UpdateManager {
         case checking
         case upToDate
         case updateAvailable(version: String)
+        case installing(stage: String)
         case failed(message: String)
     }
 
@@ -97,6 +115,68 @@ final class UpdateManager {
         }
     }
 
+    func installUpdate() async {
+        guard let release = latestRelease, let dmgURL = release.dmgURL else {
+            state = .failed(message: L10n.updateCheckFailed)
+            return
+        }
+
+        state = .installing(stage: "downloading")
+
+        do {
+            // 下载 DMG
+            let (tempURL, _) = try await URLSession.shared.download(for: URLRequest(url: dmgURL))
+
+            // 移动到临时目录
+            let fileManager = FileManager.default
+            let tempDir = fileManager.temporaryDirectory
+            let dmgName = dmgURL.lastPathComponent
+            let destURL = tempDir.appendingPathComponent(dmgName)
+
+            if fileManager.fileExists(atPath: destURL.path) {
+                try fileManager.removeItem(at: destURL)
+            }
+            try fileManager.moveItem(at: tempURL, to: destURL)
+
+            // 挂载 DMG
+            state = .installing(stage: "mounting")
+            let mountOutput = try runCommand(
+                "/usr/bin/hdiutil",
+                arguments: ["attach", destURL.path, "-nobrowse", "-quiet"]
+            )
+            let mountPath = parseMountPath(from: mountOutput)
+
+            // 复制应用到 /Applications
+            state = .installing(stage: "installing")
+            let appSource = mountPath.appendingPathComponent("X Nook.app")
+            let appDest = URL(fileURLWithPath: "/Applications/X Nook.app")
+
+            if fileManager.fileExists(atPath: appDest.path) {
+                try fileManager.removeItem(at: appDest)
+            }
+            try fileManager.copyItem(at: appSource, to: appDest)
+
+            // 卸载 DMG
+            _ = try? runCommand("/usr/bin/hdiutil", arguments: ["detach", mountPath.path, "-quiet"])
+
+            // 清理临时文件
+            try? fileManager.removeItem(at: destURL)
+
+            // 重启应用
+            state = .installing(stage: "relaunching")
+            let workspace = NSWorkspace.shared
+            let config = NSWorkspace.OpenConfiguration()
+            config.createsNewApplicationInstance = true
+            try await workspace.openApplication(at: appDest, configuration: config)
+
+            // 退出当前应用
+            NSApp.terminate(self)
+
+        } catch {
+            state = .failed(message: error.localizedDescription)
+        }
+    }
+
     func applyCheckResult(_ release: ReleaseInfo) {
         latestRelease = release
         lastCheckedAt = Date()
@@ -141,5 +221,48 @@ final class UpdateManager {
             throw URLError(.badServerResponse)
         }
         return data
+    }
+
+    private func runCommand(_ path: String, arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw UpdateError.commandFailed(path: path, status: process.terminationStatus)
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    private func parseMountPath(from output: String) -> URL {
+        let lines = output.components(separatedBy: .newlines)
+        for line in lines where line.contains("/Volumes/") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let range = trimmed.range(of: "/Volumes/") {
+                let path = String(trimmed[range.lowerBound...])
+                return URL(fileURLWithPath: path)
+            }
+        }
+        return URL(fileURLWithPath: "/Volumes/X Nook")
+    }
+
+    enum UpdateError: LocalizedError {
+        case commandFailed(path: String, status: Int32)
+
+        var errorDescription: String? {
+            switch self {
+            case .commandFailed(let path, let status):
+                return "Command \(path) failed with status \(status)"
+            }
+        }
     }
 }

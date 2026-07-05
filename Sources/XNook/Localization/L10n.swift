@@ -250,6 +250,17 @@ enum L10n {
     static func malformedReleaseVersion(_ version: String) -> String {
         localized(zh: "发布版本号格式无效：\(version)", en: "Malformed release version: \(version)")
     }
+    static var installUpdate: String { localized(zh: "安装更新", en: "Install Update") }
+    static var installUpdateDesc: String { localized(
+        zh: "下载并安装最新版本，安装完成后应用将自动重启。",
+        en: "Download and install the latest version. The app will restart after installation.") }
+    static var install: String { localized(zh: "安装", en: "Install") }
+    static func updateInstalling(_ stage: String) -> String {
+        localized(zh: "安装中（\(stage)）", en: "Installing (\(stage))")
+    }
+    static var updateInstallingDetail: String {
+        localized(zh: "正在下载并安装更新，请勿关闭应用。", en: "Downloading and installing update. Please do not close the app.")
+    }
     static func minutesBefore(_ minutes: Int) -> String {
         localized(zh: "提前 \(minutes) 分钟", en: "\(minutes) min before")
     }

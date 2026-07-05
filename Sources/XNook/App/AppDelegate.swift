@@ -233,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: L10n.showXNook, action: #selector(showNotch), keyEquivalent: "s"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.preferences, action: #selector(openPreferences), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: L10n.checkForUpdates, action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.quit, action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -285,6 +286,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openPreferencesFromNotification() {
         openPreferences()
+    }
+
+    @objc private func checkForUpdates() {
+        openPreferences()
+        // 打开设置后自动检查更新
+        Task { @MainActor in
+            await updateManager.checkForUpdates()
+        }
     }
 
     @objc private func quit() {

@@ -544,6 +544,20 @@ struct SettingsView: View {
                             .buttonStyle(.bordered)
                         }
                     }
+                    if case .updateAvailable = updateManager.state,
+                       updateManager.latestRelease?.dmgURL != nil {
+                        dividerLine
+                        settingRow(L10n.installUpdate, id: "installUpdate",
+                                  description: L10n.installUpdateDesc) {
+                            Button(L10n.install) {
+                                Task { @MainActor in
+                                    await updateManager.installUpdate()
+                                }
+                            }
+                            .font(.system(size: 12))
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
                 }
             }
 
@@ -725,6 +739,8 @@ struct SettingsView: View {
             return L10n.updateStatusUpToDate
         case .updateAvailable(let version):
             return L10n.updateStatusAvailable(version)
+        case .installing(let stage):
+            return L10n.updateInstalling(stage)
         case .failed:
             return L10n.updateStatusFailed
         }
@@ -736,6 +752,8 @@ struct SettingsView: View {
             return message
         case .updateAvailable(let version):
             return L10n.updateStatusAvailable(version)
+        case .installing:
+            return L10n.updateInstallingDetail
         default:
             return nil
         }

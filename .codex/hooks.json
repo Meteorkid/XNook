@@ -1,0 +1,96 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/usr/local/bin/node\" '/Users/meteor/github/XNook/.codex/hooks/gsd-prompt-guard.js'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/usr/local/bin/node\" '/Users/meteor/github/XNook/.codex/hooks/gsd-read-guard.js'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/usr/local/bin/node\" '/Users/meteor/github/XNook/.codex/hooks/gsd-workflow-guard.js'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/meteor/github/XNook/.codex/hooks/gsd-validate-commit.sh'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/usr/local/bin/node\" '/Users/meteor/github/XNook/.codex/hooks/gsd-context-monitor.js'",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/usr/local/bin/node\" '/Users/meteor/github/XNook/.codex/hooks/gsd-read-injection-scanner.js'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/meteor/github/XNook/.codex/hooks/gsd-phase-boundary.sh'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/usr/local/bin/node\" '/Users/meteor/github/XNook/.codex/hooks/gsd-check-update.js'"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/meteor/github/XNook/.codex/hooks/gsd-session-state.sh'"
+          }
+        ]
+      }
+    ]
+  }
+}

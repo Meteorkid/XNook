@@ -1,25 +1,26 @@
 import SwiftUI
 import AppKit
 import CoreAudio
+import Observation
 
 /// 媒体播放管理器 — 通过 MediaRemote 私有框架控制系统级播放器
-@MainActor
-final class MediaManager: ObservableObject {
+@Observable @MainActor
+final class MediaManager {
     // MARK: - Published Properties
 
-    @Published var isPlaying = false
-    @Published var playbackRate: Double = 0
-    @Published var currentTitle: String = ""
-    @Published var currentArtist: String = ""
-    @Published var currentAlbum: String = ""
-    @Published var currentLyricLine: String = ""
+    var isPlaying = false
+    var playbackRate: Double = 0
+    var currentTitle: String = ""
+    var currentArtist: String = ""
+    var currentAlbum: String = ""
+    var currentLyricLine: String = ""
     /// 仅存储原始 Data，NSImage 按需创建，避免同时持有两份图像数据
-    @Published var currentArtworkData: Data?
+    var currentArtworkData: Data?
     /// 封面版本号，每次切歌递增，用于 SwiftUI 强制刷新
-    @Published var artworkVersion: Int = 0
-    @Published var duration: TimeInterval = 0
-    @Published var elapsedTime: TimeInterval = 0
-    @Published var isAvailable = false
+    var artworkVersion: Int = 0
+    var duration: TimeInterval = 0
+    var elapsedTime: TimeInterval = 0
+    var isAvailable = false
 
     /// 缓存的 NSImage 实例，仅在 currentArtworkData 变化时重建
     private var cachedArtworkImage: NSImage?
@@ -74,16 +75,6 @@ final class MediaManager: ObservableObject {
         }
         // 启动定时器轮询 ScriptingBridge（始终运行）
         startTimers()
-    }
-
-    deinit {
-        infoTimer?.invalidate()
-        progressTimer?.invalidate()
-        if let obs = infoObserver { NotificationCenter.default.removeObserver(obs) }
-        if let obs = playingObserver { NotificationCenter.default.removeObserver(obs) }
-        if mediaRemoteAvailable {
-            MediaRemoteBridge.unregisterForNotifications()
-        }
     }
 
     // MARK: - 双定时器架构

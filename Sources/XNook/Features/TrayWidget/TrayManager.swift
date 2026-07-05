@@ -1,13 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Observation
 
 /// 文件架管理器
-@MainActor
-final class TrayManager: ObservableObject {
+@Observable @MainActor
+final class TrayManager {
     // MARK: - Published Properties
 
-    @Published var files: [TrayFile] = []
-    @Published var isDropTargeted = false
+    var files: [TrayFile] = []
+    var isDropTargeted = false
 
     private static var storageURL: URL {
         guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {

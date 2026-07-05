@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 媒体播放 Widget 视图
 struct MediaWidgetView: View {
-    @ObservedObject var mediaManager: MediaManager
+    var mediaManager: MediaManager
 
     var body: some View {
         VStack(spacing: 8) {

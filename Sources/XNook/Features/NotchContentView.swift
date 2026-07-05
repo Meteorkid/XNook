@@ -9,10 +9,10 @@ enum IslandState: Equatable {
 /// Notch 主内容视图 - 与 X Island 保持一致的灵动岛风格
 struct NotchContentView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var mediaManager = MediaManager()
-    @StateObject private var calendarManager = CalendarManager()
-    @StateObject private var notesManager = NotesManager()
-    @StateObject private var trayManager = TrayManager()
+    @State private var mediaManager = MediaManager()
+    @State private var calendarManager = CalendarManager()
+    @State private var notesManager = NotesManager()
+    @State private var trayManager = TrayManager()
 
     @State private var state: IslandState = .collapsed
     @State private var showContent = false

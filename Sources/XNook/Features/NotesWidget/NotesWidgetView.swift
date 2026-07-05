@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 笔记 Widget 视图
 struct NotesWidgetView: View {
-    @ObservedObject var notesManager: NotesManager
+    var notesManager: NotesManager
     @State private var editingContent: String = ""
 
     var body: some View {

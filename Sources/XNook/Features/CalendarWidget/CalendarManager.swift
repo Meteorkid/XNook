@@ -1,15 +1,16 @@
 import SwiftUI
 import EventKit
+import Observation
 
 /// 日历管理器
-@MainActor
-final class CalendarManager: ObservableObject {
+@Observable @MainActor
+final class CalendarManager {
     // MARK: - Published Properties
 
-    @Published var hasAccess = false
-    @Published var calendars: [EKCalendar] = []
-    @Published var upcomingEvents: [EKEvent] = []
-    @Published var selectedCalendars: Set<String> = []
+    var hasAccess = false
+    var calendars: [EKCalendar] = []
+    var upcomingEvents: [EKEvent] = []
+    var selectedCalendars: Set<String> = []
 
     // MARK: - Private Properties
 

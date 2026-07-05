@@ -1,13 +1,14 @@
 import SwiftUI
+import Observation
 
 /// 笔记管理器 — 使用文件系统存储，避免 UserDefaults 大数据量问题
-@MainActor
-final class NotesManager: ObservableObject {
+@Observable @MainActor
+final class NotesManager {
     // MARK: - Published Properties
 
-    @Published var notes: [Note] = []
-    @Published var currentNote: Note?
-    @Published var isEditing = false
+    var notes: [Note] = []
+    var currentNote: Note?
+    var isEditing = false
 
     // MARK: - Note Model
 

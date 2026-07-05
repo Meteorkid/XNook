@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 /// 文件托盘 Widget 视图
 struct TrayWidgetView: View {
-    @ObservedObject var trayManager: TrayManager
+    @Bindable var trayManager: TrayManager
     @State private var showAllFiles = false
 
     /// 当前显示的文件列表

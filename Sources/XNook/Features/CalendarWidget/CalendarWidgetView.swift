@@ -3,7 +3,7 @@ import EventKit
 
 /// 日历 Widget 视图
 struct CalendarWidgetView: View {
-    @ObservedObject var calendarManager: CalendarManager
+    var calendarManager: CalendarManager
     @Binding var recenterTrigger: Int
     @State private var selectedDate = Date()
     @State private var centeredDate = Date()

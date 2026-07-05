@@ -12,6 +12,7 @@ final class UpdateManager {
         let htmlURL: URL
         let publishedAt: Date
         let assets: [Asset]
+        let body: String?
 
         struct Asset: Codable, Equatable {
             let name: String
@@ -28,6 +29,7 @@ final class UpdateManager {
             case htmlURL = "html_url"
             case publishedAt = "published_at"
             case assets
+            case body
         }
 
         var normalizedVersion: String {
@@ -174,6 +176,16 @@ final class UpdateManager {
             }
             try fileManager.moveItem(at: tempURL, to: destURL)
 
+            // SHA256 完整性校验
+            if let expectedSHA256 = extractSHA256(from: release) {
+                let actualSHA256 = try calculateSHA256(for: destURL)
+                guard actualSHA256 == expectedSHA256 else {
+                    try? fileManager.removeItem(at: destURL)
+                    state = .failed(message: "SHA256 校验失败，下载的文件可能已被篡改。")
+                    return
+                }
+            }
+
             // 挂载 DMG
             state = .installing(stage: "mounting")
             let mountOutput = try runCommand(
@@ -182,15 +194,21 @@ final class UpdateManager {
             )
             let mountPath = parseMountPath(from: mountOutput)
 
+            // 验证应用代码签名
+            let appSource = mountPath.appendingPathComponent("X Nook.app")
+            try verifyCodeSignature(at: appSource)
+
             // 复制应用到 /Applications
             state = .installing(stage: "installing")
-            let appSource = mountPath.appendingPathComponent("X Nook.app")
             let appDest = URL(fileURLWithPath: "/Applications/X Nook.app")
 
             if fileManager.fileExists(atPath: appDest.path) {
                 try fileManager.removeItem(at: appDest)
             }
             try fileManager.copyItem(at: appSource, to: appDest)
+
+            // 清除扩展属性（避免 Gatekeeper 问题）
+            _ = try? runCommand("/usr/bin/xattr", arguments: ["-cr", appDest.path])
 
             // 卸载 DMG
             _ = try? runCommand("/usr/bin/hdiutil", arguments: ["detach", mountPath.path, "-quiet"])
@@ -211,6 +229,36 @@ final class UpdateManager {
         } catch {
             state = .failed(message: error.localizedDescription)
         }
+    }
+
+    /// 从 release 中提取 SHA256
+    private func extractSHA256(from release: ReleaseInfo) -> String? {
+        guard let body = release.body else { return nil }
+        let dmgFilename = "\(release.normalizedVersion).dmg"
+
+        // 查找 "filename: sha256" 格式
+        let pattern = "\(dmgFilename)\\s+([a-fA-F0-9]{64})"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)),
+              let range = Range(match.range(at: 1), in: body) else {
+            return nil
+        }
+        return String(body[range])
+    }
+
+    /// 计算文件 SHA256
+    private func calculateSHA256(for url: URL) throws -> String {
+        let output = try runCommand("/usr/bin/shasum", arguments: ["-a", "256", url.path])
+        return output.components(separatedBy: " ").first ?? ""
+    }
+
+    /// 验证代码签名
+    private func verifyCodeSignature(at appURL: URL) throws {
+        let output = try runCommand(
+            "/usr/bin/codesign",
+            arguments: ["--verify", "--deep", "--strict", appURL.path]
+        )
+        // codesign 在验证成功时返回空输出
     }
 
     func applyCheckResult(_ release: ReleaseInfo) {

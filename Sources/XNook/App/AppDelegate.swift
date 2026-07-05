@@ -14,7 +14,7 @@ private let hideNotificationPrefix = "island.switch.hide."
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    static private(set) weak var shared: AppDelegate?
+    static private(set) var shared: AppDelegate!
 
     var notchWindow: NotchWindow?
     let themeManager = ThemeManager()
@@ -83,6 +83,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 启动自动检查更新
         updateManager.startAutoCheck()
+
+        // 监听更新状态变化，实时刷新菜单栏
+        observeUpdateState()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -116,10 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .xnookCollapse, object: nil)
         window.showAtMouseScreen()
 
-        // 发送跨进程通知让来源岛隐藏
-        // 需要找到来源岛的应用名
-        if let sourceAppName = AppSwitcher.shared.otherIslandNames.first {
-            let hideNotification = "\(hideNotificationPrefix)\(sourceAppName)"
+        // 发送跨进程通知让其他所有岛隐藏
+        for islandName in AppSwitcher.shared.otherIslandNames {
+            let hideNotification = "\(hideNotificationPrefix)\(islandName)"
             postHideNotification(hideNotification)
         }
     }
@@ -298,6 +300,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 打开设置后自动检查更新
         Task { @MainActor in
             await updateManager.checkForUpdates()
+        }
+    }
+
+    /// 监听更新状态变化，实时刷新菜单栏
+    private func observeUpdateState() {
+        withObservationTracking {
+            _ = updateManager.state
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.refreshUpdateMenuItem()
+                self?.observeUpdateState()
+            }
+        }
+    }
+
+    /// 刷新更新菜单项
+    private func refreshUpdateMenuItem() {
+        // 找到更新菜单项并更新标题
+        if let menu = statusItem?.menu {
+            for item in menu.items {
+                if item.title == L10n.checkForUpdates || item.title == L10n.checkForUpdatesButtonChecking {
+                    switch updateManager.state {
+                    case .checking:
+                        item.title = L10n.checkForUpdatesButtonChecking
+                    case .updateAvailable(let version):
+                        item.title = "Update Available: \(version)"
+                    default:
+                        item.title = L10n.checkForUpdates
+                    }
+                    break
+                }
+            }
         }
     }
 

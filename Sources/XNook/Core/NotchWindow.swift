@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 
+@MainActor
 final class NotchWindow: NSPanel {
     static let maxExpandedWidth: CGFloat = 520
     static let maxExpandedHeight: CGFloat = 600

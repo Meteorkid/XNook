@@ -148,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 统一调度 isSwitchingApps 清除，取消之前的计时器避免竞争
-    private func scheduleClearSwitchingApps(window: NotchWindow, delay: TimeInterval) {
+    func scheduleClearSwitchingApps(window: NotchWindow?, delay: TimeInterval) {
         clearSwitchingAppsWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak window] in
             window?.isSwitchingApps = false

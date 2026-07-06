@@ -29,9 +29,6 @@ final class AppSwitcher {
         "xisland": "xisland",
     ]
 
-    /// 用于延迟清除 isSwitchingApps 标志的 WorkItem
-    private var clearSwitchingAppsWorkItem: DispatchWorkItem?
-
     /// 当前应用名
     var currentAppName: String? {
         appName
@@ -91,19 +88,16 @@ final class AppSwitcher {
         configuration.activates = false
         NSWorkspace.shared.open(url, configuration: configuration) { [weak self] _, error in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard self != nil else { return }
                 if error != nil {
                     // 目标未确认显示，立即清除切换标志
                     AppDelegate.shared?.notchWindow?.isSwitchingApps = false
                 } else {
-                    // 成功打开 URL，延迟清除切换标志（确保空间切换完成）
-                    // 使用 DispatchWorkItem 以便在需要时取消
-                    let clearWork = DispatchWorkItem { [weak self] in
-                        guard self != nil else { return }
-                        AppDelegate.shared?.notchWindow?.isSwitchingApps = false
-                    }
-                    self.clearSwitchingAppsWorkItem = clearWork
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: clearWork)
+                    // 成功打开 URL，委托 AppDelegate 统一调度延迟清除
+                    AppDelegate.shared?.scheduleClearSwitchingApps(
+                        window: AppDelegate.shared?.notchWindow,
+                        delay: 1.0
+                    )
                 }
             }
         }

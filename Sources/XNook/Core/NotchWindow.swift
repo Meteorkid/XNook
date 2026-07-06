@@ -208,6 +208,10 @@ final class NotchWindow: NSPanel {
             NSApplication.shared.windows.map { ($0.screen?.frame, $0.styleMask) }
         let frontApp = NSWorkspace.shared.frontmostApplication
 
+        // 捕获标志值为局部常量，避免异步 Task 中的竞争条件
+        let wasSwitchingApps = isSwitchingApps
+        let wasHiddenByIslandSwitch = isHiddenByIslandSwitch
+
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let inFullscreen = Self.isScreenInFullscreenOffMain(
@@ -216,6 +220,8 @@ final class NotchWindow: NSPanel {
                 frontApp: frontApp
             )
             await MainActor.run {
+                // 使用捕获时的标志值，而非重新读取（避免竞争）
+                guard !wasSwitchingApps, !wasHiddenByIslandSwitch else { return }
                 guard !self.isSwitchingApps, !self.isHiddenByIslandSwitch else { return }
                 if inFullscreen {
                     self.pauseMouseTracking()

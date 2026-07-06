@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var scrollMonitor: Any?
     private var islandHideObserver: NSObjectProtocol?
+    /// 统一的 isSwitchingApps 清除 WorkItem，确保只有一个活跃的清除计时器
+    private var clearSwitchingAppsWorkItem: DispatchWorkItem?
 
     /// 悬停自动展开是否关闭
     private var hoverToExpandDisabled: Bool {
@@ -116,12 +118,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isHiddenByIslandSwitch = false
         window.isSwitchingApps = true
         window.swipeRecognizer.suppress(for: 0.8)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            window.isSwitchingApps = false
-        }
+        scheduleClearSwitchingApps(window: window, delay: 1.5)
 
         // 先收起并显示自身，确认接管后再请求来源岛隐藏
         NotificationCenter.default.post(name: .xnookCollapse, object: nil)
+
+        // 同步缩小窗口 frame 到收起态尺寸，避免 showAtMouseScreen 时以展开态闪现
+        let collapsedW = IslandSizeCalculator.collapsedPillWidth
+        let collapsedH = IslandSizeCalculator.collapsedShapeHeight + 4 // 留一点余量
+        window.resizeToFitCollapse(contentWidth: collapsedW, contentHeight: collapsedH)
+        window.islandState = .collapsed
+
         window.showAtMouseScreen()
 
         // 发送跨进程通知让其他所有岛隐藏
@@ -137,9 +144,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isHiddenByIslandSwitch = true
         window.isSwitchingApps = true
         window.orderOut(nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            window.isSwitchingApps = false
+        scheduleClearSwitchingApps(window: window, delay: 1.0)
+    }
+
+    /// 统一调度 isSwitchingApps 清除，取消之前的计时器避免竞争
+    private func scheduleClearSwitchingApps(window: NotchWindow, delay: TimeInterval) {
+        clearSwitchingAppsWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak window] in
+            window?.isSwitchingApps = false
         }
+        clearSwitchingAppsWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     // MARK: - Setup

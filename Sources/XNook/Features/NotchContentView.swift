@@ -679,6 +679,7 @@ struct NotchContentView: View {
         if inside && !isExpanded {
             guard Date().timeIntervalSince(lastCollapseAt) > 0.65 else { return }
             guard hoverToExpandPanel else { return }
+            guard !(notchWindow?.isSwitchingApps ?? false) else { return }
             expandedByHover = true
             expandedAt = Date()
             expand(to: .expanded)

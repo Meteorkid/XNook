@@ -269,9 +269,12 @@ final class UpdateManager {
             throw UpdateError.verificationFailed("签名身份不匹配：更新包的 Identifier 不是 X Nook。")
         }
 
-        // 第三步：验证签发者身份（防止攻击者用自有证书签名同名应用）
+        // 第三步：验证完整证书链（防止攻击者用自有证书或吊销证书签名同名应用）
         guard identOutput.contains("Authority=Developer ID Application") else {
             throw UpdateError.verificationFailed("签名Authority不匹配：更新包不是由 Developer ID 签发。")
+        }
+        guard identOutput.contains("Authority=Apple Root CA") else {
+            throw UpdateError.verificationFailed("签名证书链不完整：缺少 Apple Root CA 根证书。")
         }
     }
 
@@ -348,9 +351,10 @@ final class UpdateManager {
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
 
-        let combinedPipe = Pipe()
-        process.standardOutput = combinedPipe
-        process.standardError = combinedPipe
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
         try process.run()
         process.waitUntilExit()
@@ -359,8 +363,11 @@ final class UpdateManager {
             throw UpdateError.commandFailed(path: path, status: process.terminationStatus)
         }
 
-        let data = combinedPipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        return stdout + stderr
     }
 
     private func parseMountPath(from output: String) throws -> URL {

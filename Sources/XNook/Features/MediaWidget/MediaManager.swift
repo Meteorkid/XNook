@@ -126,9 +126,9 @@ final class MediaManager {
                     } else {
                         self.elapsedTime = self.syncedElapsedTime
                     }
-                    // 仅在有歌词内容时更新歌词行，避免无意义赋值触发重绘
+                    // 先根据时间推进更新歌词行，再比较避免无意义赋值触发重绘
+                    self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
                     if self.lyricsManager.currentLine != self.currentLyricLine {
-                        self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
                         self.currentLyricLine = self.lyricsManager.currentLine
                     }
                 }

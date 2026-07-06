@@ -42,7 +42,7 @@ final class LyricsManager {
     // MARK: - 获取歌词
 
     func fetchLyrics(title: String, artist: String, duration: TimeInterval? = nil) {
-        // 检查歌词功能是否开启（默认关闭，保护隐私）
+        // 检查歌词功能是否开启（默认开启，可在设置中关闭）
         let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
         guard lyricsEnabled else {
             lyrics = []

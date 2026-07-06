@@ -341,12 +341,16 @@ struct NotchContentView: View {
             // 缓存 NotchWindow 引用，后续直接使用
             notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
 
-            // 如果窗口尚未就绪，延迟重试
+            // 如果窗口尚未就绪，递增延迟重试（0.3s → 0.6s → 1.0s）
             if notchWindow == nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
-                    notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
-                    if let window = notchWindow {
-                        islandObscuredByNotch = window.isObscuredByPhysicalNotch()
+                let delays: [TimeInterval] = [0.3, 0.6, 1.0]
+                for (index, delay) in delays.enumerated() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
+                        guard notchWindow == nil else { return } // 已找到则跳过后续重试
+                        notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
+                        if let window = notchWindow {
+                            islandObscuredByNotch = window.isObscuredByPhysicalNotch()
+                        }
                     }
                 }
             }

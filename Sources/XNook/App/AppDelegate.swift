@@ -419,20 +419,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard shouldShow else { return }
 
-        // 如果 preferred 不是自己，但自己也应该显示（对方未运行），
-        // 需要通过共享 UserDefaults 仲裁：先写入 lastShownIsland 的一方显示
-        if preferredIsland != currentIsland {
-            let alreadyTaken = IslandIntegrationSettings.lastShownIsland != nil
-                && IslandIntegrationSettings.lastShownIsland != currentIsland
-            if alreadyTaken {
-                // 对方已经声明了显示权，自己不显示
-                return
-            }
-            // 自己先声明显示权
-            IslandIntegrationSettings.markVisible(currentIsland)
-        } else {
-            IslandIntegrationSettings.markVisible(currentIsland)
+        // 用文件锁原子仲裁：确保只有一个进程获得显示权
+        let won = IslandIntegrationSettings.claimVisibility(currentApp: currentIsland) { app in
+            AppSwitcher.shared.isIslandInstalled(named: app.rawValue)
         }
+        guard won else { return }
 
         showIsland(preferMouseScreen: false, hidePeers: preferredIsland == currentIsland)
     }

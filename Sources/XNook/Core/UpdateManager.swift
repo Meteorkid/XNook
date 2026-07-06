@@ -260,13 +260,18 @@ final class UpdateManager {
             arguments: ["--verify", "--deep", "--strict", appURL.path]
         )
 
-        // 第二步：验证签名身份，确保是可信开发者签发
-        let identOutput = try runCommand(
+        // 第二步：验证签名身份（codesign -dv 的 verbose 输出可能在 stderr，需合并读取）
+        let identOutput = try runCommandCombinedOutput(
             "/usr/bin/codesign",
             arguments: ["-dv", "--verbose=4", appURL.path]
         )
         guard identOutput.contains("Identifier=X Nook") || identOutput.contains("Identifier=com.xnook") else {
             throw UpdateError.verificationFailed("签名身份不匹配：更新包的 Identifier 不是 X Nook。")
+        }
+
+        // 第三步：验证签发者身份（防止攻击者用自有证书签名同名应用）
+        guard identOutput.contains("Authority=Developer ID Application") else {
+            throw UpdateError.verificationFailed("签名Authority不匹配：更新包不是由 Developer ID 签发。")
         }
     }
 
@@ -334,6 +339,27 @@ final class UpdateManager {
         }
 
         let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// 执行命令并同时读取 stdout + stderr（codesign -dv 的 verbose 输出可能在 stderr）
+    private func runCommandCombinedOutput(_ path: String, arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+
+        let combinedPipe = Pipe()
+        process.standardOutput = combinedPipe
+        process.standardError = combinedPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw UpdateError.commandFailed(path: path, status: process.terminationStatus)
+        }
+
+        let data = combinedPipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
     }
 

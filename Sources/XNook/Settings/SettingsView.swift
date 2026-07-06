@@ -788,17 +788,6 @@ struct SettingsView: View {
             return .secondary
         }
     }
-
-    private func macPrivacyButton(title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 12, weight: .medium))
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 30)
-        }
-        .buttonStyle(.bordered)
-    }
 }
 
 // MARK: - 预览

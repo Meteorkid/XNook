@@ -1,10 +1,11 @@
 import Foundation
+import Observation
 
 /// 歌词管理器 — 从 LRCLIB 获取同步歌词，解析 LRC 格式
-@MainActor
-final class LyricsManager: ObservableObject {
-    @Published var currentLine: String = ""
-    @Published var isFetching = false
+@Observable @MainActor
+final class LyricsManager {
+    var currentLine: String = ""
+    var isFetching = false
 
     private var lyrics: [LrcLine] = []
     private var currentTitle = ""

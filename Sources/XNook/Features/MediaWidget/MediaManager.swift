@@ -24,13 +24,12 @@ final class MediaManager {
 
     /// 缓存的 NSImage 实例，仅在 currentArtworkData 变化时重建
     private var cachedArtworkImage: NSImage?
-    private var cachedArtworkDataHash: Int = 0
+    private var cachedArtworkData: Data?
 
     /// 获取封面 NSImage（带缓存，避免每次访问都从 Data 重建）
     var currentArtwork: NSImage? {
-        let dataHash = currentArtworkData.map { $0.hashValue } ?? 0
-        if dataHash != cachedArtworkDataHash {
-            cachedArtworkDataHash = dataHash
+        if currentArtworkData != cachedArtworkData {
+            cachedArtworkData = currentArtworkData
             cachedArtworkImage = currentArtworkData.flatMap { NSImage(data: $0) }
         }
         return cachedArtworkImage
@@ -43,12 +42,13 @@ final class MediaManager {
 
     /// 存储 MediaRemote 是否可用（不使用 @Published，避免 deinit 问题）
     private let mediaRemoteAvailable: Bool
-    private var infoObserver: NSObjectProtocol?
-    private var playingObserver: NSObjectProtocol?
+    /// nonisolated(unsafe)：允许在 nonisolated deinit 中访问，Timer/Observer 操作本身线程安全
+    private nonisolated(unsafe) var infoObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var playingObserver: NSObjectProtocol?
     /// 慢速轮询：获取歌曲信息、封面（1s 间隔，避免 IPC 卡顿）
-    private var infoTimer: Timer?
+    private nonisolated(unsafe) var infoTimer: Timer?
     /// 快速轮询：本地计时更新进度 + 歌词（0.05s 间隔，无 IPC 开销）
-    private var progressTimer: Timer?
+    private nonisolated(unsafe) var progressTimer: Timer?
     /// 上次 ScriptingBridge 同步时的时间戳
     private var lastSyncTime: Date = Date()
     /// 上次同步时的播放位置
@@ -77,6 +77,23 @@ final class MediaManager {
         startTimers()
     }
 
+    nonisolated deinit {
+        // Timer.invalidate() 和 NotificationCenter.removeObserver() 是线程安全的
+        // mediaRemoteAvailable 是 let 常量，nonisolated 可安全读取
+        let infoObs = infoObserver
+        let playingObs = playingObserver
+        let available = mediaRemoteAvailable
+        let timer1 = infoTimer
+        let timer2 = progressTimer
+        timer1?.invalidate()
+        timer2?.invalidate()
+        if let obs = infoObs { NotificationCenter.default.removeObserver(obs) }
+        if let obs = playingObs { NotificationCenter.default.removeObserver(obs) }
+        if available {
+            MediaRemoteBridge.unregisterForNotifications()
+        }
+    }
+
     // MARK: - 双定时器架构
 
     private func startTimers() {
@@ -96,7 +113,7 @@ final class MediaManager {
     private func startProgressTimerIfNeeded() {
         let hasContent = !currentTitle.isEmpty || !currentArtist.isEmpty
         let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
-        let needsTimer = isPlaying || (hasContent && lyricsEnabled && !lyricsManager.currentLine.isEmpty)
+        let needsTimer = isPlaying || (hasContent && lyricsEnabled)
 
         if needsTimer && progressTimer == nil {
             progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in

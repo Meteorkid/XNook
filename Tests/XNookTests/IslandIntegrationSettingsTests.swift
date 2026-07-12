@@ -84,6 +84,38 @@ final class IslandIntegrationSettingsTests: XCTestCase {
         )
     }
 
+    func testClaimVisibilityAllowsLaunchWhenLastShownIslandIsNotRunning() {
+        IslandIntegrationSettings.sharedDefaults.set(
+            IslandApp.xisland.rawValue,
+            forKey: IslandIntegrationSettings.Key.lastShownIsland
+        )
+
+        XCTAssertTrue(
+            IslandIntegrationSettings.claimVisibility(
+                currentApp: .xnook,
+                isInstalled: { $0 == .xisland },
+                isRunning: { _ in false }
+            )
+        )
+        XCTAssertEqual(IslandIntegrationSettings.lastShownIsland, .xnook)
+    }
+
+    func testClaimVisibilityKeepsCurrentIslandHiddenWhenPeerIsRunning() {
+        IslandIntegrationSettings.sharedDefaults.set(
+            IslandApp.xisland.rawValue,
+            forKey: IslandIntegrationSettings.Key.lastShownIsland
+        )
+
+        XCTAssertFalse(
+            IslandIntegrationSettings.claimVisibility(
+                currentApp: .xnook,
+                isInstalled: { $0 == .xisland },
+                isRunning: { $0 == .xisland }
+            )
+        )
+        XCTAssertEqual(IslandIntegrationSettings.lastShownIsland, .xisland)
+    }
+
     func testSwipeSensitivityChangesTriggerThreshold() {
         let defaults = IslandIntegrationSettings.sharedDefaults
         defaults.set(

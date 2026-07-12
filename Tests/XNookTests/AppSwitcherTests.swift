@@ -78,11 +78,11 @@ final class AppSwitcherTests: XCTestCase {
     func testSwitchURLUsesTargetSpecificScheme() {
         XCTAssertEqual(
             appSwitcher.switchURL(for: "xnook"),
-            URL(string: "xnook://island/show")
+            URL(string: "xnook://xnook/show")
         )
         XCTAssertEqual(
             appSwitcher.switchURL(for: "xisland"),
-            URL(string: "xisland://island/show")
+            URL(string: "xisland://xisland/show")
         )
     }
 }

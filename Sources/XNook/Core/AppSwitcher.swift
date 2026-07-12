@@ -106,7 +106,7 @@ final class AppSwitcher {
     func switchURL(for targetName: String) -> URL? {
         guard islandApps[targetName] != nil,
               let scheme = islandSchemes[targetName] else { return nil }
-        // URL 格式: island://{targetName}/show
+        // URL 格式: {target-scheme}://{targetName}/show
         return URL(string: "\(scheme)://\(targetName)/show")
     }
 
@@ -154,7 +154,7 @@ final class AppSwitcher {
 
     private func registeredHandlerBundleIdentifier(for island: IslandApp) -> String? {
         guard let scheme = islandSchemes[island.rawValue],
-              let url = URL(string: "\(scheme)://island/show"),
+              let url = URL(string: "\(scheme)://\(island.rawValue)/show"),
               let applicationURL = NSWorkspace.shared.urlForApplication(toOpen: url)
         else {
             return nil

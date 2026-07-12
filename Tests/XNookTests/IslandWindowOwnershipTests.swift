@@ -20,12 +20,20 @@ final class IslandWindowOwnershipTests: XCTestCase {
         XCTAssertEqual(owner, 20)
     }
 
-    func testVisibleIslandWindowRecognizesItselfAsFrontmost() {
+    func testVisibleIslandWindowRecognizesItselfAsFrontmost() throws {
+        guard NSScreen.screens.isEmpty == false else {
+            throw XCTSkip("当前测试环境没有可用屏幕，跳过依赖 Window Server 的校验")
+        }
+
         let window = NotchWindow()
         window.level = .screenSaver
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+        guard window.isVisible, window.windowNumber != 0 else {
+            throw XCTSkip("当前测试环境未提供可见窗口，跳过前台窗口校验")
+        }
 
         XCTAssertTrue(window.isFrontmostIslandWindow())
     }

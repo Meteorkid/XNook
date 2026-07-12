@@ -5,6 +5,8 @@ import QuartzCore
 final class NotchWindow: NSPanel {
     static let maxExpandedWidth: CGFloat = 520
     static let maxExpandedHeight: CGFloat = 600
+    private static let defaultWidth: CGFloat = 220
+    private static let defaultHeight: CGFloat = 50
 
     private static let expandedPadding: CGFloat = 8
     private static let collapsedHitHeight: CGFloat = 32
@@ -52,14 +54,17 @@ final class NotchWindow: NSPanel {
     // MARK: - Init
 
     init() {
-        let screen = Self.bestScreen()
-        let width: CGFloat = 220
-        let height: CGFloat = 50
-        let x = screen.frame.origin.x + (screen.frame.width - width) / 2
-        let y = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen) - height
+        let width = Self.defaultWidth
+        let height = Self.defaultHeight
+        let initialFrame: NSRect
+        if let screen = Self.bestScreen() {
+            initialFrame = Self.dockedFrame(on: screen, width: width, height: height)
+        } else {
+            initialFrame = Self.fallbackFrame(width: width, height: height)
+        }
 
         super.init(
-            contentRect: NSRect(x: x, y: y, width: width, height: height),
+            contentRect: initialFrame,
             styleMask: [.nonactivatingPanel, .fullSizeContentView, .borderless],
             backing: .buffered,
             defer: false
@@ -78,6 +83,13 @@ final class NotchWindow: NSPanel {
         isReleasedWhenClosed = false
         isRestorable = false
         setFrameAutosaveName("")
+
+        if let screen = Self.bestScreen() {
+            cachedBestScreen = screen
+            lastActiveScreenID = screen.deviceDescription[
+                NSDeviceDescriptionKey(rawValue: "NSScreenNumber")
+            ] as? CGDirectDisplayID
+        }
 
         applySpaceBehavior()
 
@@ -273,12 +285,26 @@ final class NotchWindow: NSPanel {
     // MARK: - Frame Management
 
     func resizeToFit(contentWidth: CGFloat, contentHeight: CGFloat, display: Bool = true) {
-        let screen = cachedOrRefreshScreen()
         let normalizedContentHeight = max(contentHeight, Self.collapsedHitHeight)
         let padding = Self.padding(forContentHeight: normalizedContentHeight)
         let w = contentWidth + padding * 2
         // 向上延伸窗口，使屏幕顶端在窗口内部
         let h = normalizedContentHeight + padding + Self.windowTopExtension
+        guard let screen = cachedOrRefreshScreen() else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            setFrameDirect(
+                NSRect(
+                    x: frame.origin.x,
+                    y: frame.origin.y,
+                    width: w,
+                    height: h
+                ),
+                display: display
+            )
+            CATransaction.commit()
+            return
+        }
         let x: CGFloat
         if let cx = customX, cx.isFinite {
             x = max(screen.frame.origin.x,
@@ -297,10 +323,26 @@ final class NotchWindow: NSPanel {
     }
 
     func resizeToFitCollapse(contentWidth: CGFloat, contentHeight: CGFloat) {
-        let screen = cachedOrRefreshScreen()
         let targetW = max(1, contentWidth.isFinite ? contentWidth : 180)
         // 向上延伸窗口
         let targetH = max(contentHeight, Self.collapsedHitHeight) + Self.windowTopExtension
+        guard let screen = cachedOrRefreshScreen() else {
+            isDragging = false
+            dragTracking = false
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            setFrameDirect(
+                NSRect(
+                    x: frame.origin.x,
+                    y: frame.origin.y,
+                    width: targetW,
+                    height: targetH
+                ),
+                display: true
+            )
+            CATransaction.commit()
+            return
+        }
         let targetX: CGFloat
         if let cx = customX, cx.isFinite {
             targetX = max(screen.frame.origin.x,
@@ -344,7 +386,22 @@ final class NotchWindow: NSPanel {
         return NSRect(x: x, y: y, width: w, height: h)
     }
 
-    static func bestScreen() -> NSScreen {
+    private static func dockedFrame(on screen: NSScreen, width: CGFloat, height: CGFloat) -> NSRect {
+        let x = screen.frame.origin.x + (screen.frame.width - width) / 2
+        let y = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen) - height
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private static func fallbackFrame(width: CGFloat, height: CGFloat) -> NSRect {
+        NSRect(
+            x: 0,
+            y: 0,
+            width: max(1, width),
+            height: max(collapsedHitHeight, height)
+        )
+    }
+
+    static func bestScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
         if let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
             return mouseScreen
@@ -355,10 +412,10 @@ final class NotchWindow: NSPanel {
         }) {
             return builtIn
         }
-        return NSScreen.main ?? NSScreen.screens.first!
+        return NSScreen.main ?? NSScreen.screens.first
     }
 
-    private func cachedOrRefreshScreen() -> NSScreen {
+    private func cachedOrRefreshScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
         let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
         if let mouseScreen {
@@ -370,7 +427,7 @@ final class NotchWindow: NSPanel {
             cachedBestScreen = mouseScreen
             return mouseScreen
         }
-        return cachedBestScreen ?? Self.bestScreen()
+        return cachedBestScreen ?? screen ?? Self.bestScreen()
     }
 
     static func screenHasPhysicalNotch(_ screen: NSScreen) -> Bool {
@@ -381,7 +438,7 @@ final class NotchWindow: NSPanel {
     }
 
     @objc private func screenDidChange(_ note: Notification) {
-        let screen = Self.bestScreen()
+        guard let screen = Self.bestScreen() else { return }
         let x: CGFloat
         if let cx = customX {
             x = max(screen.frame.origin.x,
@@ -417,7 +474,10 @@ final class NotchWindow: NSPanel {
                 isDragging = true
             }
             if isDragging {
-                let screen = cachedOrRefreshScreen()
+                guard let screen = cachedOrRefreshScreen() else {
+                    super.sendEvent(event)
+                    return
+                }
                 let newX = max(screen.frame.origin.x,
                                min(dragStartWindowX + dx,
                                    screen.frame.origin.x + screen.frame.width - frame.width))
@@ -454,16 +514,21 @@ final class NotchWindow: NSPanel {
     }
 
     func setFrameDirect(_ rect: NSRect, display: Bool = true) {
-        let screen = cachedOrRefreshScreen()
-        let normalized = Self.safeFrame(
-            NSRect(
-                x: rect.origin.x,
-                y: rect.origin.y,
-                width: rect.width,
-                height: max(rect.height, Self.collapsedHitHeight)
-            ),
-            screen: screen
+        let normalizedRect = NSRect(
+            x: rect.origin.x,
+            y: rect.origin.y,
+            width: rect.width,
+            height: max(rect.height, Self.collapsedHitHeight)
         )
+        let normalized: NSRect
+        if let screen = cachedOrRefreshScreen() {
+            normalized = Self.safeFrame(
+                normalizedRect,
+                screen: screen
+            )
+        } else {
+            normalized = normalizedRect
+        }
         super.setFrame(normalized, display: display)
     }
 

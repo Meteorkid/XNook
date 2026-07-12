@@ -7,12 +7,12 @@ enum SingleInstanceLock {
     private static var lockFD: Int32 = -1
 
     /// 尝试获取单实例锁，失败则退出
-    static func acquire() {
+    static func acquire(bundleURL: URL = Bundle.main.bundleURL) {
         guard let dir = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first else {
             print("[XNook] Unable to locate application support directory, skipping instance lock.")
             return
         }
-        let lockPath = (dir as NSString).appendingPathComponent("xnook_instance.lock")
+        let lockPath = (dir as NSString).appendingPathComponent(lockFilename(for: bundleURL))
 
         // 确保目录存在
         let fm = FileManager.default
@@ -33,5 +33,16 @@ enum SingleInstanceLock {
 
         lockFD = fd
         // 锁会在进程退出时自动释放
+    }
+
+    static func lockFilename(for bundleURL: URL) -> String {
+        if isDevelopmentBundle(bundleURL) {
+            return "xnook_dev_instance.lock"
+        }
+        return "xnook_instance.lock"
+    }
+
+    static func isDevelopmentBundle(_ bundleURL: URL) -> Bool {
+        bundleURL.standardizedFileURL.pathComponents.contains(".build")
     }
 }

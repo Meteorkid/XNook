@@ -42,6 +42,7 @@ codesign --force --deep --sign - "${APP_BUNDLE}"
 
 echo "App bundle created at: ${APP_BUNDLE}"
 echo "To run: open '${APP_BUNDLE}'"
+echo "If /Applications/X Nook.app is already running, use: open -n '${APP_BUNDLE}'"
 
 # 打包 DMG（可选，用于发布）
 if [[ "${XNOOK_BUILD_DMG:-0}" == "1" ]]; then

@@ -195,9 +195,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // 2. 双指下滑展开面板
+        // 自然滚动开启时 deltaY 正值=手指下滑；关闭时 deltaY 负值=手指下滑
+        // 统一转换为物理手指方向：正值=手指向下
+        let physicalDeltaY = event.isDirectionInvertedFromDevice
+            ? event.scrollingDeltaY
+            : -event.scrollingDeltaY
         guard UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel"),
               event.hasPreciseScrollingDeltas,
-              event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta
+              physicalDeltaY > NotchWindow.scrollExpandMinDelta
         else { return }
 
         guard let screen = window.screen else { return }

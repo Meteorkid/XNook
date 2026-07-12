@@ -553,10 +553,13 @@ private class FlippedView: NSView {
 
     override func scrollWheel(with event: NSEvent) {
         let scrollEnabled = UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel")
-        if scrollEnabled,
-           event.hasPreciseScrollingDeltas,
-           event.scrollingDeltaY > NotchWindow.scrollExpandMinDelta {
-            NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
+        if scrollEnabled, event.hasPreciseScrollingDeltas {
+            let physicalDeltaY = event.isDirectionInvertedFromDevice
+                ? event.scrollingDeltaY
+                : -event.scrollingDeltaY
+            if physicalDeltaY > NotchWindow.scrollExpandMinDelta {
+                NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
+            }
         }
         super.scrollWheel(with: event)
     }

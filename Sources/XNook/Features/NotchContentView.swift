@@ -36,6 +36,7 @@ struct NotchContentView: View {
     @State private var jellyTrigger = false
     @State private var jellySettled = false
     @State private var previousMouseY: CGFloat = 0
+    @State private var wasPointerInsidePillHitFrame = false
 
     // 防止快速晃动鼠标导致果冻动画错乱
     @State private var jellyGeneration: UInt = 0
@@ -540,6 +541,73 @@ struct NotchContentView: View {
     /// 鼠标接近判定距离（屏幕宽度的一定比例）
     private static let hoverProximityRange: CGFloat = 300
 
+    static func shouldTriggerHoverJelly(
+        isPointerInside: Bool,
+        wasPointerInside: Bool,
+        isExpanded: Bool,
+        collapseAnimating: Bool,
+        previousMouseY: CGFloat,
+        currentMouseY: CGFloat
+    ) -> Bool {
+        isPointerInside
+            && !isExpanded
+            && !collapseAnimating
+            && (!wasPointerInside || previousMouseY < currentMouseY)
+    }
+
+    static func shouldExpandForHover(
+        isPointerInside: Bool,
+        isExpanded: Bool,
+        hasPassedCollapseCooldown: Bool,
+        hoverToExpandPanel: Bool,
+        isSwitchingApps: Bool
+    ) -> Bool {
+        isPointerInside
+            && !isExpanded
+            && hasPassedCollapseCooldown
+            && hoverToExpandPanel
+            && !isSwitchingApps
+    }
+
+    static func hoverHitFrame(
+        windowFrame: CGRect,
+        screenFrame: CGRect?,
+        isExpanded: Bool
+    ) -> CGRect {
+        var hitFrame = windowFrame
+
+        if isExpanded {
+            hitFrame = windowFrame.insetBy(dx: -20, dy: -20)
+            if let screenFrame {
+                let minX = max(hitFrame.minX, screenFrame.minX)
+                let maxX = min(hitFrame.maxX, screenFrame.maxX)
+                if maxX >= minX {
+                    hitFrame.origin.x = minX
+                    hitFrame.size.width = maxX - minX
+                }
+            }
+            return hitFrame
+        }
+
+        if let screenFrame {
+            let screenTop = screenFrame.maxY
+            hitFrame.size.height += max(0, screenTop - hitFrame.maxY) + 1
+        }
+        return hitFrame
+    }
+
+    static func shouldDeferExpandedAutoHide(
+        mouseLocation: CGPoint,
+        windowFrame: CGRect,
+        screenFrame: CGRect?
+    ) -> Bool {
+        hoverHitFrame(
+            windowFrame: windowFrame,
+            screenFrame: screenFrame,
+            isExpanded: true
+        ).contains(mouseLocation)
+    }
+
     private func startHoverPolling() {
         stopHoverPolling()
         // 默认从低频开始，鼠标接近 notch 区域时自动加速
@@ -550,6 +618,20 @@ struct NotchContentView: View {
     private func stopHoverPolling() {
         hoverTimer?.invalidate()
         hoverTimer = nil
+    }
+
+    private func resolveNotchWindow() -> NotchWindow? {
+        if let appDelegateWindow = AppDelegate.shared?.notchWindow {
+            if notchWindow !== appDelegateWindow {
+                notchWindow = appDelegateWindow
+            }
+            return appDelegateWindow
+        }
+
+        if notchWindow == nil {
+            notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
+        }
+        return notchWindow
     }
 
     /// 调度单次轮询，完成后根据鼠标距离决定下次频率
@@ -571,7 +653,7 @@ struct NotchContentView: View {
     }
 
     private func pollMousePosition() {
-        guard let window = notchWindow else {
+        guard let window = resolveNotchWindow() else {
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
             return
         }
@@ -587,30 +669,26 @@ struct NotchContentView: View {
         }
 
         let mouse = NSEvent.mouseLocation
-        var hitFrame = window.frame
-
-        // 展开时用更大的命中区域
-        if isExpanded {
-            hitFrame.origin.y -= 20
-            hitFrame.size.height = expandedHeight + 40
-            if let screen = window.screen?.visibleFrame {
-                hitFrame.origin.x = max(hitFrame.origin.x, screen.minX)
-                hitFrame.size.width = min(hitFrame.maxX, screen.maxX) - hitFrame.origin.x
-            }
-        } else {
-            // 收起状态下扩展到屏幕顶部
-            if let screen = window.screen?.frame {
-                let screenTop = screen.maxY
-                hitFrame.size.height += max(0, screenTop - hitFrame.maxY) + 1
-            }
-        }
+        let hitFrame = Self.hoverHitFrame(
+            windowFrame: window.frame,
+            screenFrame: isExpanded ? window.screen?.visibleFrame : window.screen?.frame,
+            isExpanded: isExpanded
+        )
 
         var inside = hitFrame.contains(mouse)
+        let wasInside = wasPointerInsidePillHitFrame
 
         if collapseAnimating { inside = false }
 
         // 检测鼠标从下方进入药丸（仅收起状态且无动画时）
-        if inside, !isExpanded, !collapseAnimating, previousMouseY < mouse.y {
+        if Self.shouldTriggerHoverJelly(
+            isPointerInside: inside,
+            wasPointerInside: wasInside,
+            isExpanded: isExpanded,
+            collapseAnimating: collapseAnimating,
+            previousMouseY: previousMouseY,
+            currentMouseY: mouse.y
+        ) {
             if !isHoveringPill {
                 isHoveringPill = true
                 jellySettled = false
@@ -642,6 +720,7 @@ struct NotchContentView: View {
         }
 
         previousMouseY = mouse.y
+        wasPointerInsidePillHitFrame = inside
 
         // 吸附效果：鼠标靠近药丸时水平偏移
         if !isExpanded, !collapseAnimating {
@@ -676,10 +755,13 @@ struct NotchContentView: View {
             scheduleExpandedAutoHide()
         }
 
-        if inside && !isExpanded {
-            guard Date().timeIntervalSince(lastCollapseAt) > 0.65 else { return }
-            guard hoverToExpandPanel else { return }
-            guard !(notchWindow?.isSwitchingApps ?? false) else { return }
+        if Self.shouldExpandForHover(
+            isPointerInside: inside,
+            isExpanded: isExpanded,
+            hasPassedCollapseCooldown: Date().timeIntervalSince(lastCollapseAt) > 0.65,
+            hoverToExpandPanel: hoverToExpandPanel,
+            isSwitchingApps: notchWindow?.isSwitchingApps ?? false
+        ) {
             expandedByHover = true
             expandedAt = Date()
             expand(to: .expanded)
@@ -718,6 +800,16 @@ struct NotchContentView: View {
         Task {
             try? await Task.sleep(for: .seconds(delay))
             guard autoHideGeneration == gen, isExpanded else { return }
+            if let window = resolveNotchWindow() {
+                if Self.shouldDeferExpandedAutoHide(
+                    mouseLocation: NSEvent.mouseLocation,
+                    windowFrame: window.frame,
+                    screenFrame: window.screen?.visibleFrame
+                ) {
+                    scheduleExpandedAutoHide()
+                    return
+                }
+            }
             collapse()
         }
     }

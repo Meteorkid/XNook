@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NookFlow — 创意提案 | TRAE AI 创造力大赛</title>
+<style>
+  :root {
+    --bg: #000000;
+    --desktop: #1a1a2e;
+    --surface: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --surface-3: #3a3a3c;
+    --accent: #0a84ff;
+    --accent-2: #bf5af2;
+    --text: #ffffff;
+    --text-secondary: #aeaeb2;
+    --text-tertiary: #8e8e93;
+    --separator: #38383a;
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --calendar: #ff453a;
+    --notes: #ffd60a;
+    --files: #0a84ff;
+    --media: #bf5af2;
+    --shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- 顶部导航 ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(0,0,0,0.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--separator);
+  }
+  nav .wrap {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 52px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+  .brand-dot {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 0 12px rgba(10,132,255,0.5);
+  }
+  nav ul { list-style: none; display: flex; gap: 22px; }
+  nav a {
+    color: var(--text-secondary); text-decoration: none; font-size: 13px;
+    transition: color .2s;
+  }
+  nav a:hover { color: var(--text); }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    position: relative;
+    padding: 80px 0 60px;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(10,132,255,0.18), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 20%, rgba(191,90,242,0.12), transparent 60%),
+      var(--bg);
+    overflow: hidden;
+  }
+  .hero-grid {
+    display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center;
+  }
+  .tag {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-radius: 999px;
+    background: rgba(10,132,255,0.12);
+    border: 1px solid rgba(10,132,255,0.3);
+    font-size: 12px; color: var(--accent); font-weight: 500;
+    margin-bottom: 20px;
+  }
+  .tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  h1 {
+    font-size: 44px; line-height: 1.15; font-weight: 700;
+    letter-spacing: -0.02em; margin-bottom: 18px;
+  }
+  h1 .grad {
+    background: linear-gradient(135deg, #5ac8fa, #bf5af2);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero p.lead {
+    font-size: 17px; color: var(--text-secondary); margin-bottom: 28px; max-width: 520px;
+  }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px; border-radius: 10px;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+    border: none; text-decoration: none; transition: transform .15s, background .2s;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #409cff; }
+  .btn-ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--separator); }
+  .btn-ghost:hover { background: var(--surface-3); }
+
+  /* ---------- 刘海模拟 ---------- */
+  .notch-stage {
+    position: relative;
+    background: linear-gradient(160deg, #2a2a3e, #16161e);
+    border-radius: 18px;
+    padding: 36px 24px 28px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--separator);
+    overflow: hidden;
+  }
+  .notch-stage::before {
+    content: "";
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 200px; height: 26px;
+    background: #000;
+    border-bottom-left-radius: 16px;
+    border-bottom-right-radius: 16px;
+    z-index: 5;
+  }
+  .notch-pill {
+    position: relative;
+    margin: 18px auto 0;
+    width: 320px; min-height: 64px;
+    background: #000;
+    border-radius: 28px;
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.06);
+    transition: all .4s cubic-bezier(.4,.0,.2,1);
+    z-index: 4;
+  }
+  .notch-pill.expanded {
+    width: 360px; min-height: 220px;
+    border-radius: 24px;
+    flex-direction: column; align-items: stretch;
+    padding: 14px;
+  }
+  .pill-row { display: flex; align-items: center; gap: 10px; width: 100%; }
+  .pill-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0;
+  }
+  .pill-text { font-size: 12px; color: var(--text-secondary); flex: 1; }
+  .pill-text strong { color: var(--text); font-weight: 600; font-size: 12px; }
+  .countdown {
+    font-variant-numeric: tabular-nums;
+    font-size: 11px; color: var(--orange);
+    background: rgba(255,159,10,0.12);
+    padding: 3px 8px; border-radius: 6px;
+  }
+
+  .task-card { display: none; width: 100%; }
+  .task-card.show { display: block; animation: fadeUp .4s ease; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .task-card-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .task-card-sub { font-size: 11px; color: var(--text-tertiary); margin-bottom: 10px; }
+  .task-actions { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .mini-btn {
+    font-size: 10px; padding: 5px 9px; border-radius: 6px;
+    background: var(--surface-3); color: var(--text); border: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .mini-btn:hover { background: #4a4a4c; }
+  .mini-btn.accent { background: var(--accent); }
+  .mini-btn.accent:hover { background: #409cff; }
+
+  .checklist { margin-bottom: 8px; }
+  .check-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; padding: 4px 0; color: var(--text-secondary);
+    cursor: pointer; user-select: none;
+  }
+  .check-box {
+    width: 14px; height: 14px; border-radius: 4px;
+    border: 1.5px solid var(--text-tertiary);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: all .2s;
+  }
+  .check-item.done .check-box { background: var(--green); border-color: var(--green); }
+  .check-item.done .check-label { color: var(--text-tertiary); text-decoration: line-through; }
+
+  .file-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .file-tag {
+    font-size: 10px; padding: 3px 8px; border-radius: 6px;
+    background: rgba(10,132,255,0.14); color: #6cb6ff;
+    border: 1px solid rgba(10,132,255,0.25);
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .file-tag .x { cursor: pointer; opacity: .6; }
+  .file-tag .x:hover { opacity: 1; }
+
+  .stage-label {
+    text-align: center; font-size: 11px; color: var(--text-tertiary);
+    margin-top: 14px; letter-spacing: 0.04em;
+  }
+
+  /* ---------- 通用 section ---------- */
+  section { padding: 72px 0; }
+  .section-head { margin-bottom: 44px; }
+  .section-num {
+    font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  h2 {
+    font-size: 32px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 12px;
+  }
+  .section-sub { font-size: 16px; color: var(--text-secondary); max-width: 640px; }
+
+  /* ---------- 痛点卡片 ---------- */
+  .pain-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+  }
+  .pain-card {
+    background: var(--surface); border: 1px solid var(--separator);
+    border-radius: 14px; padding: 24px;
+  }
+  .pain-icon {
+    width: 38px; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; margin-bottom: 14px;
+  }
+  .pain-card h3 { font-size: 16px; margin-bottom: 8px; }
+  .pain-card p { font-size: 13px; color: var(--text-secondary); }
+
+  .persona {
+    margin-top: 28px;
+    background: linear-gradient(135deg, rgba(10,132,255,0.08), rgba(191,90,242,0.06));
+    border: 1px solid var(--separator);
+    border-radius: 14px; padding: 24px;
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px;
+  }
+  .persona-item h4 { font-size: 14px; margin-bottom: 6px; color: var(--text); }
+  .persona-item p { font-size: 13px; color: var(--text-secondary); }
+
+  /* ---------- 工作流 ---------- */
+  .flow {
+    background: var(--surface); border: 1px solid var(--separator);
+    border-radius: 18px; padding: 36px;
+  }
+  .flow-steps {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+    margin-bottom: 28px; position: relative;
+  }
+  .flow-step {
+    text-align: center; position: relative; padding: 16px 8px;
+  }
+  .flow-step .num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--surface-3); color: var(--text);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; margin: 0 auto 10px;
+    border: 1.5px solid var(--separator);
+  }
+  .flow-step.active .num { background: var(--accent); border-color: var(--accent); }
+  .flow-step .label { font-size: 12px; font-weight: 500; }
+  .flow-step .desc { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+  .flow-arrow {
+    position: absolute; top: 24px; right: -8px; color: var(--text-tertiary); font-size: 14px;
+  }
+
+  /* 交互式工作流演示 */
+  .flow-demo {
+    margin-top: 28px;
+    background: var(--bg); border: 1px solid var(--separator);
+    border-radius: 14px; padding: 24px;
+    min-height: 320px;
+  }
+  .demo-tabs { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+  .demo-tab {
+    font-size: 12px; padding: 7px 14px; border-radius: 8px;
+    background: var(--surface-2); color: var(--text-secondary);
+    border: 1px solid var(--separator); cursor: pointer;
+  }
+  .demo-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .schedule-list { display: flex; flex-direction: column; gap: 10px; }
+  .schedule-item {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--surface-2); border: 1px solid var(--separator);
+    border-radius: 12px; padding: 14px 16px;
+    transition: border-color .2s;
+  }
+  .schedule-item:hover { border-color: var(--accent); }
+  .schedule-time {
+    font-size: 11px; color: var(--text-tertiary); width: 80px;
+    font-variant-numeric: tabular-nums;
+  }
+  .schedule-color { width: 4px; height: 32px; border-radius: 2px; }
+  .schedule-info { flex: 1; }
+  .schedule-info .t { font-size: 13px; font-weight: 500; }
+  .schedule-info .s { font-size: 11px; color: var(--text-tertiary); }
+
+  .focus-state, .review-state { display: none; }
+  .focus-state.show, .review-state.show, .schedule-list.show { display: block; }
+
+  .focus-card {
+    background: linear-gradient(135deg, rgba(10,132,255,0.1), rgba(191,90,242,0.06));
+    border: 1px solid rgba(10,132,255,0.3);
+    border-radius: 14px; padding: 22px;
+  }
+  .focus-card h4 { font-size: 16px; margin-bottom: 4px; }
+  .focus-card .meta { font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; }
+  .focus-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .focus-panel {
+    background: var(--surface-2); border-radius: 10px; padding: 14px;
+    border: 1px solid var(--separator);
+  }
+  .focus-panel h5 {
+    font-size: 11px; color: var(--text-tertiary); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 10px;
+  }
+  .note-input {
+    width: 100%; background: var(--bg); border: 1px solid var(--separator);
+    border-radius: 8px; padding: 8px 10px; color: var(--text);
+    font-size: 12px; font-family: inherit; resize: vertical; min-height: 60px;
+  }
+  .note-input:focus { outline: none; border-color: var(--accent); }
+
+  .review-card {
+    background: var(--surface-2); border: 1px solid var(--separator);
+    border-radius: 14px; padding: 22px;
+  }
+  .review-card h4 { font-size: 15px; margin-bottom: 4px; }
+  .review-card .meta { font-size: 12px; color: var(--text-tertiary); margin-bottom: 14px; }
+  .review-section { margin-bottom: 14px; }
+  .review-section .label {
+    font-size: 11px; color: var(--text-tertiary); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 6px;
+  }
+  .review-section .content { font-size: 13px; color: var(--text-secondary); }
+
+  /* ---------- 核心功能 ---------- */
+  .feature-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
+  }
+  .feature-card {
+    background: var(--surface); border: 1px solid var(--separator);
+    border-radius: 14px; padding: 24px;
+    transition: transform .2s, border-color .2s;
+  }
+  .feature-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .feature-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .feature-icon {
+    width: 36px; height: 36px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .feature-card h3 { font-size: 15px; }
+  .feature-card p { font-size: 13px; color: var(--text-secondary); }
+
+  /* ---------- 价值 ---------- */
+  .value-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  }
+  .value-card {
+    background: linear-gradient(160deg, var(--surface), var(--surface-2));
+    border: 1px solid var(--separator);
+    border-radius: 14px; padding: 26px 22px;
+  }
+  .value-card .big {
+    font-size: 32px; font-weight: 700; margin-bottom: 8px;
+    background: linear-gradient(135deg, #5ac8fa, #bf5af2);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .value-card h3 { font-size: 14px; margin-bottom: 6px; }
+  .value-card p { font-size: 12px; color: var(--text-secondary); }
+
+  /* ---------- 迭代计划 ---------- */
+  .roadmap { display: flex; flex-direction: column; gap: 0; }
+  .roadmap-item {
+    display: grid; grid-template-columns: 140px 1fr; gap: 24px;
+    padding: 22px 0; border-bottom: 1px solid var(--separator);
+  }
+  .roadmap-item:last-child { border-bottom: none; }
+  .roadmap-date {
+    font-size: 12px; color: var(--accent); font-weight: 600;
+  }
+  .roadmap-date .phase { display: block; color: var(--text-tertiary); font-weight: 400; margin-top: 2px; }
+  .roadmap-body h3 { font-size: 15px; margin-bottom: 6px; }
+  .roadmap-body p { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+  .roadmap-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .rm-tag {
+    font-size: 10px; padding: 3px 8px; border-radius: 5px;
+    background: var(--surface-2); color: var(--text-secondary);
+    border: 1px solid var(--separator);
+  }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 1px solid var(--separator);
+    padding: 36px 0; text-align: center;
+    color: var(--text-tertiary); font-size: 12px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* ---------- 响应式 ---------- */
+  @media (max-width: 860px) {
+    .hero-grid { grid-template-columns: 1fr; }
+    .pain-grid, .feature-grid, .value-grid { grid-template-columns: 1fr; }
+    .flow-steps { grid-template-columns: repeat(2, 1fr); }
+    .flow-arrow { display: none; }
+    .focus-grid { grid-template-columns: 1fr; }
+    .persona { grid-template-columns: 1fr; }
+    .roadmap-item { grid-template-columns: 1fr; gap: 6px; }
+    h1 { font-size: 32px; }
+    h2 { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand"><div class="brand-dot"></div>NookFlow</div>
+    <ul>
+      <li><a href="#intro">创意简介</a></li>
+      <li><a href="#users">用户与痛点</a></li>
+      <li><a href="#flow">工作流</a></li>
+      <li><a href="#features">核心功能</a></li>
+      <li><a href="#value">价值</a></li>
+      <li><a href="#plan">迭代计划</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="tag">学习工作赛道 · TRAE AI 创造力大赛 2026</span>
+      <h1>NookFlow<br><span class="grad">让每场会议和学习任务都拥有自己的刘海工作台</span></h1>
+      <p class="lead">NookFlow 是 X Nook 在赛期内的核心迭代。它把 MacBook 刘海屏从被动展示区，升级为与当前任务同步的轻量工作台——日程倒计时、关联笔记、暂存文件、结束沉淀，一站完成，减少上下文切换。</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#flow">查看工作流演示</a>
+        <a class="btn btn-ghost" href="#plan">赛期迭代计划</a>
+      </div>
+    </div>
+
+    <!-- 刘海交互演示 -->
+    <div class="notch-stage">
+      <div class="notch-pill" id="notchPill">
+        <div class="pill-row" id="pillCollapsed">
+          <div class="pill-icon" style="background:rgba(255,69,58,0.18);color:#ff8177;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          </div>
+          <div class="pill-text">
+            <strong>产品周会</strong><br>
+            <span style="font-size:10px;color:var(--text-tertiary)">14:00 - 15:00 · 会议室 A</span>
+          </div>
+          <div class="countdown" id="pillCountdown">02:00 后开始</div>
+          <button class="mini-btn accent" id="startTaskBtn">开始任务</button>
+        </div>
+
+        <div class="task-card" id="taskCard">
+          <div class="pill-row" style="margin-bottom:8px;">
+            <div class="pill-icon" style="background:rgba(48,209,88,0.18);color:#5ee382;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="task-card-title">产品周会 · 进行中</div>
+              <div class="task-card-sub">已记录 2 条笔记 · 暂存 3 个文件</div>
+            </div>
+            <div class="countdown" id="focusTimer">00:00</div>
+          </div>
+
+          <div class="checklist">
+            <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">确认本周交付项</span></div>
+            <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">同步设计稿进度</span></div>
+            <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">记录待办与负责人</span></div>
+          </div>
+
+          <div class="file-tags">
+            <span class="file-tag">📄 周报.docx <span class="x" onclick="this.parentElement.remove()">×</span></span>
+            <span class="file-tag">📊 数据.xlsx <span class="x" onclick="this.parentElement.remove()">×</span></span>
+            <span class="file-tag">🖼 设计稿.png <span class="x" onclick="this.parentElement.remove()">×</span></span>
+          </div>
+
+          <div style="display:flex;gap:6px;margin-top:10px;">
+            <button class="mini-btn" onclick="addFile()">+ 暂存文件</button>
+            <button class="mini-btn" onclick="addNote()">+ 快速笔记</button>
+            <button class="mini-btn" style="background:var(--red);margin-left:auto;" onclick="endTask()">结束任务</button>
+          </div>
+        </div>
+      </div>
+      <div class="stage-label">点击「开始任务」体验刘海口工作台</div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ 创意简介 ============ -->
+<section id="intro">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-num">01 / 创意简介</div>
+      <h2>把刘海屏变成任务的入口，而不是通知的终点</h2>
+      <p class="section-sub">MacBook 的刘海是一块永远在最前方的视觉区域，今天它只用来显示时间。NookFlow 让这块区域与用户当前的会议或学习任务同步——开始任务时它展开为工作卡片，结束时它把过程沉淀为可回看的记录。</p>
+    </div>
+
+    <div class="persona">
+      <div class="persona-item">
+        <h4>基础项目</h4>
+        <p>X Nook 已实现 macOS 刘海工具中心：日历、便签、文件托盘、媒体控制、双指手势切换、主题与设置。但这些能力目前彼此独立，缺少围绕"一次任务"的串联。</p>
+      </div>
+      <div class="persona-item">
+        <h4>赛期内迭代：NookFlow</h4>
+        <p>NookFlow 不是原样提交旧项目，而是在 X Nook 之上新增"任务上下文工作流"内核。原来的日历、笔记、文件被整合进一个以任务为单位的生命周期：选择日程 → 开始任务 → 记录与暂存 → 结束沉淀 → 回看。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 用户与痛点 ============ -->
+<section id="users" style="background:var(--surface);">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-num">02 / 目标用户与痛点</div>
+      <h2>反复切换应用，是注意力的隐形杀手</h2>
+      <p class="section-sub">核心用户为使用 MacBook 的学生与办公人群。他们在上课、开会或深度学习时，需要频繁在日历、笔记、Finder 与多个应用之间切换，临时资料难以与具体任务关联，结束后难以回溯。</p>
+    </div>
+
+    <div class="pain-grid">
+      <div class="pain-card">
+        <div class="pain-icon" style="background:rgba(255,69,58,0.18);color:#ff8177;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <h3>切换成本高</h3>
+        <p>日历看时间、笔记记内容、Finder 翻资料、聊天工具对日程——一次任务要打开 4-5 个应用，注意力被反复打断。</p>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon" style="background:rgba(255,159,10,0.18);color:#ffb340;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <h3>资料与任务脱节</h3>
+        <p>会议中临时下载的文件、随手记的要点，散落在桌面和多个笔记里。一周后想找"上次那个会议的设计稿"，往往要翻半小时。</p>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon" style="background:rgba(191,90,242,0.18);color:#d08bff;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <h3>缺少任务边界感</h3>
+        <p>没有明确的"开始 / 结束"仪式，任务之间的上下文互相串味。结束会议后没有沉淀环节，待办和关键决策容易被遗忘。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 工作流 ============ -->
+<section id="flow">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-num">03 / 产品工作流</div>
+      <h2>一条围绕任务的关键链路</h2>
+      <p class="section-sub">选择日程 → 开始任务 → 记录笔记与暂存文件 → 结束任务 → 回看任务上下文。所有动作都发生在刘海中，不必切换到其他应用。</p>
+    </div>
+
+    <div class="flow">
+      <div class="flow-steps">
+        <div class="flow-step active"><div class="num">1</div><div class="label">选择日程</div><div class="desc">从日历 Widget 选取即将开始的事项</div><span class="flow-arrow">→</span></div>
+        <div class="flow-step"><div class="num">2</div><div class="label">开始任务</div><div class="desc">刘海展开为任务卡片，进入专注</div><span class="flow-arrow">→</span></div>
+        <div class="flow-step"><div class="num">3</div><div class="label">记录 / 暂存</div><div class="desc">快速笔记、拖入文件、勾选待办</div><span class="flow-arrow">→</span></div>
+        <div class="flow-step"><div class="num">4</div><div class="label">结束任务</div><div class="desc">收起卡片，生成任务记录</div><span class="flow-arrow">→</span></div>
+        <div class="flow-step"><div class="num">5</div><div class="label">回看上下文</div><div class="desc">按时间或日程查看历史任务</div></div>
+      </div>
+
+      <!-- 交互式演示 -->
+      <div class="flow-demo">
+        <div class="demo-tabs">
+          <div class="demo-tab active" onclick="switchDemo('schedule', this)">① 选择日程</div>
+          <div class="demo-tab" onclick="switchDemo('focus', this)">② 专注状态</div>
+          <div class="demo-tab" onclick="switchDemo('review', this)">⑤ 回看记录</div>
+        </div>
+
+        <!-- 日程选择 -->
+        <div class="schedule-list show" id="demoSchedule">
+          <div class="schedule-item">
+            <div class="schedule-time">14:00 - 15:00</div>
+            <div class="schedule-color" style="background:var(--calendar)"></div>
+            <div class="schedule-info"><div class="t">产品周会</div><div class="s">会议室 A · 5 人</div></div>
+            <button class="mini-btn accent">开始任务</button>
+          </div>
+          <div class="schedule-item">
+            <div class="schedule-time">15:30 - 17:00</div>
+            <div class="schedule-color" style="background:var(--notes)"></div>
+            <div class="schedule-info"><div class="t">算法复习 · 动态规划</div><div class="s">自习室 · 个人</div></div>
+            <button class="mini-btn">开始任务</button>
+          </div>
+          <div class="schedule-item">
+            <div class="schedule-time">19:00 - 20:00</div>
+            <div class="schedule-color" style="background:var(--files)"></div>
+            <div class="schedule-info"><div class="t">小组作业讨论</div><div class="s">线上 · 4 人</div></div>
+            <button class="mini-btn">开始任务</button>
+          </div>
+        </div>
+
+        <!-- 专注状态 -->
+        <div class="focus-state" id="demoFocus">
+          <div class="focus-card">
+            <h4>产品周会 · 进行中</h4>
+            <div class="meta">14:00 - 15:00 · 会议室 A · 已进行 12 分钟</div>
+            <div class="focus-grid">
+              <div class="focus-panel">
+                <h5>关联笔记</h5>
+                <textarea class="note-input" placeholder="输入快速笔记...">· 确认本周交付：设置页改版、日历提醒音
+· 设计稿周三前出 v2
+· 待办：联系后端接口同学</textarea>
+              </div>
+              <div class="focus-panel">
+                <h5>暂存文件 (3)</h5>
+                <div class="file-tags" style="margin-top:0;">
+                  <span class="file-tag">📄 周报.docx</span>
+                  <span class="file-tag">📊 数据.xlsx</span>
+                  <span class="file-tag">🖼 设计稿.png</span>
+                </div>
+                <h5 style="margin-top:12px;">待办清单</h5>
+                <div class="checklist">
+                  <div class="check-item done" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">确认本周交付项</span></div>
+                  <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">同步设计稿进度</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 回看记录 -->
+        <div class="review-state" id="demoReview">
+          <div class="review-card">
+            <h4>产品周会</h4>
+            <div class="meta">2026-07-10 14:00 - 15:00 · 时长 58 分钟</div>
+
+            <div class="review-section">
+              <div class="label">关联笔记</div>
+              <div class="content">· 确认本周交付：设置页改版、日历提醒音<br>· 设计稿周三前出 v2<br>· 待办：联系后端接口同学</div>
+            </div>
+            <div class="review-section">
+              <div class="label">暂存文件</div>
+              <div class="file-tags" style="margin-top:0;">
+                <span class="file-tag">📄 周报.docx</span>
+                <span class="file-tag">📊 数据.xlsx</span>
+                <span class="file-tag">🖼 设计稿.png</span>
+              </div>
+            </div>
+            <div class="review-section">
+              <div class="label">完成待办</div>
+              <div class="content">2 / 3 已完成 · 1 项延续到下次</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 核心功能 ============ -->
+<section id="features" style="background:var(--surface);">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-num">04 / 核心功能</div>
+      <h2>NookFlow 在赛期内要新增与整合的能力</h2>
+      <p class="section-sub">以下为参赛版本规划的核心功能。其中"任务上下文工作流"是 NookFlow 相对 X Nook 的主要新增内核；日历、笔记、文件托盘为已有能力的整合升级。</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-head">
+          <div class="feature-icon" style="background:rgba(10,132,255,0.18);color:#5ac8fa;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <h3>任务上下文卡片</h3>
+        </div>
+        <p>从日程进入任务后，刘海展开为上下文卡片：日程标题、倒计时、关联笔记入口、文件暂存区、待办勾选。所有动作集中在一块区域。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-head">
+          <div class="feature-icon" style="background:rgba(255,69,58,0.18);color:#ff8177;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          </div>
+          <h3>日程驱动入口</h3>
+        </div>
+        <p>日历 Widget 不再只是查看，而是任务入口。选中即将开始的日程即可一键进入任务上下文，日程元数据（时间、地点、参与人）自动带入卡片。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-head">
+          <div class="feature-icon" style="background:rgba(255,214,10,0.18);color:#ffe45e;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </div>
+          <h3>关联笔记</h3>
+        </div>
+        <p>每个任务自带一份笔记，记录的内容自动绑定到该任务。无需新建文档、命名、归类——任务结束，笔记就位。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-head">
+          <div class="feature-icon" style="background:rgba(191,90,242,0.18);color:#d08bff;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <h3>文件暂存托盘</h3>
+        </div>
+        <p>会议中拖入的文件自动绑定到当前任务，结束时一并沉淀。一周后回看任务，原始文件、笔记、待办一起出现。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-head">
+          <div class="feature-icon" style="background:rgba(48,209,88,0.18);color:#5ee382;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
+          <h3>任务待办清单</h3>
+        </div>
+        <p>任务卡片内置轻量待办，记录当场确认的事项与负责人。结束任务时未完成项可标记为延续到下次。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-head">
+          <div class="feature-icon" style="background:rgba(255,159,10,0.18);color:#ffb340;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+          </div>
+          <h3>任务回看</h3>
+        </div>
+        <p>结束的任务沉淀为历史记录，可按时间或日程查看。每条记录包含笔记、文件、待办完成情况，形成可追溯的工作日志。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 价值 ============ -->
+<section id="value">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-num">05 / 价值与意义</div>
+      <h2>让任务有边界，让上下文可回看</h2>
+      <p class="section-sub">NookFlow 的价值不在于"又一个笔记应用"，而在于把分散的工具按任务串联起来，给学生和办公人群一个低成本的上下文沉淀方式。</p>
+    </div>
+
+    <div class="value-grid">
+      <div class="value-card">
+        <div class="big">−4</div>
+        <h3>减少应用切换</h3>
+        <p>从日历、笔记、Finder、聊天工具的反复跳转，收敛到刘海一块区域。注意力被打断的次数显著下降。</p>
+      </div>
+      <div class="value-card">
+        <div class="big">1:1</div>
+        <h3>资料与任务绑定</h3>
+        <p>文件、笔记、待办不再是孤儿，而是天然属于某次会议或某节课。回溯时无需在文件夹里大海捞针。</p>
+      </div>
+      <div class="value-card">
+        <div class="big">∞</div>
+        <h3>可回看的工作日志</h3>
+        <p>每一次任务都沉淀为一条记录。学生可以复习"那节课记了什么"，办公用户可以追溯"那次会决定了什么"。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 迭代计划 ============ -->
+<section id="plan" style="background:var(--surface);">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-num">06 / 赛期内迭代计划</div>
+      <h2>用 TRAE IDE 从设计到测试，全程可追溯</h2>
+      <p class="section-sub">参赛版本将使用 TRAE IDE 完成设计、编码、调试与测试，并保留真实的任务 Session ID、对话记录与阶段截图。以下为赛期内的迭代节奏。</p>
+    </div>
+
+    <div class="roadmap">
+      <div class="roadmap-item">
+        <div class="roadmap-date">2026.06.16 - 06.30<span class="phase">阶段一 · 设计</span></div>
+        <div class="roadmap-body">
+          <h3>任务上下文数据模型与交互设计</h3>
+          <p>设计 TaskContext 数据结构（关联日程、笔记、文件、待办），定义刘海展开为任务卡片的交互流程。产出设计稿与状态机。</p>
+          <div class="roadmap-tags">
+            <span class="rm-tag">数据模型</span>
+            <span class="rm-tag">交互设计</span>
+            <span class="rm-tag">状态机</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="roadmap-item">
+        <div class="roadmap-date">2026.07.01 - 07.15<span class="phase">阶段二 · 初赛 Demo</span></div>
+        <div class="roadmap-body">
+          <h3>核心链路打通，提交可交互 Demo</h3>
+          <p>实现"选择日程 → 开始任务 → 记录笔记/暂存文件 → 结束任务"主链路。日历 Widget 改造为任务入口，笔记与文件托盘接入任务上下文。提交初赛 Demo 与创意提案。</p>
+          <div class="roadmap-tags">
+            <span class="rm-tag">主链路</span>
+            <span class="rm-tag">日历入口</span>
+            <span class="rm-tag">初赛提交</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="roadmap-item">
+        <div class="roadmap-date">2026.07.21 - 08.09<span class="phase">阶段三 · 复赛</span></div>
+        <div class="roadmap-body">
+          <h3>任务回看与历史记录完善</h3>
+          <p>实现任务结束后的沉淀与回看视图，支持按时间、日程筛选历史任务。补充待办延续、任务时长统计。完善用户路径与核心体验。</p>
+          <div class="roadmap-tags">
+            <span class="rm-tag">回看视图</span>
+            <span class="rm-tag">历史筛选</span>
+            <span class="rm-tag">复赛交付</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="roadmap-item">
+        <div class="roadmap-date">2026.08.15 - 08.22<span class="phase">阶段四 · 决赛</span></div>
+        <div class="roadmap-body">
+          <h3>稳定性打磨与现场路演</h3>
+          <p>边缘场景处理、性能优化、多显示器适配验证。准备路演材料与现场演示脚本，完成现场答辩。</p>
+          <div class="roadmap-tags">
+            <span class="rm-tag">稳定性</span>
+            <span class="rm-tag">多显示器</span>
+            <span class="rm-tag">路演</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:32px; padding:20px; background:var(--bg); border:1px solid var(--separator); border-radius:12px; font-size:13px; color:var(--text-secondary);">
+      <strong style="color:var(--text);">开发方式说明：</strong>
+      参赛版本将全程使用 TRAE IDE 完成设计、编码、调试与测试。开发过程会保留真实的任务 Session ID、AI 对话记录与阶段成果截图，作为创作过程的真实性证明。NookFlow 不宣称尚未实现的 AI 模型能力，聚焦于把 macOS 刘海屏改造为任务上下文工作台这一产品创新。
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    NookFlow · 基于 X Nook 赛期内迭代 · TRAE AI 创造力大赛 2026 · 学习工作赛道
+  </div>
+</footer>
+
+<script>
+  // ---------- 顶部刘海交互 ----------
+  const pill = document.getElementById('notchPill');
+  const collapsed = document.getElementById('pillCollapsed');
+  const taskCard = document.getElementById('taskCard');
+  const startBtn = document.getElementById('startTaskBtn');
+  const focusTimer = document.getElementById('focusTimer');
+  let timerInterval = null;
+  let seconds = 0;
+
+  startBtn.addEventListener('click', () => {
+    pill.classList.add('expanded');
+    collapsed.style.display = 'none';
+    taskCard.classList.add('show');
+    seconds = 0;
+    focusTimer.textContent = '00:00';
+    timerInterval = setInterval(() => {
+      seconds++;
+      const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+      const s = String(seconds % 60).padStart(2, '0');
+      focusTimer.textContent = `${m}:${s}`;
+    }, 1000);
+  });
+
+  function endTask() {
+    if (timerInterval) clearInterval(timerInterval);
+    pill.classList.remove('expanded');
+    taskCard.classList.remove('show');
+    collapsed.style.display = 'flex';
+    focusTimer.textContent = '00:00';
+  }
+
+  function toggleCheck(el) {
+    el.classList.toggle('done');
+  }
+
+  function addFile() {
+    const tags = document.querySelector('#taskCard .file-tags');
+    const names = ['📎 资料.pdf', '🔗 链接.txt', '📋 会议纪要.md', '🎨 草图.png'];
+    const name = names[Math.floor(Math.random() * names.length)];
+    const tag = document.createElement('span');
+    tag.className = 'file-tag';
+    tag.innerHTML = `${name} <span class="x" onclick="this.parentElement.remove()">×</span>`;
+    tags.appendChild(tag);
+  }
+
+  function addNote() {
+    const checklist = document.querySelector('#taskCard .checklist');
+    const item = document.createElement('div');
+    item.className = 'check-item';
+    item.setAttribute('onclick', 'toggleCheck(this)');
+    item.innerHTML = '<div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">新建笔记条目</span>';
+    checklist.appendChild(item);
+  }
+
+  // ---------- 工作流演示切换 ----------
+  function switchDemo(mode, el) {
+    document.querySelectorAll('.demo-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('demoSchedule').classList.remove('show');
+    document.getElementById('demoFocus').classList.remove('show');
+    document.getElementById('demoReview').classList.remove('show');
+    document.getElementById('demoSchedule').style.display = 'none';
+    document.getElementById('demoFocus').style.display = 'none';
+    document.getElementById('demoReview').style.display = 'none';
+    if (mode === 'schedule') {
+      document.getElementById('demoSchedule').style.display = 'block';
+    } else if (mode === 'focus') {
+      document.getElementById('demoFocus').style.display = 'block';
+    } else if (mode === 'review') {
+      document.getElementById('demoReview').style.display = 'block';
+    }
+  }
+
+  // ---------- 倒计时模拟 ----------
+  let countdownSec = 120;
+  const pillCountdown = document.getElementById('pillCountdown');
+  setInterval(() => {
+    if (countdownSec > 0) countdownSec--;
+    const m = String(Math.floor(countdownSec / 60)).padStart(2, '0');
+    pillCountdown.textContent = countdownSec > 0 ? `${m} 后开始` : '即将开始';
+  }, 1000);
+</script>
+
+</body>
+</html>

@@ -5,6 +5,8 @@ import EventKit
 struct CalendarWidgetView: View {
     var calendarManager: CalendarManager
     @Binding var recenterTrigger: Int
+    /// 点击“开始任务”时回调，传回所选日历事件；为 nil 时不渲染按钮
+    var onStartFocus: ((EKEvent) -> Void)?
     @State private var selectedDate = Date()
     @State private var centeredDate = Date()
 
@@ -65,6 +67,16 @@ struct CalendarWidgetView: View {
                             Text(timeString(from: event.startDate))
                                 .font(.system(size: 8, design: .monospaced))
                                 .foregroundColor(.secondary)
+
+                            // “开始任务”按钮 — NookFlow 入口
+                            if let onStartFocus {
+                                Button(action: { onStartFocus(event) }) {
+                                    Image(systemName: "play.circle.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.accentColor)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
@@ -466,6 +478,6 @@ private class DateCell: NSButton {
 }
 
 #Preview {
-    CalendarWidgetView(calendarManager: CalendarManager(), recenterTrigger: .constant(0))
+    CalendarWidgetView(calendarManager: CalendarManager(), recenterTrigger: .constant(0), onStartFocus: nil)
         .background(Color.black)
 }

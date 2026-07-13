@@ -67,12 +67,19 @@ final class NotesManager {
         notes = decoded
     }
 
-    func createNote() {
-        let note = Note()
+    /// 创建新笔记并返回，便于调用方获取 id 等字段做关联
+    func createNote(title: String = "Untitled", content: String = "", isMarkdown: Bool = true) -> Note {
+        let note = Note(title: title, content: content, isMarkdown: isMarkdown)
         notes.insert(note, at: 0)
         currentNote = note
         isEditing = true
         persist()
+        return note
+    }
+
+    /// 兼容旧调用方：创建默认笔记但不返回引用
+    func createNote() {
+        _ = createNote(title: "Untitled", content: "", isMarkdown: true)
     }
 
     func saveNote(_ note: Note) {

@@ -1,4 +1,5 @@
 import SwiftUI
+import EventKit
 
 /// 灵动岛状态
 enum IslandState: Equatable {
@@ -13,6 +14,7 @@ struct NotchContentView: View {
     @State private var calendarManager = CalendarManager()
     @State private var notesManager = NotesManager()
     @State private var trayManager = TrayManager()
+    @State private var focusSessionManager = FocusSessionManager()
 
     @State private var state: IslandState = .collapsed
     @State private var showContent = false
@@ -135,6 +137,23 @@ struct NotchContentView: View {
 
     private var isExpanded: Bool { state == .expanded }
 
+    /// NookFlow 区域是否应显示（有活跃会话或有历史记录）
+    private var isFocusSessionVisible: Bool {
+        focusSessionManager.activeSession != nil || !focusSessionManager.history.isEmpty
+    }
+
+    /// NookFlow 区域集中计算的高度来源 — expandedHeight / targetSize / cachedExpandedShapeHeight 统一使用
+    /// 活跃会话：卡片高度；仅历史记录：列表高度；否则 0
+    private var focusSessionCardHeight: CGFloat {
+        guard isFocusSessionVisible else { return 0 }
+        return focusSessionManager.activeSession != nil ? Self.activeSessionCardHeight : Self.historyListHeight
+    }
+
+    /// 活跃任务卡片估计高度
+    private static let activeSessionCardHeight: CGFloat = 96
+    /// 历史记录列表估计高度（标题 + 最多 3 条）
+    private static let historyListHeight: CGFloat = 72
+
     private var expandedWidth: CGFloat {
         IslandSizeCalculator.expandedWidth(for: state, panelWidth: panelWidth)
     }
@@ -143,7 +162,8 @@ struct NotchContentView: View {
         IslandSizeCalculator.expandedHeight(
             for: state,
             visibleSessionCount: WidgetType.enabledWidgets.count,
-            panelMaxHeight: panelMaxHeight
+            panelMaxHeight: panelMaxHeight,
+            focusSessionCardHeight: focusSessionCardHeight
         )
     }
 
@@ -313,10 +333,10 @@ struct NotchContentView: View {
             }
         }
         .preferredColorScheme(colorScheme)
-        .onChange(of: expandedHeight) { _, _ in
-            if case .expanded = state {
-                cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, expandedHeight)
-            }
+        .onChange(of: expandedHeight) { _, newHeight in
+            guard isExpanded else { return }
+            cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, newHeight)
+            onSizeChange?(expandedWidth, newHeight)
         }
         .onChange(of: state) { _, newState in
             if newState == .collapsed {
@@ -369,7 +389,8 @@ struct NotchContentView: View {
             if isExpanded {
                 cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
                     visibleSessionCount: WidgetType.enabledWidgets.count,
-                    panelMaxHeight: panelMaxHeight
+                    panelMaxHeight: panelMaxHeight,
+                    focusSessionCardHeight: focusSessionCardHeight
                 )
             }
             startHoverPolling()
@@ -444,7 +465,8 @@ struct NotchContentView: View {
         if case .expanded = newState {
             cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
                 visibleSessionCount: WidgetType.enabledWidgets.count,
-                panelMaxHeight: panelMaxHeight
+                panelMaxHeight: panelMaxHeight,
+                focusSessionCardHeight: focusSessionCardHeight
             )
         }
 
@@ -524,11 +546,14 @@ struct NotchContentView: View {
     private func targetSize(for state: IslandState) -> (width: CGFloat, height: CGFloat) {
         // 收起状态传 0（无会话），展开状态传 widget 数量
         let sessionCount = state == .expanded ? WidgetType.enabledWidgets.count : 0
+        // NookFlow 区域高度仅在展开时纳入
+        let cardHeight = state == .expanded ? focusSessionCardHeight : 0
         return IslandSizeCalculator.targetSize(
             for: state,
             visibleSessionCount: sessionCount,
             panelWidth: panelWidth,
-            panelMaxHeight: panelMaxHeight
+            panelMaxHeight: panelMaxHeight,
+            focusSessionCardHeight: cardHeight
         )
     }
 
@@ -878,8 +903,63 @@ struct NotchContentView: View {
                 .fill(IslandStyle.divider(for: colorScheme).opacity(IslandStyle.dividerOpacity(for: colorScheme)))
                 .frame(height: 0.5)
 
+            // NookFlow 区域：有活跃会话或有历史记录时显示
+            if isFocusSessionVisible {
+                FocusSessionView(
+                    manager: focusSessionManager,
+                    trayFileCount: trayManager.files.count,
+                    onCreateLinkedNote: createLinkedNote,
+                    onLinkTrayFiles: linkTrayFiles,
+                    onEndSession: endFocusSession
+                )
+                // NookFlow 区域与下方 widget 网格之间的分隔线
+                Rectangle()
+                    .fill(IslandStyle.divider(for: colorScheme).opacity(IslandStyle.dividerOpacity(for: colorScheme)))
+                    .frame(height: 0.5)
+            }
+
             // 始终显示紧凑网格
             widgetCompactGrid
+        }
+    }
+
+    // MARK: - NookFlow 协调逻辑
+
+    /// 创建关联笔记 — 立即将返回 Note 的 id 与 title 写入 activeSession 快照
+    private func createLinkedNote() {
+        let note = notesManager.createNote(
+            title: focusSessionManager.activeSession?.title ?? "Untitled",
+            content: "",
+            isMarkdown: true
+        )
+        focusSessionManager.linkNote(id: note.id, title: note.title)
+    }
+
+    /// 关联当前文件架 — 遍历 trayManager.files，立即把每个文件的快照写入 activeSession
+    /// 已关联的文件由 Manager 按 id 去重
+    private func linkTrayFiles() {
+        guard focusSessionManager.activeSession != nil else { return }
+        for file in trayManager.files {
+            focusSessionManager.linkFile(id: file.id, name: file.name, icon: file.icon)
+        }
+    }
+
+    /// 结束当前任务会话 — 直接调用 Manager.end()，不回读其他 Manager
+    private func endFocusSession() {
+        focusSessionManager.end()
+    }
+
+    /// 从日历事件启动 NookFlow 会话
+    /// 写入 activeSession 后由 @Observable 驱动 expandedHeight 重算，
+    /// onChange(of: expandedHeight) 同步窗口尺寸；若面板未展开则展开一次
+    private func startFocusSession(from event: EKEvent) {
+        focusSessionManager.start(
+            title: event.title ?? "",
+            eventIdentifier: event.eventIdentifier,
+            scheduledEndAt: event.endDate
+        )
+        if !isExpanded {
+            expand(to: .expanded)
         }
     }
 
@@ -914,8 +994,12 @@ struct NotchContentView: View {
         case .media:
             MediaWidgetView(mediaManager: mediaManager)
         case .calendar:
-            CalendarWidgetView(calendarManager: calendarManager, recenterTrigger: $calendarRecenterTrigger)
-                .onAppear { calendarManager.ensureAccess() }
+            CalendarWidgetView(
+                calendarManager: calendarManager,
+                recenterTrigger: $calendarRecenterTrigger,
+                onStartFocus: { event in startFocusSession(from: event) }
+            )
+            .onAppear { calendarManager.ensureAccess() }
         case .notes:
             NotesWidgetView(notesManager: notesManager)
         case .tray:

@@ -1,0 +1,59 @@
+import XCTest
+@testable import XNook
+
+final class NookFlowHistoryDisplayTests: XCTestCase {
+    func testHistoryDisplayLimitUsesDefaultAndClampsToSupportedRange() {
+        XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(0), 1)
+        XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(1), 1)
+        XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(3), 3)
+        XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(5), 5)
+        XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(6), 5)
+        XCTAssertEqual(SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit"), 3)
+    }
+
+    func testHistoryListHeightAddsExactlyOneRowForEachVisibleRecord() {
+        let oneRecordHeight = FocusSessionView.historyListHeight(for: 1)
+        let threeRecordHeight = FocusSessionView.historyListHeight(for: 3)
+        let fiveRecordHeight = FocusSessionView.historyListHeight(for: 5)
+
+        XCTAssertEqual(
+            threeRecordHeight - oneRecordHeight,
+            FocusSessionView.historyRowHeight * 2,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            fiveRecordHeight - threeRecordHeight,
+            FocusSessionView.historyRowHeight * 2,
+            accuracy: 0.001
+        )
+    }
+
+    func testExpandedPanelHeightTracksVisibleHistoryRowsAndRespectsMaximum() {
+        let oneRecordPanelHeight = IslandSizeCalculator.expandedPanelShapeHeight(
+            visibleSessionCount: 0,
+            panelMaxHeight: 1_000,
+            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 1)
+        )
+        let fiveRecordPanelHeight = IslandSizeCalculator.expandedPanelShapeHeight(
+            visibleSessionCount: 0,
+            panelMaxHeight: 1_000,
+            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
+        )
+
+        XCTAssertEqual(
+            fiveRecordPanelHeight - oneRecordPanelHeight,
+            FocusSessionView.historyRowHeight * 4,
+            accuracy: 0.001
+        )
+
+        XCTAssertEqual(
+            IslandSizeCalculator.expandedPanelShapeHeight(
+                visibleSessionCount: 0,
+                panelMaxHeight: 150,
+                focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
+            ),
+            150,
+            accuracy: 0.001
+        )
+    }
+}

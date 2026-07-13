@@ -26,6 +26,7 @@ enum SettingsDefaults {
         "calendarReminderSoundEnabled": false,
         "calendarReminderLeadMinutes": 5.0,
         "calendarReminderSoundName": "Glass",
+        "nookFlowHistoryDisplayLimit": 3,
     ]
 
     static func register(on defaults: UserDefaults = .standard) {
@@ -38,6 +39,10 @@ enum SettingsDefaults {
 
     static func double(for key: String, fallback: Double = 0) -> Double {
         values[key] as? Double ?? fallback
+    }
+
+    static func int(for key: String, fallback: Int = 0) -> Int {
+        values[key] as? Int ?? fallback
     }
 
     static func string(for key: String, fallback: String = "") -> String {

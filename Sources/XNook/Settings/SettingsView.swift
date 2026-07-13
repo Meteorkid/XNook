@@ -41,6 +41,7 @@ struct SettingsView: View {
     @AppStorage("calendarReminderSoundEnabled") private var calendarReminderSoundEnabled = SettingsDefaults.bool(for: "calendarReminderSoundEnabled")
     @AppStorage("calendarReminderLeadMinutes") private var calendarReminderLeadMinutes = SettingsDefaults.double(for: "calendarReminderLeadMinutes", fallback: 5.0)
     @AppStorage("calendarReminderSoundName") private var calendarReminderSoundName = SettingsDefaults.string(for: "calendarReminderSoundName", fallback: "Glass")
+    @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -275,6 +276,13 @@ struct SettingsView: View {
         return ["media", "calendar", "notes", "tray"]
     }
 
+    private var historyDisplayLimitBinding: Binding<Int> {
+        Binding(
+            get: { FocusSessionView.sanitizedHistoryDisplayLimit(nookFlowHistoryDisplayLimit) },
+            set: { nookFlowHistoryDisplayLimit = FocusSessionView.sanitizedHistoryDisplayLimit($0) }
+        )
+    }
+
     private var displayPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             section(L10n.sectionAppearance) {
@@ -354,6 +362,21 @@ struct SettingsView: View {
                     settingRow(L10n.panelMaxHeight, id: "panelMaxHeight",
                               description: L10n.panelMaxHeightDesc) {
                         AppStorageSlider(key: "panelMaxHeight", range: 200...900, format: "%.0fpt")
+                    }
+                }
+            }
+
+            section(L10n.sectionNookFlow) {
+                card {
+                    settingRow(L10n.nookFlowHistoryDisplayLimit, id: "nookFlowHistoryDisplayLimit",
+                              description: L10n.nookFlowHistoryDisplayLimitDesc) {
+                        Picker("", selection: historyDisplayLimitBinding) {
+                            ForEach(FocusSessionView.historyDisplayLimitRange, id: \.self) { count in
+                                Text(L10n.nookFlowHistoryDisplayCount(count)).tag(count)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 120)
                     }
                 }
             }

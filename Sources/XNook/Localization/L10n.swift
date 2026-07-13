@@ -66,6 +66,7 @@ enum L10n {
     static var sectionInteraction: String { localized(zh: "交互", en: "Interaction") }
     static var sectionIslandSize: String { localized(zh: "灵动岛尺寸", en: "Island Size") }
     static var sectionPanelSize: String { localized(zh: "面板尺寸", en: "Panel Size") }
+    static var sectionNookFlow: String { localized(zh: "NookFlow", en: "NookFlow") }
     static var sectionWidgets: String { localized(zh: "Widget 选择", en: "Widgets") }
     static var sectionAppearance: String { localized(zh: "外观", en: "Appearance") }
     static var sectionAccessibility: String { localized(zh: "辅助功能", en: "Accessibility") }
@@ -166,6 +167,14 @@ enum L10n {
     static var panelMaxHeightDesc: String { localized(
         zh: "展开面板的最大高度（单位：点）。",
         en: "Maximum height of the expanded panel in points.") }
+
+    static var nookFlowHistoryDisplayLimit: String { localized(zh: "最近任务显示条数", en: "Recent tasks shown") }
+    static var nookFlowHistoryDisplayLimitDesc: String { localized(
+        zh: "控制展开面板中最近任务的显示数量（1–5 条）。",
+        en: "Choose how many recent tasks appear in the expanded panel (1–5).") }
+    static func nookFlowHistoryDisplayCount(_ count: Int) -> String {
+        localized(zh: "\(count) 条", en: "\(count) items")
+    }
 
     static var reduceMotion: String { localized(zh: "减弱动画", en: "Reduce motion") }
     static var reduceMotionDesc: String { localized(

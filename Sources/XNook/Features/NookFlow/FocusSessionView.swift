@@ -4,18 +4,45 @@ import SwiftUI
 ///
 /// 显示策略：
 /// - 有 activeSession：任务卡片（标题、开始时间、时长、关联笔记入口、关联文件架入口、结束任务按钮）
-/// - 无 activeSession 但 history 非空：最近 1–3 条任务记录
+/// - 无 activeSession 但 history 非空：按用户设置显示最近 1–5 条任务记录
 /// - 两者皆空：EmptyView（不占布局，由父视图条件渲染避免调用）
 struct FocusSessionView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let manager: FocusSessionManager
+    /// 用户设置的最近任务显示上限（1–5）
+    let historyDisplayLimit: Int
     /// 当前文件架文件数量，由 NotchContentView 传入，用于空态反馈
     let trayFileCount: Int
     // 由 NotchContentView 提供的协调回调（关联操作立即写入快照）
     let onCreateLinkedNote: () -> Void
     let onLinkTrayFiles: () -> Void
     let onEndSession: () -> Void
+
+    static let defaultHistoryDisplayLimit = 3
+    static let historyDisplayLimitRange = 1...5
+
+    /// 单条历史记录在列表中占用的总高度（文本行高 + 行间距）。
+    static let historyRowHeight: CGFloat = 15
+    private static let historyHeaderHeight: CGFloat = 12
+    private static let historyVerticalPadding: CGFloat = 6
+
+    static func sanitizedHistoryDisplayLimit(_ value: Int) -> Int {
+        min(max(value, historyDisplayLimitRange.lowerBound), historyDisplayLimitRange.upperBound)
+    }
+
+    /// 历史列表的确定性高度，与下方 header、行高、间距和内边距保持一致。
+    static func historyListHeight(for recordCount: Int) -> CGFloat {
+        historyVerticalPadding * 2 + historyContentHeight(for: recordCount)
+    }
+
+    private static func historyContentHeight(for recordCount: Int) -> CGFloat {
+        historyHeaderHeight + CGFloat(max(0, recordCount)) * historyRowHeight
+    }
+
+    private var visibleHistoryRecordCount: Int {
+        min(manager.history.count, Self.sanitizedHistoryDisplayLimit(historyDisplayLimit))
+    }
 
     var body: some View {
         if let session = manager.activeSession {
@@ -149,11 +176,13 @@ struct FocusSessionView: View {
                     .foregroundStyle(IslandStyle.secondaryText)
                 Spacer()
             }
+            .frame(height: Self.historyHeaderHeight)
 
-            ForEach(manager.history.prefix(3)) { record in
+            ForEach(manager.history.prefix(visibleHistoryRecordCount)) { record in
                 historyRow(record)
             }
         }
+        .frame(height: Self.historyContentHeight(for: visibleHistoryRecordCount))
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
@@ -190,6 +219,7 @@ struct FocusSessionView: View {
                     .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
             }
         }
+        .frame(height: Self.historyRowHeight - 4)
     }
 
     // MARK: - 时间格式化

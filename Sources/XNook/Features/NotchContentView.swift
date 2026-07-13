@@ -78,6 +78,7 @@ struct NotchContentView: View {
     @AppStorage("showTickerLine") private var showTickerLine = SettingsDefaults.bool(for: "showTickerLine", fallback: true)
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
     @AppStorage("tickerSpeed") private var tickerSpeed = SettingsDefaults.double(for: "tickerSpeed")
+    @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
     @State private var cachedGifData: Data?
     @State private var islandObscuredByNotch = false
 
@@ -142,17 +143,24 @@ struct NotchContentView: View {
         focusSessionManager.activeSession != nil || !focusSessionManager.history.isEmpty
     }
 
+    private var visibleHistoryRecordCount: Int {
+        min(
+            focusSessionManager.history.count,
+            FocusSessionView.sanitizedHistoryDisplayLimit(nookFlowHistoryDisplayLimit)
+        )
+    }
+
     /// NookFlow 区域集中计算的高度来源 — expandedHeight / targetSize / cachedExpandedShapeHeight 统一使用
-    /// 活跃会话：卡片高度；仅历史记录：列表高度；否则 0
+    /// 活跃会话：卡片高度；仅历史记录：按可见任务行数计算列表高度；否则 0
     private var focusSessionCardHeight: CGFloat {
         guard isFocusSessionVisible else { return 0 }
-        return focusSessionManager.activeSession != nil ? Self.activeSessionCardHeight : Self.historyListHeight
+        return focusSessionManager.activeSession != nil
+            ? Self.activeSessionCardHeight
+            : FocusSessionView.historyListHeight(for: visibleHistoryRecordCount)
     }
 
     /// 活跃任务卡片估计高度
     private static let activeSessionCardHeight: CGFloat = 96
-    /// 历史记录列表估计高度（标题 + 最多 3 条）
-    private static let historyListHeight: CGFloat = 72
 
     private var expandedWidth: CGFloat {
         IslandSizeCalculator.expandedWidth(for: state, panelWidth: panelWidth)
@@ -907,6 +915,7 @@ struct NotchContentView: View {
             if isFocusSessionVisible {
                 FocusSessionView(
                     manager: focusSessionManager,
+                    historyDisplayLimit: nookFlowHistoryDisplayLimit,
                     trayFileCount: trayManager.files.count,
                     onCreateLinkedNote: createLinkedNote,
                     onLinkTrayFiles: linkTrayFiles,

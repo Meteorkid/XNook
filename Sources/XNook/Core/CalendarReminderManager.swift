@@ -30,7 +30,13 @@ final class CalendarReminderManager {
 
     private let eventStore = EKEventStore()
     private var timer: Timer?
-    private var notifiedReminderKeys: Set<String> = []
+    private var notifiedReminderKeys: Set<String>
+
+    private static let notifiedReminderKeysKey = "calendarReminderNotifiedKeys"
+
+    private init() {
+        notifiedReminderKeys = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedReminderKeysKey) ?? [])
+    }
 
     func startMonitoring() {
         guard timer == nil else {
@@ -151,7 +157,12 @@ final class CalendarReminderManager {
 
         let leadTime = max(leadMinutes, 1) * 60
         let calendarWindowEnd = now.addingTimeInterval(leadTime)
-        let calendars = eventStore.calendars(for: .event)
+        let allCalendars = eventStore.calendars(for: .event)
+        let selectedIdentifiers = CalendarManager.selectedCalendarIdentifiers(
+            availableIdentifiers: Set(allCalendars.map(\.calendarIdentifier)),
+            storedIdentifiers: UserDefaults.standard.object(forKey: CalendarManager.selectedCalendarIdentifiersKey) as? [String]
+        )
+        let calendars = allCalendars.filter { selectedIdentifiers.contains($0.calendarIdentifier) }
         guard !calendars.isEmpty else { return }
 
         let predicate = eventStore.predicateForEvents(
@@ -174,6 +185,7 @@ final class CalendarReminderManager {
         }
 
         notifiedReminderKeys.insert(Self.reminderKey(for: reminder.identifier, startDate: reminder.startDate))
+        persistNotifiedReminderKeys()
         playSound(named: selectedSoundName)
     }
 
@@ -202,6 +214,11 @@ final class CalendarReminderManager {
             }
             return Date(timeIntervalSince1970: timestamp) >= cutoff
         }
+        persistNotifiedReminderKeys()
+    }
+
+    private func persistNotifiedReminderKeys() {
+        UserDefaults.standard.set(Array(notifiedReminderKeys).sorted(), forKey: Self.notifiedReminderKeysKey)
     }
 
     private static func reminderKey(for identifier: String, startDate: Date) -> String {

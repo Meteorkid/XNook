@@ -561,20 +561,6 @@ struct SettingsView: View {
                             .buttonStyle(.bordered)
                         }
                     }
-                    if case .updateAvailable = updateManager.state,
-                       updateManager.latestRelease?.dmgURL != nil {
-                        dividerLine
-                        settingRow(L10n.installUpdate, id: "installUpdate",
-                                  description: L10n.installUpdateDesc) {
-                            Button(L10n.install) {
-                                Task { @MainActor in
-                                    await updateManager.installUpdate()
-                                }
-                            }
-                            .font(.system(size: 12))
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
                 }
             }
 

@@ -10,6 +10,7 @@ final class LyricsManager {
     private var lyrics: [LrcLine] = []
     private var currentTitle = ""
     private var currentArtist = ""
+    private var currentAlbum = ""
     /// 代际标识：每次切歌递增，防止旧异步请求覆盖新状态
     private var fetchGeneration: Int = 0
     /// 当前歌词请求任务，用于取消旧请求
@@ -28,20 +29,29 @@ final class LyricsManager {
         var lines: [LrcLine] = []
         for raw in lrc.components(separatedBy: .newlines) {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            // 匹配 [mm:ss.xx] 或 [mm:ss.xxx] 或 [mm:ss]
-            guard let match = trimmed.firstMatch(of: #/\[(\d+):(\d+\.?\d*)\](.*)/#) else { continue }
-            let min = Double(match.1) ?? 0
-            let sec = Double(match.2) ?? 0
-            let text = String(match.3).trimmingCharacters(in: .whitespaces)
+            // 一行可能对应多个时间点，例如 [00:12.00][00:30.00]副歌
+            let matches = trimmed.matches(of: #/\[(\d+):(\d+\.?\d*)\]/#)
+            guard let lastMatch = matches.last else { continue }
+            let text = String(trimmed[lastMatch.range.upperBound...])
+                .trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { continue }
-            lines.append(LrcLine(time: min * 60 + sec, text: text))
+            for match in matches {
+                let min = Double(match.1) ?? 0
+                let sec = Double(match.2) ?? 0
+                lines.append(LrcLine(time: min * 60 + sec, text: text))
+            }
         }
         return lines.sorted { $0.time < $1.time }
     }
 
     // MARK: - 获取歌词
 
-    func fetchLyrics(title: String, artist: String, duration: TimeInterval? = nil) {
+    func fetchLyrics(
+        title: String,
+        artist: String,
+        album: String,
+        duration: TimeInterval? = nil
+    ) {
         // 检查歌词功能是否开启（默认开启，可在设置中关闭）
         let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
         guard lyricsEnabled else {
@@ -50,9 +60,12 @@ final class LyricsManager {
             return
         }
 
-        guard !title.isEmpty, title != currentTitle || artist != currentArtist else { return }
+        guard !title.isEmpty,
+              (title != currentTitle || artist != currentArtist || album != currentAlbum)
+        else { return }
         currentTitle = title
         currentArtist = artist
+        currentAlbum = album
         lyrics = []
         currentLine = ""
         isFetching = true
@@ -67,6 +80,7 @@ final class LyricsManager {
                 guard let decoded = try await Self.fetchResponse(
                     title: title,
                     artist: artist,
+                    album: album,
                     duration: duration
                 ) else {
                     // 代际不匹配时不要修改状态
@@ -80,11 +94,9 @@ final class LyricsManager {
                 guard generation == self.fetchGeneration else { return }
                 if let synced = decoded.syncedLyrics, !synced.isEmpty {
                     self.lyrics = Self.parseLrc(synced)
-                } else if let plain = decoded.plainLyrics, !plain.isEmpty {
-                    // 无时间轴歌词，用纯文本逐行显示
-                    self.lyrics = plain.components(separatedBy: .newlines).enumerated().map { i, line in
-                        LrcLine(time: TimeInterval(i) * 4, text: line)
-                    }
+                } else {
+                    // 普通歌词没有可信时间轴，不能伪装成同步歌词。
+                    self.lyrics = []
                 }
                 self.isFetching = false
             } catch {
@@ -125,22 +137,25 @@ final class LyricsManager {
     private static func fetchResponse(
         title: String,
         artist: String,
+        album: String,
         duration: TimeInterval?
     ) async throws -> LrcResponse? {
         try Task.checkCancellation()
 
-        guard let exactURL = lyricsURL(path: "get", title: title, artist: artist) else {
-            return nil
+        if let duration,
+           shouldUseExactLookup(album: album, duration: duration),
+           let exactURL = exactLyricsURL(title: title, artist: artist, album: album, duration: duration) {
+            let (exactData, exactResponse) = try await URLSession.shared.data(for: request(for: exactURL))
+            try Task.checkCancellation()
+            if let exactHTTP = exactResponse as? HTTPURLResponse, exactHTTP.statusCode == 200 {
+                let exactResult = try JSONDecoder().decode(LrcResponse.self, from: exactData)
+                if exactResult.hasSyncedLyrics {
+                    return exactResult
+                }
+            }
         }
-        let (exactData, exactResponse) = try await URLSession.shared.data(for: request(for: exactURL))
-        try Task.checkCancellation()
-        guard let exactHTTP = exactResponse as? HTTPURLResponse else { return nil }
 
-        if exactHTTP.statusCode == 200 {
-            return try JSONDecoder().decode(LrcResponse.self, from: exactData)
-        }
-        guard exactHTTP.statusCode == 404,
-              let searchURL = lyricsURL(path: "search", title: title, artist: artist) else {
+        guard let searchURL = searchLyricsURL(title: title, artist: artist) else {
             return nil
         }
 
@@ -162,8 +177,29 @@ final class LyricsManager {
 
     private static let lyricsAPIBaseURL = "https://lrclib.net/api"
 
-    private static func lyricsURL(path: String, title: String, artist: String) -> URL? {
-        var components = URLComponents(string: "\(lyricsAPIBaseURL)/\(path)")
+    static func shouldUseExactLookup(album: String, duration: TimeInterval?) -> Bool {
+        !album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (duration ?? 0) > 0
+    }
+
+    private static func exactLyricsURL(
+        title: String,
+        artist: String,
+        album: String,
+        duration: TimeInterval
+    ) -> URL? {
+        var components = URLComponents(string: "\(lyricsAPIBaseURL)/get")
+        components?.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist),
+            URLQueryItem(name: "album_name", value: album),
+            URLQueryItem(name: "duration", value: String(Int(duration.rounded()))),
+        ]
+        return components?.url
+    }
+
+    private static func searchLyricsURL(title: String, artist: String) -> URL? {
+        var components = URLComponents(string: "\(lyricsAPIBaseURL)/search")
         components?.queryItems = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist),
@@ -230,6 +266,7 @@ final class LyricsManager {
         currentLine = ""
         currentTitle = ""
         currentArtist = ""
+        currentAlbum = ""
         isFetching = false
         fetchGeneration += 1  // 使旧的异步请求失效
     }
@@ -246,5 +283,9 @@ struct LrcResponse: Codable {
 
     var hasLyrics: Bool {
         syncedLyrics?.isEmpty == false || plainLyrics?.isEmpty == false
+    }
+
+    var hasSyncedLyrics: Bool {
+        syncedLyrics?.isEmpty == false
     }
 }

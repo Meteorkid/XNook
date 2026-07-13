@@ -53,6 +53,8 @@ final class MediaManager {
     private var lastSyncTime: Date = Date()
     /// 上次同步时的播放位置
     private var syncedElapsedTime: TimeInterval = 0
+    /// 仅在播放器提供真实位置后才推进歌词时间轴，避免从 0 秒伪造同步。
+    private var hasAuthoritativePlaybackPosition = false
     /// 用户手动操作播放控制后的保护截止时间（防止 ScriptingBridge 延迟覆盖）
     private var userActionDeadline: Date = .distantPast
 
@@ -111,21 +113,20 @@ final class MediaManager {
 
     /// 根据当前播放状态决定是否启动/停止 progressTimer
     private func startProgressTimerIfNeeded() {
-        let hasContent = !currentTitle.isEmpty || !currentArtist.isEmpty
         let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
-        let needsTimer = isPlaying || (hasContent && lyricsEnabled)
+        let needsTimer = Self.shouldAdvanceLyricTimeline(
+            isPlaying: isPlaying,
+            lyricsEnabled: lyricsEnabled,
+            hasAuthoritativePlaybackPosition: hasAuthoritativePlaybackPosition
+        )
 
         if needsTimer && progressTimer == nil {
             progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
                     let now = Date()
-                    if self.isPlaying {
-                        let delta = now.timeIntervalSince(self.lastSyncTime) * self.playbackRate
-                        self.elapsedTime = self.syncedElapsedTime + delta
-                    } else {
-                        self.elapsedTime = self.syncedElapsedTime
-                    }
+                    let delta = now.timeIntervalSince(self.lastSyncTime) * self.playbackRate
+                    self.elapsedTime = self.syncedElapsedTime + delta
                     // 先根据时间推进更新歌词行，再比较避免无意义赋值触发重绘
                     self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
                     if self.lyricsManager.currentLine != self.currentLyricLine {
@@ -173,19 +174,51 @@ final class MediaManager {
 
     private var lastFetchedTitle = ""
     private var lastFetchedArtist = ""
+    private var lastFetchedAlbum = ""
+    private var lastFetchedDuration: TimeInterval?
     private var lastLyricsEnabled = false
+
+    static func hasTrackIdentityChanged(
+        title: String,
+        artist: String,
+        album: String,
+        previousTitle: String,
+        previousArtist: String,
+        previousAlbum: String
+    ) -> Bool {
+        title != previousTitle || artist != previousArtist || album != previousAlbum
+    }
 
     static func shouldSyncLyrics(
         title: String,
         artist: String,
+        album: String,
+        duration: TimeInterval?,
         isEnabled: Bool,
         previousTitle: String,
         previousArtist: String,
+        previousAlbum: String,
+        previousDuration: TimeInterval?,
         wasEnabled: Bool
     ) -> Bool {
-        title != previousTitle
-            || artist != previousArtist
+        hasTrackIdentityChanged(
+            title: title,
+            artist: artist,
+            album: album,
+            previousTitle: previousTitle,
+            previousArtist: previousArtist,
+            previousAlbum: previousAlbum
+        )
+            || duration != previousDuration
             || isEnabled != wasEnabled
+    }
+
+    static func shouldAdvanceLyricTimeline(
+        isPlaying: Bool,
+        lyricsEnabled: Bool,
+        hasAuthoritativePlaybackPosition: Bool
+    ) -> Bool {
+        isPlaying && lyricsEnabled && hasAuthoritativePlaybackPosition
     }
 
     func fetchNowPlayingInfo() {
@@ -197,10 +230,25 @@ final class MediaManager {
             await MainActor.run {
                 let newTitle = info["title"] as? String ?? ""
                 let newArtist = info["artist"] as? String ?? ""
-                let trackChanged = newTitle != self.currentTitle || newArtist != self.currentArtist
+                let newAlbum = info["album"] as? String ?? ""
+                let trackChanged = Self.hasTrackIdentityChanged(
+                    title: newTitle,
+                    artist: newArtist,
+                    album: newAlbum,
+                    previousTitle: self.currentTitle,
+                    previousArtist: self.currentArtist,
+                    previousAlbum: self.currentAlbum
+                )
+                if trackChanged {
+                    self.currentLyricLine = ""
+                    self.hasAuthoritativePlaybackPosition = false
+                    self.syncedElapsedTime = 0
+                    self.elapsedTime = 0
+                    self.duration = 0
+                }
                 self.currentTitle = newTitle
                 self.currentArtist = newArtist
-                self.currentAlbum = info["album"] as? String ?? ""
+                self.currentAlbum = newAlbum
 
                 // 封面提取 — 有新数据才更新，暂停时保留当前封面
                 let oldArtworkData = self.currentArtworkData
@@ -219,6 +267,7 @@ final class MediaManager {
                 }
                 // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
                 if let pos = info["playerPosition"] as? TimeInterval {
+                    self.hasAuthoritativePlaybackPosition = true
                     self.syncedElapsedTime = pos
                     self.lastSyncTime = Date()
                     self.elapsedTime = pos
@@ -233,22 +282,30 @@ final class MediaManager {
 
                 // 切歌或歌词开关变化时同步歌词状态
                 let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
+                let lyricDuration = self.duration > 0 ? self.duration : nil
                 if Self.shouldSyncLyrics(
                     title: self.currentTitle,
                     artist: self.currentArtist,
+                    album: self.currentAlbum,
+                    duration: lyricDuration,
                     isEnabled: lyricsEnabled,
                     previousTitle: self.lastFetchedTitle,
                     previousArtist: self.lastFetchedArtist,
+                    previousAlbum: self.lastFetchedAlbum,
+                    previousDuration: self.lastFetchedDuration,
                     wasEnabled: self.lastLyricsEnabled
                 ) {
                     self.lastFetchedTitle = self.currentTitle
                     self.lastFetchedArtist = self.currentArtist
+                    self.lastFetchedAlbum = self.currentAlbum
+                    self.lastFetchedDuration = lyricDuration
                     self.lastLyricsEnabled = lyricsEnabled
                     if lyricsEnabled && !self.currentTitle.isEmpty {
                         self.lyricsManager.fetchLyrics(
                             title: self.currentTitle,
                             artist: self.currentArtist,
-                            duration: self.duration > 0 ? self.duration : nil
+                            album: self.currentAlbum,
+                            duration: lyricDuration
                         )
                     } else {
                         self.lyricsManager.reset()
@@ -256,7 +313,11 @@ final class MediaManager {
                 }
 
                 // 更新歌词当前行
-                self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
+                if self.hasAuthoritativePlaybackPosition {
+                    self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
+                } else {
+                    self.currentLyricLine = ""
+                }
 
                 // 根据当前状态决定是否需要 progressTimer
                 self.startProgressTimerIfNeeded()
@@ -279,6 +340,7 @@ final class MediaManager {
                 }
                 // 播放/暂停切换时重新校准进度
                 if let pos = info["playerPosition"] as? TimeInterval {
+                    self.hasAuthoritativePlaybackPosition = true
                     self.syncedElapsedTime = pos
                     self.lastSyncTime = Date()
                     self.elapsedTime = pos

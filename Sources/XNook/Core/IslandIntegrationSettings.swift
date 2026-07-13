@@ -61,6 +61,9 @@ enum IslandIntegrationSettings {
 
     enum Key {
         static let protocolVersion = "island.integration.protocolVersion"
+        static func protocolVersion(for app: IslandApp) -> String {
+            "island.integration.protocolVersion.\(app.rawValue)"
+        }
         static let swipeSwitchEnabled = "island.integration.swipeSwitchEnabled"
         static let swipeSensitivity = "island.integration.swipeSensitivity"
         static let startupDisplayMode = "island.integration.startupDisplayMode"
@@ -79,11 +82,13 @@ enum IslandIntegrationSettings {
         ])
     }
 
-    /// 检查对方应用的协议版本是否兼容（版本号相同或更高才兼容）
-    static func isPeerProtocolCompatible() -> Bool {
-        let peerVersion = sharedDefaults.integer(forKey: Key.protocolVersion)
-        // peerVersion == 0 表示对方未写入版本号（旧版应用），视为兼容
-        return peerVersion == 0 || peerVersion >= protocolVersion
+    static func markProtocolAvailable(for app: IslandApp) {
+        sharedDefaults.set(protocolVersion, forKey: Key.protocolVersion(for: app))
+    }
+
+    /// 仅在对方已明确声明兼容版本时显示为就绪，避免把旧版误判为可联动。
+    static func isPeerProtocolCompatible(_ peer: IslandApp) -> Bool {
+        sharedDefaults.integer(forKey: Key.protocolVersion(for: peer)) >= protocolVersion
     }
 
     static var isSwipeSwitchEnabled: Bool {

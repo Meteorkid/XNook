@@ -5,6 +5,8 @@ import Observation
 /// 日历管理器
 @Observable @MainActor
 final class CalendarManager {
+    static let selectedCalendarIdentifiersKey = "selectedCalendarIdentifiers"
+
     // MARK: - Published Properties
 
     var hasAccess = false
@@ -16,8 +18,6 @@ final class CalendarManager {
 
     private let eventStore = EKEventStore()
     private var displayedDate = Date()
-    private var hasInitializedCalendarSelection = false
-
     // MARK: - Public Methods
 
     /// 首次展开日历时触发权限请求（延迟到用户需要时）
@@ -48,12 +48,10 @@ final class CalendarManager {
     func loadCalendars() {
         calendars = eventStore.calendars(for: .event)
         let availableIdentifiers = Set(calendars.map(\.calendarIdentifier))
-        if hasInitializedCalendarSelection {
-            selectedCalendars.formIntersection(availableIdentifiers)
-        } else {
-            selectedCalendars = availableIdentifiers
-            hasInitializedCalendarSelection = true
-        }
+        selectedCalendars = Self.selectedCalendarIdentifiers(
+            availableIdentifiers: availableIdentifiers,
+            storedIdentifiers: UserDefaults.standard.object(forKey: Self.selectedCalendarIdentifiersKey) as? [String]
+        )
     }
 
     static func eventInterval(
@@ -92,7 +90,16 @@ final class CalendarManager {
         } else {
             selectedCalendars.insert(calendar.calendarIdentifier)
         }
+        UserDefaults.standard.set(Array(selectedCalendars).sorted(), forKey: Self.selectedCalendarIdentifiersKey)
         loadEvents(for: displayedDate)
+    }
+
+    static func selectedCalendarIdentifiers(
+        availableIdentifiers: Set<String>,
+        storedIdentifiers: [String]?
+    ) -> Set<String> {
+        guard let storedIdentifiers else { return availableIdentifiers }
+        return Set(storedIdentifiers).intersection(availableIdentifiers)
     }
 
     func createEvent(title: String, startDate: Date, endDate: Date) {

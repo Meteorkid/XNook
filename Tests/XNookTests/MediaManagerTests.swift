@@ -10,9 +10,13 @@ final class MediaManagerTests: XCTestCase {
         let shouldSync = MediaManager.shouldSyncLyrics(
             title: "Song",
             artist: "Artist",
+            album: "Album",
+            duration: 180,
             isEnabled: true,
             previousTitle: "Song",
             previousArtist: "Artist",
+            previousAlbum: "Album",
+            previousDuration: 180,
             wasEnabled: false
         )
         XCTAssertTrue(shouldSync)
@@ -22,9 +26,13 @@ final class MediaManagerTests: XCTestCase {
         let shouldSync = MediaManager.shouldSyncLyrics(
             title: "Song",
             artist: "Artist",
+            album: "Album",
+            duration: 180,
             isEnabled: false,
             previousTitle: "Song",
             previousArtist: "Artist",
+            previousAlbum: "Album",
+            previousDuration: 180,
             wasEnabled: true
         )
         XCTAssertTrue(shouldSync)
@@ -34,9 +42,13 @@ final class MediaManagerTests: XCTestCase {
         let shouldSync = MediaManager.shouldSyncLyrics(
             title: "New Song",
             artist: "Artist",
+            album: "Album",
+            duration: 180,
             isEnabled: true,
             previousTitle: "Old Song",
             previousArtist: "Artist",
+            previousAlbum: "Album",
+            previousDuration: 180,
             wasEnabled: true
         )
         XCTAssertTrue(shouldSync)
@@ -46,9 +58,13 @@ final class MediaManagerTests: XCTestCase {
         let shouldSync = MediaManager.shouldSyncLyrics(
             title: "Song",
             artist: "New Artist",
+            album: "Album",
+            duration: 180,
             isEnabled: true,
             previousTitle: "Song",
             previousArtist: "Old Artist",
+            previousAlbum: "Album",
+            previousDuration: 180,
             wasEnabled: true
         )
         XCTAssertTrue(shouldSync)
@@ -58,9 +74,13 @@ final class MediaManagerTests: XCTestCase {
         let shouldSync = MediaManager.shouldSyncLyrics(
             title: "Song",
             artist: "Artist",
+            album: "Album",
+            duration: 180,
             isEnabled: true,
             previousTitle: "Song",
             previousArtist: "Artist",
+            previousAlbum: "Album",
+            previousDuration: 180,
             wasEnabled: true
         )
         XCTAssertFalse(shouldSync)
@@ -70,12 +90,80 @@ final class MediaManagerTests: XCTestCase {
         let shouldSync = MediaManager.shouldSyncLyrics(
             title: "",
             artist: "",
+            album: "",
+            duration: nil,
             isEnabled: false,
             previousTitle: "Song",
             previousArtist: "Artist",
+            previousAlbum: "Album",
+            previousDuration: 180,
             wasEnabled: true
         )
         XCTAssertTrue(shouldSync)
+    }
+
+    func testAlbumChangeTriggersSync() {
+        XCTAssertTrue(
+            MediaManager.shouldSyncLyrics(
+                title: "Song",
+                artist: "Artist",
+                album: "Deluxe",
+                duration: 180,
+                isEnabled: true,
+                previousTitle: "Song",
+                previousArtist: "Artist",
+                previousAlbum: "Original",
+                previousDuration: 180,
+                wasEnabled: true
+            )
+        )
+    }
+
+    func testDurationArrivalTriggersLyricsRefresh() {
+        XCTAssertTrue(
+            MediaManager.shouldSyncLyrics(
+                title: "Song",
+                artist: "Artist",
+                album: "Album",
+                duration: 180,
+                isEnabled: true,
+                previousTitle: "Song",
+                previousArtist: "Artist",
+                previousAlbum: "Album",
+                previousDuration: nil,
+                wasEnabled: true
+            )
+        )
+    }
+
+    func testAlbumChangeResetsTrackIdentity() {
+        XCTAssertTrue(
+            MediaManager.hasTrackIdentityChanged(
+                title: "Song",
+                artist: "Artist",
+                album: "Deluxe",
+                previousTitle: "Song",
+                previousArtist: "Artist",
+                previousAlbum: "Original"
+            )
+        )
+    }
+
+    func testLyricTimelineRequiresPlayingStateAndAuthoritativePosition() {
+        XCTAssertFalse(
+            MediaManager.shouldAdvanceLyricTimeline(
+                isPlaying: true,
+                lyricsEnabled: true,
+                hasAuthoritativePlaybackPosition: false
+            )
+        )
+        XCTAssertTrue(
+            MediaManager.shouldAdvanceLyricTimeline(
+                isPlaying: true,
+                lyricsEnabled: true,
+                hasAuthoritativePlaybackPosition: true
+            )
+        )
     }
 
     // MARK: - formatTime

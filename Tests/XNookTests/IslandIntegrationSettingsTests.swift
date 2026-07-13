@@ -8,6 +8,8 @@ final class IslandIntegrationSettingsTests: XCTestCase {
         IslandIntegrationSettings.Key.swipeSensitivity,
         IslandIntegrationSettings.Key.startupDisplayMode,
         IslandIntegrationSettings.Key.lastShownIsland,
+        IslandIntegrationSettings.Key.protocolVersion(for: .xnook),
+        IslandIntegrationSettings.Key.protocolVersion(for: .xisland),
     ]
     private var savedValues: [String: Any?] = [:]
 
@@ -152,5 +154,14 @@ final class IslandIntegrationSettingsTests: XCTestCase {
         guard case .inProgress = lowResult else {
             return XCTFail("低灵敏度不应在相同位移下提前触发")
         }
+    }
+
+    func testPeerProtocolRequiresPeerSpecificHandshake() {
+        let defaults = IslandIntegrationSettings.sharedDefaults
+        defaults.removeObject(forKey: IslandIntegrationSettings.Key.protocolVersion(for: .xisland))
+        XCTAssertFalse(IslandIntegrationSettings.isPeerProtocolCompatible(.xisland))
+
+        IslandIntegrationSettings.markProtocolAvailable(for: .xisland)
+        XCTAssertTrue(IslandIntegrationSettings.isPeerProtocolCompatible(.xisland))
     }
 }

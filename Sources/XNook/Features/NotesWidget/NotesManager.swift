@@ -72,6 +72,7 @@ final class NotesManager {
         notes.insert(note, at: 0)
         currentNote = note
         isEditing = true
+        persist()
     }
 
     func saveNote(_ note: Note) {

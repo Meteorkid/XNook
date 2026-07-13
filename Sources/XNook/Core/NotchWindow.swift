@@ -50,6 +50,8 @@ final class NotchWindow: NSPanel {
     var isSwitchingApps = false
     /// 已让位给另一个灵动岛，收到显式显示命令前禁止自动显示
     var isHiddenByIslandSwitch = false
+    /// 用户主动隐藏后，不应因桌面或全屏状态变化重新出现
+    private(set) var isHiddenByUser = false
 
     // MARK: - Init
 
@@ -108,7 +110,9 @@ final class NotchWindow: NSPanel {
         )
 
         mouseTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.followMouseIfScreenChanged()
+            Task { @MainActor [weak self] in
+                self?.followMouseIfScreenChanged()
+            }
         }
     }
 
@@ -122,12 +126,16 @@ final class NotchWindow: NSPanel {
 
     func showWindow() {
         isHiddenByIslandSwitch = false
+        isHiddenByUser = false
         if let currentIsland = AppSwitcher.shared.currentIsland {
             IslandIntegrationSettings.markVisible(currentIsland)
         }
         orderFrontRegardless()
     }
-    func hideWindow() { orderOut(nil) }
+    func hideWindow() {
+        isHiddenByUser = true
+        orderOut(nil)
+    }
     func toggleVisibility() { isVisible ? hideWindow() : showWindow() }
 
     /// 在鼠标所在屏幕显示窗口（URL Scheme 唤醒时调用）
@@ -176,7 +184,9 @@ final class NotchWindow: NSPanel {
     private func resumeMouseTracking() {
         guard mouseTrackingTimer == nil else { return }
         mouseTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.followMouseIfScreenChanged()
+            Task { @MainActor [weak self] in
+                self?.followMouseIfScreenChanged()
+            }
         }
     }
 
@@ -239,7 +249,7 @@ final class NotchWindow: NSPanel {
                 if inFullscreen {
                     self.pauseMouseTracking()
                     self.orderOut(nil)
-                } else {
+                } else if !self.isHiddenByUser {
                     self.resumeMouseTracking()
                     self.orderFrontRegardless()
                 }

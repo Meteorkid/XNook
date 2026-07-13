@@ -144,6 +144,7 @@ final class AppSwitcher {
         let installed = isIslandInstalled(named: island.rawValue)
         let running = isIslandRunning(named: island.rawValue)
         let protocolConfigured = expectedBundleID == registeredHandlerBundleIdentifier(for: island)
+            && IslandIntegrationSettings.isPeerProtocolCompatible(island)
         return IslandPeerStatus(
             island: island,
             isInstalled: installed,

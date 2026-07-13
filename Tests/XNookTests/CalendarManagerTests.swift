@@ -18,4 +18,24 @@ final class CalendarManagerTests: XCTestCase {
         XCTAssertEqual(calendar.component(.day, from: interval.start), 30)
         XCTAssertEqual(calendar.component(.day, from: interval.end), 1)
     }
+
+    func testSelectedCalendarsUseAllCalendarsWhenNoPreferenceExists() {
+        XCTAssertEqual(
+            CalendarManager.selectedCalendarIdentifiers(
+                availableIdentifiers: ["work", "personal"],
+                storedIdentifiers: nil
+            ),
+            ["work", "personal"]
+        )
+    }
+
+    func testSelectedCalendarsPreserveExplicitEmptyPreference() {
+        XCTAssertEqual(
+            CalendarManager.selectedCalendarIdentifiers(
+                availableIdentifiers: ["work", "personal"],
+                storedIdentifiers: []
+            ),
+            []
+        )
+    }
 }

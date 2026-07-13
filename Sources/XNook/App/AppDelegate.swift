@@ -58,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         SettingsDefaults.register()
         IslandIntegrationSettings.registerDefaults()
+        IslandIntegrationSettings.markProtocolAvailable(for: .xnook)
         CalendarReminderManager.shared.startMonitoring()
 
         setupNotchWindow()

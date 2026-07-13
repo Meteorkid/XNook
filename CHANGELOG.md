@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.10 (2026-07-14)
+
+本版修复 Music 重启或切歌后歌词时间轴反复回到 0 秒的问题。
+
+### 修复
+
+- Music 与 Spotify 获取播放位置时，优先使用 AppleScript 返回的实时位置；当 ScriptingBridge 持续返回 `0` 或旧值时，不再覆盖真实进度。
+- AppleScript 不可用时仍回退使用 ScriptingBridge，保持既有兼容性。
+- 新增回归测试，覆盖“Bridge 返回 0、AppleScript 有真实位置”和“AppleScript 不可用”的两种路径。
+
 ## v1.3.6 (2026-07-13)
 
 本版新增 **NookFlow**：面向学生与办公场景，将日历日程、专注任务、笔记和文件架整合进 X Nook 灵动岛工作流。

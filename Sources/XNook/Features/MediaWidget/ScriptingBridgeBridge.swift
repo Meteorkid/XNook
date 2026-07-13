@@ -40,12 +40,9 @@ enum ScriptingBridgeHelper {
         }
 
         // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴。
-        // 部分 Music 版本会通过 ScriptingBridge 漏掉该字段，改用 AppleScript 回退读取。
+        // Music 的 ScriptingBridge 可能持续返回 0，优先用 AppleScript 的真实位置。
         let scriptingBridgePosition = app.value(forKey: "playerPosition") as? Double
-        let appleScriptPosition = resolvedPlaybackPosition(
-            scriptingBridgePosition: scriptingBridgePosition,
-            appleScriptPosition: nil
-        ) == nil ? await fetchPlaybackPositionViaAppleScript(app: .music) : nil
+        let appleScriptPosition = await fetchPlaybackPositionViaAppleScript(app: .music)
         if let position = resolvedPlaybackPosition(
             scriptingBridgePosition: scriptingBridgePosition,
             appleScriptPosition: appleScriptPosition
@@ -175,12 +172,9 @@ enum ScriptingBridgeHelper {
         }
 
         // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴。
-        // 当 ScriptingBridge 未返回位置时，用 AppleScript 回退，避免歌词时间轴停在空态。
+        // 优先用 AppleScript 的真实位置，避免 ScriptingBridge 的静态值阻塞歌词时间轴。
         let scriptingBridgePosition = app.value(forKey: "playerPosition") as? Double
-        let appleScriptPosition = resolvedPlaybackPosition(
-            scriptingBridgePosition: scriptingBridgePosition,
-            appleScriptPosition: nil
-        ) == nil ? await fetchPlaybackPositionViaAppleScript(app: .spotify) : nil
+        let appleScriptPosition = await fetchPlaybackPositionViaAppleScript(app: .spotify)
         if let position = resolvedPlaybackPosition(
             scriptingBridgePosition: scriptingBridgePosition,
             appleScriptPosition: appleScriptPosition
@@ -210,20 +204,20 @@ enum ScriptingBridgeHelper {
         return music ?? spotify ?? [:]
     }
 
-    /// 优先使用 ScriptingBridge 的有效值；缺失或无效时采用 AppleScript 回退值。
+    /// 优先使用 AppleScript 的真实位置；不可用时回退到 ScriptingBridge。
     static func resolvedPlaybackPosition(
         scriptingBridgePosition: Double?,
         appleScriptPosition: Double?
     ) -> Double? {
-        if let scriptingBridgePosition,
-           scriptingBridgePosition.isFinite,
-           scriptingBridgePosition >= 0 {
-            return scriptingBridgePosition
-        }
         if let appleScriptPosition,
            appleScriptPosition.isFinite,
            appleScriptPosition >= 0 {
             return appleScriptPosition
+        }
+        if let scriptingBridgePosition,
+           scriptingBridgePosition.isFinite,
+           scriptingBridgePosition >= 0 {
+            return scriptingBridgePosition
         }
         return nil
     }

@@ -28,15 +28,13 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
         )
     }
 
-    func testExpandedPanelHeightTracksVisibleHistoryRowsAndRespectsMaximum() {
+    func testExpandedPanelHeightTracksVisibleHistoryRowsWithoutClippingWidgets() {
         let oneRecordPanelHeight = IslandSizeCalculator.expandedPanelShapeHeight(
             visibleSessionCount: 0,
-            panelMaxHeight: 1_000,
             focusSessionCardHeight: FocusSessionView.historyListHeight(for: 1)
         )
         let fiveRecordPanelHeight = IslandSizeCalculator.expandedPanelShapeHeight(
             visibleSessionCount: 0,
-            panelMaxHeight: 1_000,
             focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
         )
 
@@ -46,13 +44,17 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
             accuracy: 0.001
         )
 
+        let requiredHeight = IslandSizeCalculator.expandedPanelShapeHeight(
+            visibleSessionCount: 4,
+            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
+        )
+
         XCTAssertEqual(
             IslandSizeCalculator.expandedPanelShapeHeight(
-                visibleSessionCount: 0,
-                panelMaxHeight: 150,
+                visibleSessionCount: 4,
                 focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
             ),
-            150,
+            requiredHeight,
             accuracy: 0.001
         )
     }

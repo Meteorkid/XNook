@@ -358,11 +358,6 @@ struct SettingsView: View {
                               description: L10n.panelWidthDesc) {
                         AppStorageSlider(key: "panelWidth", range: 200...800, format: "%.0fpt")
                     }
-                    dividerLine
-                    settingRow(L10n.panelMaxHeight, id: "panelMaxHeight",
-                              description: L10n.panelMaxHeightDesc) {
-                        AppStorageSlider(key: "panelMaxHeight", range: 200...900, format: "%.0fpt")
-                    }
                 }
             }
 

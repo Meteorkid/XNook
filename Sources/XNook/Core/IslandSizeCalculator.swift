@@ -69,7 +69,6 @@ enum IslandSizeCalculator {
     static func expandedHeight(
         for state: IslandState,
         visibleSessionCount: Int,
-        panelMaxHeight: CGFloat,
         focusSessionCardHeight: CGFloat = 0
     ) -> CGFloat {
         switch state {
@@ -78,7 +77,6 @@ enum IslandSizeCalculator {
         case .expanded:
             return expandedPanelShapeHeight(
                 visibleSessionCount: visibleSessionCount,
-                panelMaxHeight: panelMaxHeight,
                 focusSessionCardHeight: focusSessionCardHeight
             )
         }
@@ -88,7 +86,6 @@ enum IslandSizeCalculator {
     /// - Parameter focusSessionCardHeight: NookFlow 区域高度，无活跃会话且无历史记录时传 0
     static func expandedPanelShapeHeight(
         visibleSessionCount: Int,
-        panelMaxHeight: CGFloat,
         focusSessionCardHeight: CGFloat = 0
     ) -> CGFloat {
         // 头部高度 + NookFlow 区域高度 + 会话列表高度 + 底部间距
@@ -97,7 +94,7 @@ enum IslandSizeCalculator {
             + focusSessionCardHeight
             + sessionListHeight
             + expandedPanelBottomInset
-        return min(calculatedHeight, panelMaxHeight)
+        return calculatedHeight
     }
 
     /// 根据状态计算目标尺寸
@@ -106,14 +103,12 @@ enum IslandSizeCalculator {
         for state: IslandState,
         visibleSessionCount: Int,
         panelWidth: CGFloat,
-        panelMaxHeight: CGFloat,
         focusSessionCardHeight: CGFloat = 0
     ) -> (width: CGFloat, height: CGFloat) {
         let width = expandedWidth(for: state, panelWidth: panelWidth)
         let height = expandedHeight(
             for: state,
             visibleSessionCount: visibleSessionCount,
-            panelMaxHeight: panelMaxHeight,
             focusSessionCardHeight: focusSessionCardHeight
         )
         return (width, height)

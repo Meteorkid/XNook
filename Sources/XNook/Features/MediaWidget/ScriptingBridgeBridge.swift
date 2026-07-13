@@ -39,9 +39,18 @@ enum ScriptingBridgeHelper {
             result["duration"] = duration
         }
 
-        // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴
-        if let pos = app.value(forKey: "playerPosition") as? Double {
-            result["playerPosition"] = pos
+        // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴。
+        // 部分 Music 版本会通过 ScriptingBridge 漏掉该字段，改用 AppleScript 回退读取。
+        let scriptingBridgePosition = app.value(forKey: "playerPosition") as? Double
+        let appleScriptPosition = resolvedPlaybackPosition(
+            scriptingBridgePosition: scriptingBridgePosition,
+            appleScriptPosition: nil
+        ) == nil ? await fetchPlaybackPositionViaAppleScript(app: .music) : nil
+        if let position = resolvedPlaybackPosition(
+            scriptingBridgePosition: scriptingBridgePosition,
+            appleScriptPosition: appleScriptPosition
+        ) {
+            result["playerPosition"] = position
         }
 
         // 用 AppleScript 获取封面（ScriptingBridge 的 artwork 属性不可用）
@@ -83,6 +92,32 @@ enum ScriptingBridgeHelper {
                     return
                 }
                 continuation.resume(returning: result.doubleValue)
+            }
+        }
+    }
+
+    /// 通过 AppleScript 获取指定应用的真实播放位置（秒）
+    private static func fetchPlaybackPositionViaAppleScript(app: SupportedApp) async -> Double? {
+        let appName = app.rawValue
+        let source = """
+        tell application "\(appName)"
+            return player position
+        end tell
+        """
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                var error: NSDictionary?
+                guard let script = NSAppleScript(source: source) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let result = script.executeAndReturnError(&error)
+                guard error == nil else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let position = result.doubleValue
+                continuation.resume(returning: position.isFinite && position >= 0 ? position : nil)
             }
         }
     }
@@ -139,9 +174,18 @@ enum ScriptingBridgeHelper {
             result["duration"] = duration / 1000.0
         }
 
-        // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴
-        if let pos = app.value(forKey: "playerPosition") as? Double {
-            result["playerPosition"] = pos
+        // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴。
+        // 当 ScriptingBridge 未返回位置时，用 AppleScript 回退，避免歌词时间轴停在空态。
+        let scriptingBridgePosition = app.value(forKey: "playerPosition") as? Double
+        let appleScriptPosition = resolvedPlaybackPosition(
+            scriptingBridgePosition: scriptingBridgePosition,
+            appleScriptPosition: nil
+        ) == nil ? await fetchPlaybackPositionViaAppleScript(app: .spotify) : nil
+        if let position = resolvedPlaybackPosition(
+            scriptingBridgePosition: scriptingBridgePosition,
+            appleScriptPosition: appleScriptPosition
+        ) {
+            result["playerPosition"] = position
         }
 
         // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
@@ -164,6 +208,24 @@ enum ScriptingBridgeHelper {
             return spotify
         }
         return music ?? spotify ?? [:]
+    }
+
+    /// 优先使用 ScriptingBridge 的有效值；缺失或无效时采用 AppleScript 回退值。
+    static func resolvedPlaybackPosition(
+        scriptingBridgePosition: Double?,
+        appleScriptPosition: Double?
+    ) -> Double? {
+        if let scriptingBridgePosition,
+           scriptingBridgePosition.isFinite,
+           scriptingBridgePosition >= 0 {
+            return scriptingBridgePosition
+        }
+        if let appleScriptPosition,
+           appleScriptPosition.isFinite,
+           appleScriptPosition >= 0 {
+            return appleScriptPosition
+        }
+        return nil
     }
 
     /// 获取当前播放信息（优先选择正在播放的来源）

@@ -60,7 +60,6 @@ struct NotchContentView: View {
     }()
 
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
-    @AppStorage("panelMaxHeight") private var panelMaxHeight = SettingsDefaults.double(for: "panelMaxHeight")
     @AppStorage("jellyIntensity") private var jellyIntensity = SettingsDefaults.string(for: "jellyIntensity", fallback: "medium")
 
     /// 根据强度设置返回果冻缩放值
@@ -170,7 +169,6 @@ struct NotchContentView: View {
         IslandSizeCalculator.expandedHeight(
             for: state,
             visibleSessionCount: WidgetType.enabledWidgets.count,
-            panelMaxHeight: panelMaxHeight,
             focusSessionCardHeight: focusSessionCardHeight
         )
     }
@@ -397,7 +395,6 @@ struct NotchContentView: View {
             if isExpanded {
                 cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
                     visibleSessionCount: WidgetType.enabledWidgets.count,
-                    panelMaxHeight: panelMaxHeight,
                     focusSessionCardHeight: focusSessionCardHeight
                 )
             }
@@ -473,7 +470,6 @@ struct NotchContentView: View {
         if case .expanded = newState {
             cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
                 visibleSessionCount: WidgetType.enabledWidgets.count,
-                panelMaxHeight: panelMaxHeight,
                 focusSessionCardHeight: focusSessionCardHeight
             )
         }
@@ -560,7 +556,6 @@ struct NotchContentView: View {
             for: state,
             visibleSessionCount: sessionCount,
             panelWidth: panelWidth,
-            panelMaxHeight: panelMaxHeight,
             focusSessionCardHeight: cardHeight
         )
     }

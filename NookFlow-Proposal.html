@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NookFlow — 创意提案 | TRAE AI 创造力大赛</title>
+<title>NookFlow — 交互体验 | TRAE AI 创造力大赛</title>
 <style>
   :root {
     --bg: #000000;
@@ -436,7 +436,8 @@
       <li><a href="#flow">工作流</a></li>
       <li><a href="#features">核心功能</a></li>
       <li><a href="#value">价值</a></li>
-      <li><a href="#plan">迭代计划</a></li>
+      <li><a href="#practice">TRAE 实践</a></li>
+      <li><a href="https://github.com/Meteorkid/XNook/releases/tag/v1.3.11" target="_blank" rel="noreferrer">下载 App</a></li>
     </ul>
   </div>
 </nav>
@@ -447,10 +448,11 @@
     <div>
       <span class="tag">学习工作赛道 · TRAE AI 创造力大赛 2026</span>
       <h1>NookFlow<br><span class="grad">让每场会议和学习任务都拥有自己的刘海工作台</span></h1>
-      <p class="lead">NookFlow 是 X Nook 在赛期内的核心迭代。它把 MacBook 刘海屏从被动展示区，升级为与当前任务同步的轻量工作台——日程倒计时、关联笔记、暂存文件、结束沉淀，一站完成，减少上下文切换。</p>
+      <p class="lead">NookFlow 是 X Nook 的任务上下文工作流：从日历事件开始，在刘海面板中关联笔记和文件架，结束后留下最近任务记录。它把 MacBook 刘海屏从被动展示区，变成不打断当前桌面的轻量工作入口。</p>
+      <p style="font-size:12px;color:var(--text-tertiary);margin:-12px 0 22px;max-width:520px;">此页面为可交互的流程演示；完整 macOS 功能请下载已发布的 X Nook App。</p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="#flow">查看工作流演示</a>
-        <a class="btn btn-ghost" href="#plan">赛期迭代计划</a>
+        <a class="btn btn-primary" href="#flow">立即体验工作流</a>
+        <a class="btn btn-ghost" href="https://github.com/Meteorkid/XNook/releases/tag/v1.3.11" target="_blank" rel="noreferrer">下载 macOS App</a>
       </div>
     </div>
 
@@ -476,31 +478,21 @@
             </div>
             <div style="flex:1;">
               <div class="task-card-title">产品周会 · 进行中</div>
-              <div class="task-card-sub">已记录 2 条笔记 · 暂存 3 个文件</div>
+              <div class="task-card-sub" id="taskCardSummary">尚未关联笔记 · 文件架为空</div>
             </div>
             <div class="countdown" id="focusTimer">00:00</div>
           </div>
 
-          <div class="checklist">
-            <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">确认本周交付项</span></div>
-            <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">同步设计稿进度</span></div>
-            <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">记录待办与负责人</span></div>
-          </div>
-
-          <div class="file-tags">
-            <span class="file-tag">📄 周报.docx <span class="x" onclick="this.parentElement.remove()">×</span></span>
-            <span class="file-tag">📊 数据.xlsx <span class="x" onclick="this.parentElement.remove()">×</span></span>
-            <span class="file-tag">🖼 设计稿.png <span class="x" onclick="this.parentElement.remove()">×</span></span>
-          </div>
+          <div class="file-tags" id="taskFileTags"></div>
 
           <div style="display:flex;gap:6px;margin-top:10px;">
-            <button class="mini-btn" onclick="addFile()">+ 暂存文件</button>
-            <button class="mini-btn" onclick="addNote()">+ 快速笔记</button>
+            <button class="mini-btn" onclick="linkDemoNote()">创建关联笔记</button>
+            <button class="mini-btn" onclick="linkDemoFiles()">关联文件架</button>
             <button class="mini-btn" style="background:var(--red);margin-left:auto;" onclick="endTask()">结束任务</button>
           </div>
         </div>
       </div>
-      <div class="stage-label">点击「开始任务」体验刘海口工作台</div>
+      <div class="stage-label">点击「开始任务」，体验从日程进入任务上下文</div>
     </div>
   </div>
 </header>
@@ -511,7 +503,7 @@
     <div class="section-head">
       <div class="section-num">01 / 创意简介</div>
       <h2>把刘海屏变成任务的入口，而不是通知的终点</h2>
-      <p class="section-sub">MacBook 的刘海是一块永远在最前方的视觉区域，今天它只用来显示时间。NookFlow 让这块区域与用户当前的会议或学习任务同步——开始任务时它展开为工作卡片，结束时它把过程沉淀为可回看的记录。</p>
+      <p class="section-sub">MacBook 的刘海是一个始终靠近视线、却很少承载工作上下文的空间。NookFlow 让这块区域与当前的会议或学习任务同步——开始任务时它展开为工作卡片，结束时它把过程沉淀为可回看的记录。</p>
     </div>
 
     <div class="persona">
@@ -520,8 +512,8 @@
         <p>X Nook 已实现 macOS 刘海工具中心：日历、便签、文件托盘、媒体控制、双指手势切换、主题与设置。但这些能力目前彼此独立，缺少围绕"一次任务"的串联。</p>
       </div>
       <div class="persona-item">
-        <h4>赛期内迭代：NookFlow</h4>
-        <p>NookFlow 不是原样提交旧项目，而是在 X Nook 之上新增"任务上下文工作流"内核。原来的日历、笔记、文件被整合进一个以任务为单位的生命周期：选择日程 → 开始任务 → 记录与暂存 → 结束沉淀 → 回看。</p>
+        <h4>NookFlow：把能力串成一条任务链路</h4>
+        <p>参赛版本不把日历、笔记和文件架堆成更多入口，而是把它们组织为同一条任务生命周期：选择日程 → 开始任务 → 关联资料 → 结束 → 查看最近任务。</p>
       </div>
     </div>
   </div>
@@ -568,24 +560,24 @@
     <div class="section-head">
       <div class="section-num">03 / 产品工作流</div>
       <h2>一条围绕任务的关键链路</h2>
-      <p class="section-sub">选择日程 → 开始任务 → 记录笔记与暂存文件 → 结束任务 → 回看任务上下文。所有动作都发生在刘海中，不必切换到其他应用。</p>
+      <p class="section-sub">选择日程 → 开始任务 → 关联笔记与文件架 → 结束任务 → 查看最近任务。每一步都围绕当前任务展开，减少重新定位工作上下文的成本。</p>
     </div>
 
     <div class="flow">
       <div class="flow-steps">
         <div class="flow-step active"><div class="num">1</div><div class="label">选择日程</div><div class="desc">从日历 Widget 选取即将开始的事项</div><span class="flow-arrow">→</span></div>
         <div class="flow-step"><div class="num">2</div><div class="label">开始任务</div><div class="desc">刘海展开为任务卡片，进入专注</div><span class="flow-arrow">→</span></div>
-        <div class="flow-step"><div class="num">3</div><div class="label">记录 / 暂存</div><div class="desc">快速笔记、拖入文件、勾选待办</div><span class="flow-arrow">→</span></div>
+        <div class="flow-step"><div class="num">3</div><div class="label">关联资料</div><div class="desc">创建关联笔记、接入文件架</div><span class="flow-arrow">→</span></div>
         <div class="flow-step"><div class="num">4</div><div class="label">结束任务</div><div class="desc">收起卡片，生成任务记录</div><span class="flow-arrow">→</span></div>
-        <div class="flow-step"><div class="num">5</div><div class="label">回看上下文</div><div class="desc">按时间或日程查看历史任务</div></div>
+        <div class="flow-step"><div class="num">5</div><div class="label">最近任务</div><div class="desc">显示任务名、关联摘要与结束时间</div></div>
       </div>
 
       <!-- 交互式演示 -->
       <div class="flow-demo">
         <div class="demo-tabs">
-          <div class="demo-tab active" onclick="switchDemo('schedule', this)">① 选择日程</div>
-          <div class="demo-tab" onclick="switchDemo('focus', this)">② 专注状态</div>
-          <div class="demo-tab" onclick="switchDemo('review', this)">⑤ 回看记录</div>
+          <div class="demo-tab active" onclick="switchDemo('schedule', this)">① 日程入口</div>
+          <div class="demo-tab" onclick="switchDemo('focus', this)">② 任务卡片</div>
+          <div class="demo-tab" onclick="switchDemo('review', this)">③ 最近任务</div>
         </div>
 
         <!-- 日程选择 -->
@@ -594,19 +586,19 @@
             <div class="schedule-time">14:00 - 15:00</div>
             <div class="schedule-color" style="background:var(--calendar)"></div>
             <div class="schedule-info"><div class="t">产品周会</div><div class="s">会议室 A · 5 人</div></div>
-            <button class="mini-btn accent">开始任务</button>
+            <button class="mini-btn accent" onclick="startDemoTask()">开始任务</button>
           </div>
           <div class="schedule-item">
             <div class="schedule-time">15:30 - 17:00</div>
             <div class="schedule-color" style="background:var(--notes)"></div>
             <div class="schedule-info"><div class="t">算法复习 · 动态规划</div><div class="s">自习室 · 个人</div></div>
-            <button class="mini-btn">开始任务</button>
+            <button class="mini-btn" onclick="startDemoTask('算法复习 · 动态规划')">开始任务</button>
           </div>
           <div class="schedule-item">
             <div class="schedule-time">19:00 - 20:00</div>
             <div class="schedule-color" style="background:var(--files)"></div>
             <div class="schedule-info"><div class="t">小组作业讨论</div><div class="s">线上 · 4 人</div></div>
-            <button class="mini-btn">开始任务</button>
+            <button class="mini-btn" onclick="startDemoTask('小组作业讨论')">开始任务</button>
           </div>
         </div>
 
@@ -618,22 +610,20 @@
             <div class="focus-grid">
               <div class="focus-panel">
                 <h5>关联笔记</h5>
-                <textarea class="note-input" placeholder="输入快速笔记...">· 确认本周交付：设置页改版、日历提醒音
-· 设计稿周三前出 v2
-· 待办：联系后端接口同学</textarea>
+                <div class="review-section" style="margin-bottom:0;">
+                  <div class="content">创建后自动关联到当前任务，任务卡片显示“已关联：&lt;笔记标题&gt;”，避免重复创建。</div>
+                </div>
+                <button class="mini-btn" style="margin-top:10px;" onclick="linkDemoNote()">创建关联笔记</button>
               </div>
               <div class="focus-panel">
-                <h5>暂存文件 (3)</h5>
+                <h5>关联文件架</h5>
                 <div class="file-tags" style="margin-top:0;">
-                  <span class="file-tag">📄 周报.docx</span>
-                  <span class="file-tag">📊 数据.xlsx</span>
-                  <span class="file-tag">🖼 设计稿.png</span>
+                  <span class="file-tag">文件架中的资料</span>
                 </div>
-                <h5 style="margin-top:12px;">待办清单</h5>
-                <div class="checklist">
-                  <div class="check-item done" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">确认本周交付项</span></div>
-                  <div class="check-item" onclick="toggleCheck(this)"><div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">同步设计稿进度</span></div>
+                <div class="review-section" style="margin:12px 0 0;">
+                  <div class="content">先把资料放入文件架，再一键关联到当前任务；文件架为空时按钮会明确提示，避免无效操作。</div>
                 </div>
+                <button class="mini-btn" style="margin-top:10px;" onclick="linkDemoFiles()">关联文件架</button>
               </div>
             </div>
           </div>
@@ -646,20 +636,8 @@
             <div class="meta">2026-07-10 14:00 - 15:00 · 时长 58 分钟</div>
 
             <div class="review-section">
-              <div class="label">关联笔记</div>
-              <div class="content">· 确认本周交付：设置页改版、日历提醒音<br>· 设计稿周三前出 v2<br>· 待办：联系后端接口同学</div>
-            </div>
-            <div class="review-section">
-              <div class="label">暂存文件</div>
-              <div class="file-tags" style="margin-top:0;">
-                <span class="file-tag">📄 周报.docx</span>
-                <span class="file-tag">📊 数据.xlsx</span>
-                <span class="file-tag">🖼 设计稿.png</span>
-              </div>
-            </div>
-            <div class="review-section">
-              <div class="label">完成待办</div>
-              <div class="content">2 / 3 已完成 · 1 项延续到下次</div>
+              <div class="label">历史记录摘要</div>
+              <div class="content">显示任务标题、关联笔记 / 文件数量与结束时间；用户可在设置中选择显示最近 1–5 条，展开面板随记录数量增加高度，不挤压其他组件。</div>
             </div>
           </div>
         </div>
@@ -673,8 +651,8 @@
   <div class="wrap">
     <div class="section-head">
       <div class="section-num">04 / 核心功能</div>
-      <h2>NookFlow 在赛期内要新增与整合的能力</h2>
-      <p class="section-sub">以下为参赛版本规划的核心功能。其中"任务上下文工作流"是 NookFlow 相对 X Nook 的主要新增内核；日历、笔记、文件托盘为已有能力的整合升级。</p>
+      <h2>已经交付的核心能力</h2>
+      <p class="section-sub">NookFlow 以“任务上下文”而非“功能堆叠”为中心：日历、笔记与文件架各自保留原有用途，但在一次任务里形成可验证的闭环。</p>
     </div>
 
     <div class="feature-grid">
@@ -685,7 +663,7 @@
           </div>
           <h3>任务上下文卡片</h3>
         </div>
-        <p>从日程进入任务后，刘海展开为上下文卡片：日程标题、倒计时、关联笔记入口、文件暂存区、待办勾选。所有动作集中在一块区域。</p>
+        <p>从日历事件开始后，刘海展开为任务卡片：任务标题、开始时间、已进行时长、关联笔记入口、关联文件架入口与结束任务操作集中在同一处。</p>
       </div>
 
       <div class="feature-card">
@@ -695,7 +673,7 @@
           </div>
           <h3>日程驱动入口</h3>
         </div>
-        <p>日历 Widget 不再只是查看，而是任务入口。选中即将开始的日程即可一键进入任务上下文，日程元数据（时间、地点、参与人）自动带入卡片。</p>
+        <p>日历 Widget 不再只用于查看。用户可从日历事件一键开始任务，事件标题和结束时间成为会话上下文，让“看到日程”自然接上“开始处理”。</p>
       </div>
 
       <div class="feature-card">
@@ -705,7 +683,7 @@
           </div>
           <h3>关联笔记</h3>
         </div>
-        <p>每个任务自带一份笔记，记录的内容自动绑定到该任务。无需新建文档、命名、归类——任务结束，笔记就位。</p>
+        <p>进行中的任务可一键创建并关联一条笔记。关联后卡片直接显示笔记标题并禁用重复创建，明确告诉用户这条任务已经有记录入口。</p>
       </div>
 
       <div class="feature-card">
@@ -713,9 +691,9 @@
           <div class="feature-icon" style="background:rgba(191,90,242,0.18);color:#d08bff;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           </div>
-          <h3>文件暂存托盘</h3>
+          <h3>文件架关联</h3>
         </div>
-        <p>会议中拖入的文件自动绑定到当前任务，结束时一并沉淀。一周后回看任务，原始文件、笔记、待办一起出现。</p>
+        <p>用户先将资料放入文件架，再将整个文件架关联到当前任务。系统对已关联文件去重；文件架为空时按钮会提示并禁用，避免无效操作。</p>
       </div>
 
       <div class="feature-card">
@@ -723,9 +701,9 @@
           <div class="feature-icon" style="background:rgba(48,209,88,0.18);color:#5ee382;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           </div>
-          <h3>任务待办清单</h3>
+          <h3>可控的最近任务</h3>
         </div>
-        <p>任务卡片内置轻量待办，记录当场确认的事项与负责人。结束任务时未完成项可标记为延续到下次。</p>
+        <p>结束任务后，它会按结束时间沉淀为最近任务。用户可在设置中选择显示 1–5 条，显示更多记录时展开面板会按行数增加高度，不压缩其他组件。</p>
       </div>
 
       <div class="feature-card">
@@ -733,9 +711,9 @@
           <div class="feature-icon" style="background:rgba(255,159,10,0.18);color:#ffb340;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
           </div>
-          <h3>任务回看</h3>
+          <h3>轻量回顾摘要</h3>
         </div>
-        <p>结束的任务沉淀为历史记录，可按时间或日程查看。每条记录包含笔记、文件、待办完成情况，形成可追溯的工作日志。</p>
+        <p>每条最近任务显示任务名称、关联笔记 / 文件摘要和结束时间。它不是又一个复杂的项目管理系统，而是帮用户快速找回“刚才在处理什么”。</p>
       </div>
     </div>
   </div>
@@ -752,97 +730,84 @@
 
     <div class="value-grid">
       <div class="value-card">
-        <div class="big">−4</div>
-        <h3>减少应用切换</h3>
-        <p>从日历、笔记、Finder、聊天工具的反复跳转，收敛到刘海一块区域。注意力被打断的次数显著下降。</p>
+        <div class="big">一步</div>
+        <h3>减少重新定位</h3>
+        <p>从“先找日历、再找笔记、再找资料”的多次定位，收敛为从当前日程直接开始任务。它不承诺夸张的效率数字，只减少一段真实存在的启动摩擦。</p>
       </div>
       <div class="value-card">
-        <div class="big">1:1</div>
+        <div class="big">1 个</div>
         <h3>资料与任务绑定</h3>
-        <p>文件、笔记、待办不再是孤儿，而是天然属于某次会议或某节课。回溯时无需在文件夹里大海捞针。</p>
+        <p>每次任务都有自己的笔记和文件关联摘要。回溯时，用户先找到任务，再回到资料，而不是从文件夹和窗口中反向猜测任务。</p>
       </div>
       <div class="value-card">
-        <div class="big">∞</div>
-        <h3>可回看的工作日志</h3>
-        <p>每一次任务都沉淀为一条记录。学生可以复习"那节课记了什么"，办公用户可以追溯"那次会决定了什么"。</p>
+        <div class="big">1–5</div>
+        <h3>刚刚好的回顾密度</h3>
+        <p>用户决定展示最近几条任务，面板随条目增长而伸展。对于小而高频的刘海空间，克制的信息密度本身就是体验的一部分。</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ============ 迭代计划 ============ -->
-<section id="plan" style="background:var(--surface);">
+<!-- ============ TRAE 实践 ============ -->
+<section id="practice" style="background:var(--surface);">
   <div class="wrap">
     <div class="section-head">
-      <div class="section-num">06 / 赛期内迭代计划</div>
-      <h2>用 TRAE IDE 从设计到测试，全程可追溯</h2>
-      <p class="section-sub">参赛版本将使用 TRAE IDE 完成设计、编码、调试与测试，并保留真实的任务 Session ID、对话记录与阶段截图。以下为赛期内的迭代节奏。</p>
+      <div class="section-num">06 / TRAE IDE 实践</div>
+      <h2>从一个界面想法，到一条可验证的任务链路</h2>
+      <p class="section-sub">开发过程中，TRAE IDE 参与了任务拆解、SwiftUI 实现、边界检查与回归测试。参赛帖会附上真实的 Session ID 与阶段截图，供评委追溯创作过程。</p>
     </div>
 
     <div class="roadmap">
       <div class="roadmap-item">
-        <div class="roadmap-date">2026.06.16 - 06.30<span class="phase">阶段一 · 设计</span></div>
+        <div class="roadmap-date">阶段一<span class="phase">工作流建模</span></div>
         <div class="roadmap-body">
-          <h3>任务上下文数据模型与交互设计</h3>
-          <p>设计 TaskContext 数据结构（关联日程、笔记、文件、待办），定义刘海展开为任务卡片的交互流程。产出设计稿与状态机。</p>
+          <h3>把“打开工具”改成“开始一件事”</h3>
+          <p>围绕学生上课与办公会议的共同起点，定义会话模型：任务标题、来源日程、开始与结束时间、关联笔记和文件快照。让每个状态都有明确的进入与退出。</p>
           <div class="roadmap-tags">
             <span class="rm-tag">数据模型</span>
+            <span class="rm-tag">任务生命周期</span>
             <span class="rm-tag">交互设计</span>
-            <span class="rm-tag">状态机</span>
           </div>
         </div>
       </div>
 
       <div class="roadmap-item">
-        <div class="roadmap-date">2026.07.01 - 07.15<span class="phase">阶段二 · 初赛 Demo</span></div>
+        <div class="roadmap-date">阶段二<span class="phase">主链路实现</span></div>
         <div class="roadmap-body">
-          <h3>核心链路打通，提交可交互 Demo</h3>
-          <p>实现"选择日程 → 开始任务 → 记录笔记/暂存文件 → 结束任务"主链路。日历 Widget 改造为任务入口，笔记与文件托盘接入任务上下文。提交初赛 Demo 与创意提案。</p>
+          <h3>让日历、笔记与文件架真正互相认识</h3>
+          <p>从日历事件启动任务；任务内创建并锁定关联笔记；将文件架中的资料写入任务快照；结束后把会话移入最近任务。每一步都保持与原有 X Nook 能力的最小耦合。</p>
           <div class="roadmap-tags">
             <span class="rm-tag">主链路</span>
             <span class="rm-tag">日历入口</span>
-            <span class="rm-tag">初赛提交</span>
+            <span class="rm-tag">上下文关联</span>
           </div>
         </div>
       </div>
 
       <div class="roadmap-item">
-        <div class="roadmap-date">2026.07.21 - 08.09<span class="phase">阶段三 · 复赛</span></div>
+        <div class="roadmap-date">阶段三<span class="phase">体验与稳定性打磨</span></div>
         <div class="roadmap-body">
-          <h3>任务回看与历史记录完善</h3>
-          <p>实现任务结束后的沉淀与回看视图，支持按时间、日程筛选历史任务。补充待办延续、任务时长统计。完善用户路径与核心体验。</p>
+          <h3>把边界条件变成清晰的反馈</h3>
+          <p>针对已关联笔记、空文件架、最近任务数量变化等状态进行限制与提示；同时让面板高度按记录行数增长，保证信息增加时不会遮挡原有组件。</p>
           <div class="roadmap-tags">
-            <span class="rm-tag">回看视图</span>
-            <span class="rm-tag">历史筛选</span>
-            <span class="rm-tag">复赛交付</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="roadmap-item">
-        <div class="roadmap-date">2026.08.15 - 08.22<span class="phase">阶段四 · 决赛</span></div>
-        <div class="roadmap-body">
-          <h3>稳定性打磨与现场路演</h3>
-          <p>边缘场景处理、性能优化、多显示器适配验证。准备路演材料与现场演示脚本，完成现场答辩。</p>
-          <div class="roadmap-tags">
-            <span class="rm-tag">稳定性</span>
-            <span class="rm-tag">多显示器</span>
-            <span class="rm-tag">路演</span>
+            <span class="rm-tag">边界状态</span>
+            <span class="rm-tag">动态高度</span>
+            <span class="rm-tag">回归测试</span>
           </div>
         </div>
       </div>
     </div>
 
     <div style="margin-top:32px; padding:20px; background:var(--bg); border:1px solid var(--separator); border-radius:12px; font-size:13px; color:var(--text-secondary);">
-      <strong style="color:var(--text);">开发方式说明：</strong>
-      参赛版本将全程使用 TRAE IDE 完成设计、编码、调试与测试。开发过程会保留真实的任务 Session ID、AI 对话记录与阶段成果截图，作为创作过程的真实性证明。NookFlow 不宣称尚未实现的 AI 模型能力，聚焦于把 macOS 刘海屏改造为任务上下文工作台这一产品创新。
+      <strong style="color:var(--text);">体验边界说明：</strong>
+      本页演示 NookFlow 的任务流与交互逻辑，不替代原生 App。网页不宣称不存在的 AI 自动总结、任务待办、历史筛选或跨应用自动读取能力；评委可通过下方 Release 下载 App，验证日程启动、关联笔记、关联文件架、结束任务与最近任务展示。
     </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    NookFlow · 基于 X Nook 赛期内迭代 · TRAE AI 创造力大赛 2026 · 学习工作赛道
+    NookFlow · X Nook 的任务上下文工作流 · TRAE AI 创造力大赛 2026 · 学习工作赛道 · <a href="https://github.com/Meteorkid/XNook/releases/tag/v1.3.11" target="_blank" rel="noreferrer">下载 macOS App</a>
   </div>
 </footer>
 
@@ -878,27 +843,27 @@
     focusTimer.textContent = '00:00';
   }
 
-  function toggleCheck(el) {
-    el.classList.toggle('done');
+  function linkDemoNote() {
+    document.getElementById('taskCardSummary').textContent = '已关联：产品周会记录 · 文件架为空';
   }
 
-  function addFile() {
-    const tags = document.querySelector('#taskCard .file-tags');
-    const names = ['📎 资料.pdf', '🔗 链接.txt', '📋 会议纪要.md', '🎨 草图.png'];
-    const name = names[Math.floor(Math.random() * names.length)];
-    const tag = document.createElement('span');
-    tag.className = 'file-tag';
-    tag.innerHTML = `${name} <span class="x" onclick="this.parentElement.remove()">×</span>`;
-    tags.appendChild(tag);
+  function linkDemoFiles() {
+    const tags = document.getElementById('taskFileTags');
+    if (!tags.children.length) {
+      ['📄 周报.docx', '🖼 设计稿.png'].forEach((name) => {
+        const tag = document.createElement('span');
+        tag.className = 'file-tag';
+        tag.textContent = name;
+        tags.appendChild(tag);
+      });
+    }
+    document.getElementById('taskCardSummary').textContent = '已关联：产品周会记录 · 已关联 2 个文件';
   }
 
-  function addNote() {
-    const checklist = document.querySelector('#taskCard .checklist');
-    const item = document.createElement('div');
-    item.className = 'check-item';
-    item.setAttribute('onclick', 'toggleCheck(this)');
-    item.innerHTML = '<div class="check-box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><span class="check-label">新建笔记条目</span>';
-    checklist.appendChild(item);
+  function startDemoTask(title = '产品周会') {
+    const tabs = document.querySelectorAll('.demo-tab');
+    switchDemo('focus', tabs[1]);
+    document.querySelector('#demoFocus h4').textContent = `${title} · 进行中`;
   }
 
   // ---------- 工作流演示切换 ----------

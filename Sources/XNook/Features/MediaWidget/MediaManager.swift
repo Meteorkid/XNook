@@ -3,6 +3,93 @@ import AppKit
 import CoreAudio
 import Observation
 
+private final class MediaManagerCleanup: @unchecked Sendable {
+    private let lock = NSLock()
+    private var infoObserver: NSObjectProtocol?
+    private var playingObserver: NSObjectProtocol?
+    private var infoTimer: Timer?
+    private var progressTimer: Timer?
+
+    func storeInfoObserver(_ observer: NSObjectProtocol?) {
+        lock.lock()
+        infoObserver = observer
+        lock.unlock()
+    }
+
+    func storePlayingObserver(_ observer: NSObjectProtocol?) {
+        lock.lock()
+        playingObserver = observer
+        lock.unlock()
+    }
+
+    func storeInfoTimer(_ timer: Timer?) {
+        lock.lock()
+        infoTimer = timer
+        lock.unlock()
+    }
+
+    func hasProgressTimer() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return progressTimer != nil
+    }
+
+    func storeProgressTimer(_ timer: Timer?) {
+        lock.lock()
+        progressTimer = timer
+        lock.unlock()
+    }
+
+    func invalidateProgressTimer() {
+        lock.lock()
+        let timer = progressTimer
+        progressTimer = nil
+        lock.unlock()
+        timer?.invalidate()
+    }
+
+    func cleanUp() {
+        lock.lock()
+        let infoObserver = infoObserver
+        let playingObserver = playingObserver
+        let infoTimer = infoTimer
+        let progressTimer = progressTimer
+        self.infoObserver = nil
+        self.playingObserver = nil
+        self.infoTimer = nil
+        self.progressTimer = nil
+        lock.unlock()
+
+        infoTimer?.invalidate()
+        progressTimer?.invalidate()
+        if let infoObserver { NotificationCenter.default.removeObserver(infoObserver) }
+        if let playingObserver { NotificationCenter.default.removeObserver(playingObserver) }
+    }
+}
+
+struct MediaInfoFetchGate {
+    private(set) var isInFlight = false
+    private var currentRequestID = 0
+
+    mutating func begin() -> Int? {
+        guard !isInFlight else { return nil }
+        currentRequestID &+= 1
+        isInFlight = true
+        return currentRequestID
+    }
+
+    mutating func timeout(requestID: Int) {
+        guard isInFlight, requestID == currentRequestID else { return }
+        isInFlight = false
+    }
+
+    mutating func finish(requestID: Int) -> Bool {
+        guard isInFlight, requestID == currentRequestID else { return false }
+        isInFlight = false
+        return true
+    }
+}
+
 /// 媒体播放管理器 — 通过 MediaRemote 私有框架控制系统级播放器
 @Observable @MainActor
 final class MediaManager {
@@ -42,13 +129,8 @@ final class MediaManager {
 
     /// 存储 MediaRemote 是否可用（不使用 @Published，避免 deinit 问题）
     private let mediaRemoteAvailable: Bool
-    /// nonisolated(unsafe)：允许在 nonisolated deinit 中访问，Timer/Observer 操作本身线程安全
-    private nonisolated(unsafe) var infoObserver: NSObjectProtocol?
-    private nonisolated(unsafe) var playingObserver: NSObjectProtocol?
-    /// 慢速轮询：获取歌曲信息、封面（1s 间隔，避免 IPC 卡顿）
-    private nonisolated(unsafe) var infoTimer: Timer?
-    /// 快速轮询：本地计时更新进度 + 歌词（0.05s 间隔，无 IPC 开销）
-    private nonisolated(unsafe) var progressTimer: Timer?
+    /// 为非隔离 deinit 保留的线程安全资源容器。
+    private let cleanup = MediaManagerCleanup()
     /// 上次 ScriptingBridge 同步时的时间戳
     private var lastSyncTime: Date = Date()
     /// 上次同步时的播放位置
@@ -79,19 +161,9 @@ final class MediaManager {
         startTimers()
     }
 
-    nonisolated deinit {
-        // Timer.invalidate() 和 NotificationCenter.removeObserver() 是线程安全的
-        // mediaRemoteAvailable 是 let 常量，nonisolated 可安全读取
-        let infoObs = infoObserver
-        let playingObs = playingObserver
-        let available = mediaRemoteAvailable
-        let timer1 = infoTimer
-        let timer2 = progressTimer
-        timer1?.invalidate()
-        timer2?.invalidate()
-        if let obs = infoObs { NotificationCenter.default.removeObserver(obs) }
-        if let obs = playingObs { NotificationCenter.default.removeObserver(obs) }
-        if available {
+    deinit {
+        cleanup.cleanUp()
+        if mediaRemoteAvailable {
             MediaRemoteBridge.unregisterForNotifications()
         }
     }
@@ -100,12 +172,15 @@ final class MediaManager {
 
     private func startTimers() {
         // 慢速轮询：拉取 ScriptingBridge（歌曲信息 + 封面 + 位置校准）
-        infoTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // .common mode：菜单跟踪、拖拽等 event tracking 期间保持歌词推进不冻结
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.fetchNowPlayingInfo()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        cleanup.storeInfoTimer(timer)
         // 快速轮询：0.05s 本地计时，更新歌词（无 IPC 开销）
         // 仅在有播放内容时启动，节省 CPU 和电量
         startProgressTimerIfNeeded()
@@ -120,8 +195,8 @@ final class MediaManager {
             hasAuthoritativePlaybackPosition: hasAuthoritativePlaybackPosition
         )
 
-        if needsTimer && progressTimer == nil {
-            progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        if needsTimer && !cleanup.hasProgressTimer() {
+            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
                     let now = Date()
@@ -134,16 +209,16 @@ final class MediaManager {
                     }
                 }
             }
-        } else if !needsTimer && progressTimer != nil {
-            progressTimer?.invalidate()
-            progressTimer = nil
+            RunLoop.main.add(timer, forMode: .common)
+            cleanup.storeProgressTimer(timer)
+        } else if !needsTimer && cleanup.hasProgressTimer() {
+            cleanup.invalidateProgressTimer()
         }
     }
 
     /// 停止 progressTimer（用于无播放内容时彻底停止）
     private func stopProgressTimer() {
-        progressTimer?.invalidate()
-        progressTimer = nil
+        cleanup.invalidateProgressTimer()
     }
 
     // MARK: - 通知注册
@@ -151,23 +226,23 @@ final class MediaManager {
     private func registerNotifications() {
         MediaRemoteBridge.registerForNotifications()
 
-        infoObserver = NotificationCenter.default.addObserver(
+        cleanup.storeInfoObserver(NotificationCenter.default.addObserver(
             forName: NSNotification.Name(MediaRemoteBridge.nowPlayingInfoDidChange as String),
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.fetchNowPlayingInfo()
             }
-        }
+        })
 
-        playingObserver = NotificationCenter.default.addObserver(
+        cleanup.storePlayingObserver(NotificationCenter.default.addObserver(
             forName: NSNotification.Name(MediaRemoteBridge.nowPlayingApplicationIsPlayingDidChange as String),
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.fetchPlaybackState()
             }
-        }
+        })
     }
 
     // MARK: - 获取 Now Playing 信息
@@ -221,13 +296,38 @@ final class MediaManager {
         isPlaying && lyricsEnabled && hasAuthoritativePlaybackPosition
     }
 
+    /// 用位置的采样时刻补偿 AppleScript 取值到应用之间的延迟，
+    /// 使歌词时间轴以真实播放进度为基准而非收到数据的时刻
+    static func compensatedElapsedTime(
+        position: TimeInterval,
+        sampledAt: Date,
+        now: Date,
+        playbackRate: Double
+    ) -> TimeInterval {
+        let latency = max(0, now.timeIntervalSince(sampledAt))
+        return max(0, position + latency * max(0, playbackRate))
+    }
+
+    /// 防止 AppleScript 偶发慢于轮询间隔时请求堆积、旧位置乱序覆盖新位置。
+    private var infoFetchGate = MediaInfoFetchGate()
+    private static let infoFetchTimeoutNanoseconds: UInt64 = 5_000_000_000
+
     func fetchNowPlayingInfo() {
+        guard let requestID = infoFetchGate.begin() else { return }
+
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.infoFetchTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.infoFetchGate.timeout(requestID: requestID)
+        }
+
         Task.detached { [weak self] in
             // ScriptingBridge 获取（MediaRemote 在非沙盒环境中返回空）
             let info = await ScriptingBridgeHelper.getNowPlayingInfo()
             guard let self else { return }
 
             await MainActor.run {
+                guard self.infoFetchGate.finish(requestID: requestID) else { return }
                 let newTitle = info["title"] as? String ?? ""
                 let newArtist = info["artist"] as? String ?? ""
                 let newAlbum = info["album"] as? String ?? ""
@@ -265,19 +365,27 @@ final class MediaManager {
                 if let dur = info["duration"] as? TimeInterval {
                     self.duration = dur
                 }
-                // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
-                if let pos = info["playerPosition"] as? TimeInterval {
-                    self.hasAuthoritativePlaybackPosition = true
-                    self.syncedElapsedTime = pos
-                    self.lastSyncTime = Date()
-                    self.elapsedTime = pos
-                }
+                // 先更新播放速率，位置补偿计算依赖最新速率
                 if let rate = info["playbackRate"] as? Double {
                     self.playbackRate = rate
                     // 用户手动操作后的保护期内，不覆盖状态
                     if Date() > self.userActionDeadline {
                         self.isPlaying = rate > 0
                     }
+                }
+                // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
+                // lastSyncTime 取采样时刻：封面等后续 AppleScript 耗时不再拖累时间轴
+                if let pos = info["playerPosition"] as? TimeInterval {
+                    let sampledAt = info["positionTimestamp"] as? Date ?? Date()
+                    self.hasAuthoritativePlaybackPosition = true
+                    self.syncedElapsedTime = pos
+                    self.lastSyncTime = sampledAt
+                    self.elapsedTime = Self.compensatedElapsedTime(
+                        position: pos,
+                        sampledAt: sampledAt,
+                        now: Date(),
+                        playbackRate: self.playbackRate
+                    )
                 }
 
                 // 切歌或歌词开关变化时同步歌词状态
@@ -340,10 +448,16 @@ final class MediaManager {
                 }
                 // 播放/暂停切换时重新校准进度
                 if let pos = info["playerPosition"] as? TimeInterval {
+                    let sampledAt = info["positionTimestamp"] as? Date ?? Date()
                     self.hasAuthoritativePlaybackPosition = true
                     self.syncedElapsedTime = pos
-                    self.lastSyncTime = Date()
-                    self.elapsedTime = pos
+                    self.lastSyncTime = sampledAt
+                    self.elapsedTime = Self.compensatedElapsedTime(
+                        position: pos,
+                        sampledAt: sampledAt,
+                        now: Date(),
+                        playbackRate: self.playbackRate
+                    )
                 }
                 self.startProgressTimerIfNeeded()
             }

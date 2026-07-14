@@ -4,6 +4,21 @@ import XCTest
 @MainActor
 final class MediaManagerTests: XCTestCase {
 
+    // MARK: - MediaInfoFetchGate
+
+    func testTimedOutInfoFetchAllowsNextRequestAndRejectsStaleResult() throws {
+        var gate = MediaInfoFetchGate()
+        let firstRequest = try XCTUnwrap(gate.begin())
+        XCTAssertNil(gate.begin())
+
+        gate.timeout(requestID: firstRequest)
+        let secondRequest = try XCTUnwrap(gate.begin())
+
+        XCTAssertFalse(gate.finish(requestID: firstRequest))
+        XCTAssertTrue(gate.finish(requestID: secondRequest))
+        XCTAssertFalse(gate.isInFlight)
+    }
+
     // MARK: - shouldSyncLyrics
 
     func testEnablingLyricsRefreshesUnchangedTrack() {
@@ -163,6 +178,52 @@ final class MediaManagerTests: XCTestCase {
                 lyricsEnabled: true,
                 hasAuthoritativePlaybackPosition: true
             )
+        )
+    }
+
+    // MARK: - compensatedElapsedTime
+
+    func testCompensatedElapsedTimeAddsFetchLatency() {
+        let sampledAt = Date(timeIntervalSince1970: 1000)
+        let now = Date(timeIntervalSince1970: 1000.8) // AppleScript 链路耗时 0.8s
+        XCTAssertEqual(
+            MediaManager.compensatedElapsedTime(
+                position: 30,
+                sampledAt: sampledAt,
+                now: now,
+                playbackRate: 1.0
+            ),
+            30.8,
+            accuracy: 0.0001
+        )
+    }
+
+    func testCompensatedElapsedTimeIgnoresLatencyWhenPaused() {
+        let sampledAt = Date(timeIntervalSince1970: 1000)
+        let now = Date(timeIntervalSince1970: 1001)
+        XCTAssertEqual(
+            MediaManager.compensatedElapsedTime(
+                position: 30,
+                sampledAt: sampledAt,
+                now: now,
+                playbackRate: 0
+            ),
+            30
+        )
+    }
+
+    func testCompensatedElapsedTimeClampsClockSkew() {
+        // 时钟回拨等异常导致采样时刻晚于当前时刻时，不允许时间轴倒退
+        let sampledAt = Date(timeIntervalSince1970: 1002)
+        let now = Date(timeIntervalSince1970: 1000)
+        XCTAssertEqual(
+            MediaManager.compensatedElapsedTime(
+                position: 30,
+                sampledAt: sampledAt,
+                now: now,
+                playbackRate: 1.0
+            ),
+            30
         )
     }
 

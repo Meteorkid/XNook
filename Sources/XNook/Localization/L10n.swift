@@ -163,10 +163,19 @@ enum L10n {
         zh: "展开面板的宽度（单位：点）。",
         en: "Width of the expanded panel in points.") }
 
+    static var panelBaseHeight: String { localized(zh: "面板基础高度", en: "Panel base height") }
+    static var panelBaseHeightDesc: String { localized(
+        zh: "展开面板的最小高度；内容超出时会自动继续增高。",
+        en: "Minimum expanded panel height. The panel continues growing when content exceeds it.") }
+
     static var nookFlowHistoryDisplayLimit: String { localized(zh: "最近任务显示条数", en: "Recent tasks shown") }
     static var nookFlowHistoryDisplayLimitDesc: String { localized(
         zh: "控制展开面板中最近任务的显示数量（1–5 条）。",
         en: "Choose how many recent tasks appear in the expanded panel (1–5).") }
+    static var showNookFlowHistory: String { localized(zh: "显示最近任务", en: "Show recent tasks") }
+    static var showNookFlowHistoryDesc: String { localized(
+        zh: "在展开面板中显示已完成的最近任务。",
+        en: "Show completed recent tasks in the expanded panel.") }
     static func nookFlowHistoryDisplayCount(_ count: Int) -> String {
         localized(zh: "\(count) 条", en: "\(count) items")
     }

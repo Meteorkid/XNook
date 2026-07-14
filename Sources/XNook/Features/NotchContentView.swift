@@ -60,6 +60,7 @@ struct NotchContentView: View {
     }()
 
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
+    @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
     @AppStorage("jellyIntensity") private var jellyIntensity = SettingsDefaults.string(for: "jellyIntensity", fallback: "medium")
 
     /// 根据强度设置返回果冻缩放值
@@ -77,6 +78,7 @@ struct NotchContentView: View {
     @AppStorage("showTickerLine") private var showTickerLine = SettingsDefaults.bool(for: "showTickerLine", fallback: true)
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
     @AppStorage("tickerSpeed") private var tickerSpeed = SettingsDefaults.double(for: "tickerSpeed")
+    @AppStorage("showNookFlowHistory") private var showNookFlowHistory = SettingsDefaults.bool(for: "showNookFlowHistory", fallback: true)
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
     @State private var cachedGifData: Data?
     @State private var islandObscuredByNotch = false
@@ -137,9 +139,10 @@ struct NotchContentView: View {
 
     private var isExpanded: Bool { state == .expanded }
 
-    /// NookFlow 区域是否应显示（有活跃会话或有历史记录）
+    /// NookFlow 区域是否应显示（有活跃会话，或用户开启了最近任务且存在历史记录）
     private var isFocusSessionVisible: Bool {
-        focusSessionManager.activeSession != nil || !focusSessionManager.history.isEmpty
+        focusSessionManager.activeSession != nil
+            || (showNookFlowHistory && !focusSessionManager.history.isEmpty)
     }
 
     private var visibleHistoryRecordCount: Int {
@@ -169,7 +172,8 @@ struct NotchContentView: View {
         IslandSizeCalculator.expandedHeight(
             for: state,
             visibleSessionCount: WidgetType.enabledWidgets.count,
-            focusSessionCardHeight: focusSessionCardHeight
+            focusSessionCardHeight: focusSessionCardHeight,
+            panelBaseHeight: panelBaseHeight
         )
     }
 
@@ -395,7 +399,8 @@ struct NotchContentView: View {
             if isExpanded {
                 cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
                     visibleSessionCount: WidgetType.enabledWidgets.count,
-                    focusSessionCardHeight: focusSessionCardHeight
+                    focusSessionCardHeight: focusSessionCardHeight,
+                    panelBaseHeight: panelBaseHeight
                 )
             }
             startHoverPolling()
@@ -470,7 +475,8 @@ struct NotchContentView: View {
         if case .expanded = newState {
             cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
                 visibleSessionCount: WidgetType.enabledWidgets.count,
-                focusSessionCardHeight: focusSessionCardHeight
+                focusSessionCardHeight: focusSessionCardHeight,
+                panelBaseHeight: panelBaseHeight
             )
         }
 
@@ -556,7 +562,8 @@ struct NotchContentView: View {
             for: state,
             visibleSessionCount: sessionCount,
             panelWidth: panelWidth,
-            focusSessionCardHeight: cardHeight
+            focusSessionCardHeight: cardHeight,
+            panelBaseHeight: panelBaseHeight
         )
     }
 

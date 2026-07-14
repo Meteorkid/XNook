@@ -41,6 +41,18 @@ final class ScriptingBridgeHelperTests: XCTestCase {
         )
     }
 
+    func testArtworkCacheKeyDistinguishesFieldBoundaries() {
+        // 字段内容串位不应产生相同的缓存 key
+        XCTAssertNotEqual(
+            ScriptingBridgeHelper.artworkCacheKey(title: "a|b", artist: "", album: "c"),
+            ScriptingBridgeHelper.artworkCacheKey(title: "a", artist: "b", album: "c")
+        )
+        XCTAssertEqual(
+            ScriptingBridgeHelper.artworkCacheKey(title: "Song", artist: "Artist", album: "Album"),
+            ScriptingBridgeHelper.artworkCacheKey(title: "Song", artist: "Artist", album: "Album")
+        )
+    }
+
     func testPlayingSpotifyWinsOverPausedMusic() {
         let music: [String: Any] = [
             "title": "Paused Music Track",

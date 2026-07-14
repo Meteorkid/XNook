@@ -48,10 +48,19 @@ enum ScriptingBridgeHelper {
             appleScriptPosition: appleScriptPosition
         ) {
             result["playerPosition"] = position
+            // 采样时间戳：后续封面/播放状态的 AppleScript 调用耗时数百毫秒，
+            // 消费方须以采样时刻（而非收到时刻）为基准补偿，否则歌词时间轴滞后
+            result["positionTimestamp"] = Date()
         }
 
         // 用 AppleScript 获取封面（ScriptingBridge 的 artwork 属性不可用）
-        if let artworkData = await fetchMusicArtwork() {
+        // 封面 payload 大、传输慢，按曲目缓存，仅切歌时重新拉取
+        let trackKey = artworkCacheKey(
+            title: result["title"] as? String ?? "",
+            artist: result["artist"] as? String ?? "",
+            album: result["album"] as? String ?? ""
+        )
+        if let artworkData = await musicArtworkData(for: trackKey) {
             result["artworkData"] = artworkData
         }
 
@@ -119,6 +128,43 @@ enum ScriptingBridgeHelper {
         }
     }
 
+    // MARK: - 封面缓存
+
+    private struct ArtworkCacheEntry: Sendable {
+        let trackKey: String
+        let data: Data
+    }
+
+    private actor ArtworkCache {
+        private var entry: ArtworkCacheEntry?
+
+        func data(for trackKey: String) -> Data? {
+            guard entry?.trackKey == trackKey else { return nil }
+            return entry?.data
+        }
+
+        func store(_ data: Data, for trackKey: String) {
+            entry = ArtworkCacheEntry(trackKey: trackKey, data: data)
+        }
+    }
+
+    private static let artworkCache = ArtworkCache()
+
+    /// 曲目标识，用于判断是否需要重新拉取封面
+    static func artworkCacheKey(title: String, artist: String, album: String) -> String {
+        // 用不可见分隔符拼接，避免字段内容串位导致 key 冲突
+        [title, artist, album].joined(separator: "\u{1F}")
+    }
+
+    /// 获取 Music.app 封面：命中缓存直接返回；未命中才走 AppleScript
+    private static func musicArtworkData(for trackKey: String) async -> Data? {
+        if let cached = await artworkCache.data(for: trackKey) { return cached }
+        // 拉取失败（如暂停时脚本返回空）不写缓存，下个轮询周期重试
+        guard let data = await fetchMusicArtwork() else { return nil }
+        await artworkCache.store(data, for: trackKey)
+        return data
+    }
+
     /// 通过 AppleScript 获取 Music.app 当前曲目封面（异步执行，不阻塞调用线程）
     private static func fetchMusicArtwork() async -> Data? {
         let source = """
@@ -180,6 +226,7 @@ enum ScriptingBridgeHelper {
             appleScriptPosition: appleScriptPosition
         ) {
             result["playerPosition"] = position
+            result["positionTimestamp"] = Date()
         }
 
         // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较

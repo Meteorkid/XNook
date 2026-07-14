@@ -41,6 +41,7 @@ struct SettingsView: View {
     @AppStorage("calendarReminderSoundEnabled") private var calendarReminderSoundEnabled = SettingsDefaults.bool(for: "calendarReminderSoundEnabled")
     @AppStorage("calendarReminderLeadMinutes") private var calendarReminderLeadMinutes = SettingsDefaults.double(for: "calendarReminderLeadMinutes", fallback: 5.0)
     @AppStorage("calendarReminderSoundName") private var calendarReminderSoundName = SettingsDefaults.string(for: "calendarReminderSoundName", fallback: "Glass")
+    @AppStorage("showNookFlowHistory") private var showNookFlowHistory = SettingsDefaults.bool(for: "showNookFlowHistory", fallback: true)
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
 
     var body: some View {
@@ -184,7 +185,7 @@ struct SettingsView: View {
                     dividerLine
                     settingRow(L10n.expandedInactivityHide, id: "expandedInactivity",
                               description: L10n.expandedInactivityHideDesc) {
-                        AppStorageSlider(key: "expandedInactivityAutoHideDelay", range: 0...120, step: 1, format: "%.0fs")
+                        AppStorageSlider(key: "expandedInactivityAutoHideDelay", range: 0...120, step: 0.01, format: "%.2fs")
                     }
                     dividerLine
                     settingRow(L10n.hoverExitCollapseDelay, id: "hoverExit",
@@ -358,11 +359,21 @@ struct SettingsView: View {
                               description: L10n.panelWidthDesc) {
                         AppStorageSlider(key: "panelWidth", range: 200...800, format: "%.0fpt")
                     }
+                    dividerLine
+                    settingRow(L10n.panelBaseHeight, id: "panelBaseHeight",
+                              description: L10n.panelBaseHeightDesc) {
+                        AppStorageSlider(key: "panelBaseHeight", range: 300...900, step: 10, format: "%.0fpt")
+                    }
                 }
             }
 
             section(L10n.sectionNookFlow) {
                 card {
+                    settingRow(L10n.showNookFlowHistory, id: "showNookFlowHistory",
+                              description: L10n.showNookFlowHistoryDesc) {
+                        AppStorageToggle(key: "showNookFlowHistory")
+                    }
+                    dividerLine
                     settingRow(L10n.nookFlowHistoryDisplayLimit, id: "nookFlowHistoryDisplayLimit",
                               description: L10n.nookFlowHistoryDisplayLimitDesc) {
                         Picker("", selection: historyDisplayLimitBinding) {
@@ -372,6 +383,7 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.menu)
                         .frame(width: 120)
+                        .disabled(!showNookFlowHistory)
                     }
                 }
             }

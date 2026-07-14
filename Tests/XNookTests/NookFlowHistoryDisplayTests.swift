@@ -2,6 +2,36 @@ import XCTest
 @testable import XNook
 
 final class NookFlowHistoryDisplayTests: XCTestCase {
+    func testExpandedPanelHeightHonorsConfiguredBaseHeight() {
+        let height = IslandSizeCalculator.expandedPanelShapeHeight(
+            visibleSessionCount: 0,
+            focusSessionCardHeight: 0,
+            panelBaseHeight: 400
+        )
+
+        XCTAssertEqual(height, 400, accuracy: 0.001)
+    }
+
+    func testTargetSizeAllowsContentToExceedPanelBaseHeight() {
+        let contentHeight = IslandSizeCalculator.expandedPanelShapeHeight(
+            visibleSessionCount: 4,
+            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
+        )
+        let target = IslandSizeCalculator.targetSize(
+            for: .expanded,
+            visibleSessionCount: 4,
+            panelWidth: 600,
+            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5),
+            panelBaseHeight: 400
+        )
+
+        XCTAssertEqual(target.height, contentHeight, accuracy: 0.001)
+    }
+
+    func testPanelBaseHeightUsesDefault() {
+        XCTAssertEqual(SettingsDefaults.double(for: "panelBaseHeight"), 400, accuracy: 0.001)
+    }
+
     func testHistoryDisplayLimitUsesDefaultAndClampsToSupportedRange() {
         XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(0), 1)
         XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(1), 1)
@@ -9,6 +39,10 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
         XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(5), 5)
         XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(6), 5)
         XCTAssertEqual(SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit"), 3)
+    }
+
+    func testRecentTaskHistoryIsShownByDefault() {
+        XCTAssertTrue(SettingsDefaults.bool(for: "showNookFlowHistory"))
     }
 
     func testHistoryListHeightAddsExactlyOneRowForEachVisibleRecord() {

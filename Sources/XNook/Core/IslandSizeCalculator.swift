@@ -69,7 +69,8 @@ enum IslandSizeCalculator {
     static func expandedHeight(
         for state: IslandState,
         visibleSessionCount: Int,
-        focusSessionCardHeight: CGFloat = 0
+        focusSessionCardHeight: CGFloat = 0,
+        panelBaseHeight: CGFloat = 0
     ) -> CGFloat {
         switch state {
         case .collapsed:
@@ -77,16 +78,20 @@ enum IslandSizeCalculator {
         case .expanded:
             return expandedPanelShapeHeight(
                 visibleSessionCount: visibleSessionCount,
-                focusSessionCardHeight: focusSessionCardHeight
+                focusSessionCardHeight: focusSessionCardHeight,
+                panelBaseHeight: panelBaseHeight
             )
         }
     }
 
     /// 计算展开面板的实际高度
-    /// - Parameter focusSessionCardHeight: NookFlow 区域高度，无活跃会话且无历史记录时传 0
+    /// - Parameters:
+    ///   - focusSessionCardHeight: NookFlow 区域高度，无活跃会话且无历史记录时传 0
+    ///   - panelBaseHeight: 用户设置的面板基础高度；内容超出时仍按内容继续增长
     static func expandedPanelShapeHeight(
         visibleSessionCount: Int,
-        focusSessionCardHeight: CGFloat = 0
+        focusSessionCardHeight: CGFloat = 0,
+        panelBaseHeight: CGFloat = 0
     ) -> CGFloat {
         // 头部高度 + NookFlow 区域高度 + 会话列表高度 + 底部间距
         let sessionListHeight = CGFloat(visibleSessionCount) * 80 + 30
@@ -94,7 +99,7 @@ enum IslandSizeCalculator {
             + focusSessionCardHeight
             + sessionListHeight
             + expandedPanelBottomInset
-        return calculatedHeight
+        return max(calculatedHeight, panelBaseHeight)
     }
 
     /// 根据状态计算目标尺寸
@@ -103,13 +108,15 @@ enum IslandSizeCalculator {
         for state: IslandState,
         visibleSessionCount: Int,
         panelWidth: CGFloat,
-        focusSessionCardHeight: CGFloat = 0
+        focusSessionCardHeight: CGFloat = 0,
+        panelBaseHeight: CGFloat = 0
     ) -> (width: CGFloat, height: CGFloat) {
         let width = expandedWidth(for: state, panelWidth: panelWidth)
         let height = expandedHeight(
             for: state,
             visibleSessionCount: visibleSessionCount,
-            focusSessionCardHeight: focusSessionCardHeight
+            focusSessionCardHeight: focusSessionCardHeight,
+            panelBaseHeight: panelBaseHeight
         )
         return (width, height)
     }

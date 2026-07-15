@@ -73,7 +73,8 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
 
     @MainActor
     func testPanelHeightMaximumRespectsScreenHeightAndHardLimit() {
-        XCTAssertEqual(NotchWindow.maximumExpandedContentHeight(forScreenHeight: 700), 686, accuracy: 0.001)
+        // screenHeight(700) - expandedPadding(8) - windowTopExtension(4) = 688
+        XCTAssertEqual(NotchWindow.maximumExpandedContentHeight(forScreenHeight: 700), 688, accuracy: 0.001)
         XCTAssertEqual(NotchWindow.maximumExpandedContentHeight(forScreenHeight: 2_000), 900, accuracy: 0.001)
     }
 

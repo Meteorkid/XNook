@@ -16,7 +16,9 @@ final class NotchWindow: NSPanel {
     static func islandTopOffset(for _: NSScreen) -> CGFloat { 0 }
 
     /// 窗口向上延伸的像素数，使屏幕顶端在窗口内部而非边缘
-    static let windowTopExtension: CGFloat = 6
+    /// 避免 setFrame 偏差或抗锯齿导致顶部出现 1px 缝隙；内容顶部 padding 会覆盖此越界量，可见区无空隙
+    /// 4px 已足够覆盖 setFrame 偏差与抗锯齿，同时减少内容空间浪费
+    static let windowTopExtension: CGFloat = 4
 
     /// 展开面板可见高度上限，保留窗口边距并避免超出当前屏幕。
     static func maximumExpandedContentHeight(for screen: NSScreen? = NSScreen.main) -> CGFloat {

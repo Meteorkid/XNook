@@ -91,7 +91,7 @@ struct AppStorageSlider: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.secondary)
-                    .frame(width: 45, alignment: .trailing)
+                    .frame(width: 65, alignment: .trailing)
                     .multilineTextAlignment(.trailing)
                     .onSubmit { commitInput() }
                     .onExitCommand { commitInput() }
@@ -105,7 +105,7 @@ struct AppStorageSlider: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 45, alignment: .trailing)
+                .frame(width: 65, alignment: .trailing)
             }
         }
     }

@@ -3,8 +3,8 @@ import QuartzCore
 
 @MainActor
 final class NotchWindow: NSPanel {
-    static let maxExpandedWidth: CGFloat = 520
-    static let maxExpandedHeight: CGFloat = 600
+    static let maxExpandedWidth: CGFloat = 1_600
+    static let maxExpandedHeight: CGFloat = 900
     private static let defaultWidth: CGFloat = 220
     private static let defaultHeight: CGFloat = 50
 
@@ -17,6 +17,30 @@ final class NotchWindow: NSPanel {
 
     /// 窗口向上延伸的像素数，使屏幕顶端在窗口内部而非边缘
     static let windowTopExtension: CGFloat = 6
+
+    /// 展开面板可见高度上限，保留窗口边距并避免超出当前屏幕。
+    static func maximumExpandedContentHeight(for screen: NSScreen? = NSScreen.main) -> CGFloat {
+        let screenHeight = screen?.visibleFrame.height ?? maxExpandedHeight
+        return maximumExpandedContentHeight(forScreenHeight: screenHeight)
+    }
+
+    static func maximumExpandedContentHeight(forScreenHeight screenHeight: CGFloat) -> CGFloat {
+        let availableHeight = screenHeight - expandedPadding - windowTopExtension
+        return max(160, min(maxExpandedHeight, availableHeight))
+    }
+
+    static func maximumExpandedContentWidth(forScreenWidth screenWidth: CGFloat) -> CGFloat {
+        max(160, min(maxExpandedWidth, screenWidth - expandedPadding * 2))
+    }
+
+    func maximumExpandedContentSize() -> CGSize {
+        let screen = cachedOrRefreshScreen()
+        let width = screen.map { Self.maximumExpandedContentWidth(forScreenWidth: $0.visibleFrame.width) }
+            ?? Self.maxExpandedWidth
+        let height = screen.map { Self.maximumExpandedContentHeight(for: $0) }
+            ?? Self.maxExpandedHeight
+        return CGSize(width: width, height: height)
+    }
 
     func isObscuredByPhysicalNotch() -> Bool {
         guard let screen = self.screen else { return false }

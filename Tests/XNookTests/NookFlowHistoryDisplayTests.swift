@@ -2,21 +2,19 @@ import XCTest
 @testable import XNook
 
 final class NookFlowHistoryDisplayTests: XCTestCase {
-    func testExpandedPanelHeightHonorsConfiguredBaseHeight() {
+    func testExpandedPanelHeightFitsContentWhenBelowCap() {
+        // 内容不足上限时按实际内容高度展开，与 X Island 一致
         let height = IslandSizeCalculator.expandedPanelShapeHeight(
             visibleSessionCount: 0,
             focusSessionCardHeight: 0,
             panelBaseHeight: 400
         )
 
-        XCTAssertEqual(height, 400, accuracy: 0.001)
+        // calculatedHeight = 48(头部) + 0 + 30(空列表) + 16(底部) = 94
+        XCTAssertEqual(height, 94, accuracy: 0.001)
     }
 
-    func testTargetSizeAllowsContentToExceedPanelBaseHeight() {
-        let contentHeight = IslandSizeCalculator.expandedPanelShapeHeight(
-            visibleSessionCount: 4,
-            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
-        )
+    func testTargetSizeUsesConfiguredHeightWhenContentOverflows() {
         let target = IslandSizeCalculator.targetSize(
             for: .expanded,
             visibleSessionCount: 4,
@@ -25,7 +23,7 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
             panelBaseHeight: 400
         )
 
-        XCTAssertEqual(target.height, contentHeight, accuracy: 0.001)
+        XCTAssertEqual(target.height, 400, accuracy: 0.001)
     }
 
     func testPanelBaseHeightUsesDefault() {
@@ -62,34 +60,26 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
         )
     }
 
-    func testExpandedPanelHeightTracksVisibleHistoryRowsWithoutClippingWidgets() {
-        let oneRecordPanelHeight = IslandSizeCalculator.expandedPanelShapeHeight(
-            visibleSessionCount: 0,
-            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 1)
-        )
-        let fiveRecordPanelHeight = IslandSizeCalculator.expandedPanelShapeHeight(
-            visibleSessionCount: 0,
-            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
-        )
-
-        XCTAssertEqual(
-            fiveRecordPanelHeight - oneRecordPanelHeight,
-            FocusSessionView.historyRowHeight * 4,
-            accuracy: 0.001
-        )
-
-        let requiredHeight = IslandSizeCalculator.expandedPanelShapeHeight(
+    func testExpandedPanelHeightCapsAtConfiguredMaximum() {
+        // 内容超过上限时裁切到 panelBaseHeight
+        let height = IslandSizeCalculator.expandedPanelShapeHeight(
             visibleSessionCount: 4,
-            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
+            focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5),
+            panelBaseHeight: 200
         )
 
-        XCTAssertEqual(
-            IslandSizeCalculator.expandedPanelShapeHeight(
-                visibleSessionCount: 4,
-                focusSessionCardHeight: FocusSessionView.historyListHeight(for: 5)
-            ),
-            requiredHeight,
-            accuracy: 0.001
-        )
+        XCTAssertEqual(height, 200, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testPanelHeightMaximumRespectsScreenHeightAndHardLimit() {
+        XCTAssertEqual(NotchWindow.maximumExpandedContentHeight(forScreenHeight: 700), 686, accuracy: 0.001)
+        XCTAssertEqual(NotchWindow.maximumExpandedContentHeight(forScreenHeight: 2_000), 900, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testPanelWidthMaximumRespectsScreenWidthAndHardLimit() {
+        XCTAssertEqual(NotchWindow.maximumExpandedContentWidth(forScreenWidth: 700), 684, accuracy: 0.001)
+        XCTAssertEqual(NotchWindow.maximumExpandedContentWidth(forScreenWidth: 2_000), 1_600, accuracy: 0.001)
     }
 }

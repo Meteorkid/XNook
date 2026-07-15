@@ -163,10 +163,10 @@ enum L10n {
         zh: "展开面板的宽度（单位：点）。",
         en: "Width of the expanded panel in points.") }
 
-    static var panelBaseHeight: String { localized(zh: "面板基础高度", en: "Panel base height") }
+    static var panelBaseHeight: String { localized(zh: "面板最大高度", en: "Panel max height") }
     static var panelBaseHeightDesc: String { localized(
-        zh: "展开面板的最小高度；内容超出时会自动继续增高。",
-        en: "Minimum expanded panel height. The panel continues growing when content exceeds it.") }
+        zh: "展开面板的高度上限；内容不足时按实际高度展开，超出时裁切。",
+        en: "Height cap for the expanded panel. Panel fits content; caps when content exceeds.") }
 
     static var nookFlowHistoryDisplayLimit: String { localized(zh: "最近任务显示条数", en: "Recent tasks shown") }
     static var nookFlowHistoryDisplayLimitDesc: String { localized(

@@ -1031,7 +1031,11 @@ struct NotchContentView: View {
 
     private func openSettingsWindow() {
         collapse()
-        AppDelegate.shared?.openPreferences()
+        // 推迟到下一 runloop 打开设置窗口，避免 NSPanel 首次创建 + SettingsView 加载
+        // 阻塞主线程导致收起动画前几帧丢帧
+        DispatchQueue.main.async {
+            AppDelegate.shared?.openPreferences()
+        }
     }
 
     /// Ticker 显示文本：开启歌词时优先显示歌词，否则显示 标题 — 艺术家

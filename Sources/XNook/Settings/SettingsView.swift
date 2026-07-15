@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import AppKit
 
 // MARK: - 设置面板枚举
 
@@ -43,6 +44,21 @@ struct SettingsView: View {
     @AppStorage("calendarReminderSoundName") private var calendarReminderSoundName = SettingsDefaults.string(for: "calendarReminderSoundName", fallback: "Glass")
     @AppStorage("showNookFlowHistory") private var showNookFlowHistory = SettingsDefaults.bool(for: "showNookFlowHistory", fallback: true)
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
+    @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
+    @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
+
+    private var panelHeightRange: ClosedRange<Double> {
+        160...Double(panelContentSizeLimit.height)
+    }
+
+    private var panelWidthRange: ClosedRange<Double> {
+        160...Double(panelContentSizeLimit.width)
+    }
+
+    private var panelContentSizeLimit: CGSize {
+        AppDelegate.shared?.notchWindow?.maximumExpandedContentSize()
+            ?? CGSize(width: NotchWindow.maxExpandedWidth, height: NotchWindow.maxExpandedHeight)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,6 +74,10 @@ struct SettingsView: View {
         .frame(width: 560)
         .frame(minHeight: 400, maxHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear(perform: clampPanelHeightToVisibleRange)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            clampPanelHeightToVisibleRange()
+        }
     }
 
     // MARK: - 工具栏
@@ -185,12 +205,12 @@ struct SettingsView: View {
                     dividerLine
                     settingRow(L10n.expandedInactivityHide, id: "expandedInactivity",
                               description: L10n.expandedInactivityHideDesc) {
-                        AppStorageSlider(key: "expandedInactivityAutoHideDelay", range: 0...120, step: 0.01, format: "%.2fs")
+                        AppStorageSlider(key: "expandedInactivityAutoHideDelay", range: 0...600, format: "%.2fs")
                     }
                     dividerLine
                     settingRow(L10n.hoverExitCollapseDelay, id: "hoverExit",
                               description: L10n.hoverExitCollapseDelayDesc) {
-                        AppStorageSlider(key: "hoverExitCollapseDelay", range: 0.1...3.0, step: 0.05, format: "%.2fs")
+                        AppStorageSlider(key: "hoverExitCollapseDelay", range: 0.01...10, format: "%.2fs")
                     }
                 }
             }
@@ -299,12 +319,12 @@ struct SettingsView: View {
                 card {
                     settingRow(L10n.islandWidth, id: "islandWidth",
                               description: L10n.islandWidthDesc) {
-                        AppStorageSlider(key: "islandWidth", range: 80...350, format: "%.0fpt")
+                        AppStorageSlider(key: "islandWidth", range: 40...600, format: "%.2fpt")
                     }
                     dividerLine
                     settingRow(L10n.islandHeight, id: "islandHeight",
                               description: L10n.islandHeightDesc) {
-                        AppStorageSlider(key: "islandHeight", range: 16...60, format: "%.1fpt")
+                        AppStorageSlider(key: "islandHeight", range: 8...120, format: "%.2fpt")
                     }
                 }
             }
@@ -313,12 +333,12 @@ struct SettingsView: View {
                 card {
                     settingRow(L10n.islandWidthWithLyrics, id: "islandWidthWithLyrics",
                               description: L10n.islandWidthWithLyricsDesc) {
-                        AppStorageSlider(key: "islandWidthWithLyrics", range: 120...400, format: "%.0fpt")
+                        AppStorageSlider(key: "islandWidthWithLyrics", range: 60...800, format: "%.2fpt")
                     }
                     dividerLine
                     settingRow(L10n.islandHeightWithLyrics, id: "islandHeightWithLyrics",
                               description: L10n.islandHeightWithLyricsDesc) {
-                        AppStorageSlider(key: "islandHeightWithLyrics", range: 20...60, format: "%.0fpt")
+                        AppStorageSlider(key: "islandHeightWithLyrics", range: 10...160, format: "%.2fpt")
                     }
                 }
             }
@@ -337,7 +357,7 @@ struct SettingsView: View {
                     dividerLine
                     settingRow(L10n.tickerSpeed, id: "tickerSpeed",
                               description: L10n.tickerSpeedDesc) {
-                        AppStorageSlider(key: "tickerSpeed", range: 10...60, step: 5, format: "%.0fpt/s")
+                        AppStorageSlider(key: "tickerSpeed", range: 1...200, format: "%.2fpt/s")
                     }
                 }
             }
@@ -357,12 +377,12 @@ struct SettingsView: View {
                 card {
                     settingRow(L10n.panelWidth, id: "panelWidth",
                               description: L10n.panelWidthDesc) {
-                        AppStorageSlider(key: "panelWidth", range: 200...800, format: "%.0fpt")
+                        AppStorageSlider(key: "panelWidth", range: panelWidthRange, format: "%.2fpt")
                     }
                     dividerLine
                     settingRow(L10n.panelBaseHeight, id: "panelBaseHeight",
                               description: L10n.panelBaseHeightDesc) {
-                        AppStorageSlider(key: "panelBaseHeight", range: 300...900, step: 10, format: "%.0fpt")
+                        AppStorageSlider(key: "panelBaseHeight", range: panelHeightRange, format: "%.2fpt")
                     }
                 }
             }
@@ -441,6 +461,11 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private func clampPanelHeightToVisibleRange() {
+        panelBaseHeight = min(max(panelBaseHeight, panelHeightRange.lowerBound), panelHeightRange.upperBound)
+        panelWidth = min(max(panelWidth, panelWidthRange.lowerBound), panelWidthRange.upperBound)
     }
 
     // MARK: - Integration 面板

@@ -87,7 +87,7 @@ enum IslandSizeCalculator {
     /// 计算展开面板的实际高度
     /// - Parameters:
     ///   - focusSessionCardHeight: NookFlow 区域高度，无活跃会话且无历史记录时传 0
-    ///   - panelBaseHeight: 用户设置的面板基础高度；内容超出时仍按内容继续增长
+    ///   - panelBaseHeight: 用户设置的面板最大高度上限；内容不足时按内容自然高度，超出时裁切
     static func expandedPanelShapeHeight(
         visibleSessionCount: Int,
         focusSessionCardHeight: CGFloat = 0,
@@ -99,7 +99,8 @@ enum IslandSizeCalculator {
             + focusSessionCardHeight
             + sessionListHeight
             + expandedPanelBottomInset
-        return max(calculatedHeight, panelBaseHeight)
+        // 与 X Island 一致：panelBaseHeight 作为上限裁切，内容不足时按自然高度
+        return panelBaseHeight > 0 ? min(calculatedHeight, panelBaseHeight) : calculatedHeight
     }
 
     /// 根据状态计算目标尺寸

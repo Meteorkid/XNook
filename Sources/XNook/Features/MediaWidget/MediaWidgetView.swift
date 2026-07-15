@@ -9,30 +9,12 @@ struct MediaWidgetView: View {
             Spacer()
 
             // 专辑封面
-            if let artwork = mediaManager.currentArtwork {
-                Image(nsImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 56, height: 56)
-                    .cornerRadius(8)
-                    .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
-                    .id(mediaManager.artworkVersion) // 切歌时强制刷新
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(
-                        LinearGradient(
-                            colors: [.pink.opacity(0.3), .purple.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 20))
-                            .foregroundColor(.pink)
-                    )
+            Button(action: { mediaManager.openCurrentPlayer() }) {
+                artworkView
             }
+            .buttonStyle(.plain)
+            .disabled(mediaManager.currentSource == nil)
+            .help(mediaManager.currentSource?.rawValue ?? L10n.noTrack)
 
             // 歌曲信息
             VStack(spacing: 2) {
@@ -72,6 +54,34 @@ struct MediaWidgetView: View {
             .foregroundColor(.primary)
 
             Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var artworkView: some View {
+        if let artwork = mediaManager.currentArtwork {
+            Image(nsImage: artwork)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 56, height: 56)
+                .cornerRadius(8)
+                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                .id(mediaManager.artworkVersion)
+        } else {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(
+                    LinearGradient(
+                        colors: [.pink.opacity(0.3), .purple.opacity(0.2)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 56, height: 56)
+                .overlay(
+                    Image(systemName: "music.note")
+                        .font(.system(size: 20))
+                        .foregroundColor(.pink)
+                )
         }
     }
 }

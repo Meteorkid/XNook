@@ -9,6 +9,29 @@ enum ScriptingBridgeHelper {
     enum SupportedApp: String {
         case music = "Music"
         case spotify = "Spotify"
+
+        var bundleIdentifier: String {
+            switch self {
+            case .music: "com.apple.Music"
+            case .spotify: "com.spotify.client"
+            }
+        }
+    }
+
+    enum PlaybackCommand {
+        case play
+        case pause
+        case nextTrack
+        case previousTrack
+
+        var appleScriptStatement: String {
+            switch self {
+            case .play: "play"
+            case .pause: "pause"
+            case .nextTrack: "next track"
+            case .previousTrack: "previous track"
+            }
+        }
     }
 
     /// 安全获取 NSObject 的值
@@ -21,7 +44,7 @@ enum ScriptingBridgeHelper {
     static func getNowPlayingFromMusic() async -> [String: Any]? {
         guard let app = SBApplication(bundleIdentifier: "com.apple.Music") else { return nil }
 
-        var result: [String: Any] = [:]
+        var result: [String: Any] = ["source": SupportedApp.music.rawValue]
 
         guard app.responds(to: NSSelectorFromString("currentTrack")),
               let track = app.value(forKey: "currentTrack") as? NSObject else { return nil }
@@ -199,7 +222,7 @@ enum ScriptingBridgeHelper {
     static func getNowPlayingFromSpotify() async -> [String: Any]? {
         guard let app = SBApplication(bundleIdentifier: "com.spotify.client") else { return nil }
 
-        var result: [String: Any] = [:]
+        var result: [String: Any] = ["source": SupportedApp.spotify.rawValue]
 
         guard app.responds(to: NSSelectorFromString("currentTrack")),
               let track = app.value(forKey: "currentTrack") as? NSObject else { return nil }
@@ -249,6 +272,39 @@ enum ScriptingBridgeHelper {
             return spotify
         }
         return music ?? spotify ?? [:]
+    }
+
+    static func supportedApp(from info: [String: Any]) -> SupportedApp? {
+        guard let source = info["source"] as? String else { return nil }
+        return SupportedApp(rawValue: source)
+    }
+
+    /// 对当前来源应用执行控制命令。使用 AppleScript 可可靠命中 Music 和 Spotify。
+    static func sendCommand(_ command: PlaybackCommand, to app: SupportedApp) async -> Bool {
+        let source = """
+        tell application "\(app.rawValue)"
+            \(command.appleScriptStatement)
+        end tell
+        """
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                var error: NSDictionary?
+                guard let script = NSAppleScript(source: source) else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                _ = script.executeAndReturnError(&error)
+                continuation.resume(returning: error == nil)
+            }
+        }
+    }
+
+    @MainActor
+    static func activate(_ app: SupportedApp) {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleIdentifier) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
     }
 
     /// 优先使用 AppleScript 的真实位置；不可用时回退到 ScriptingBridge。

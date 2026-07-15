@@ -70,4 +70,16 @@ final class ScriptingBridgeHelperTests: XCTestCase {
 
         XCTAssertEqual(selected["title"] as? String, "Playing Spotify Track")
     }
+
+    func testSelectedSourceIdentifiesMusicAndSpotify() {
+        XCTAssertEqual(
+            ScriptingBridgeHelper.supportedApp(from: ["source": "Music"]),
+            .music
+        )
+        XCTAssertEqual(
+            ScriptingBridgeHelper.supportedApp(from: ["source": "Spotify"]),
+            .spotify
+        )
+        XCTAssertNil(ScriptingBridgeHelper.supportedApp(from: [:]))
+    }
 }

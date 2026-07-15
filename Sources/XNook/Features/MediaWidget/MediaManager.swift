@@ -108,6 +108,7 @@ final class MediaManager {
     var duration: TimeInterval = 0
     var elapsedTime: TimeInterval = 0
     var isAvailable = false
+    private(set) var currentSource: ScriptingBridgeHelper.SupportedApp?
 
     /// 缓存的 NSImage 实例，仅在 currentArtworkData 变化时重建
     private var cachedArtworkImage: NSImage?
@@ -349,6 +350,7 @@ final class MediaManager {
                 self.currentTitle = newTitle
                 self.currentArtist = newArtist
                 self.currentAlbum = newAlbum
+                self.currentSource = ScriptingBridgeHelper.supportedApp(from: info)
 
                 // 封面提取 — 有新数据才更新，暂停时保留当前封面
                 let oldArtworkData = self.currentArtworkData
@@ -467,14 +469,14 @@ final class MediaManager {
     // MARK: - 播放控制
 
     func play() {
-        MediaRemoteBridge.sendCommand(.play)
+        sendPlaybackCommand(.play, fallback: .play)
         isPlaying = true
         userActionDeadline = Date().addingTimeInterval(2.0) // 2s 保护期
         startProgressTimerIfNeeded()
     }
 
     func pause() {
-        MediaRemoteBridge.sendCommand(.pause)
+        sendPlaybackCommand(.pause, fallback: .pause)
         isPlaying = false
         userActionDeadline = Date().addingTimeInterval(2.0)
         startProgressTimerIfNeeded()
@@ -488,16 +490,38 @@ final class MediaManager {
     }
 
     func nextTrack() {
-        MediaRemoteBridge.sendCommand(.nextTrack)
+        sendPlaybackCommand(.nextTrack, fallback: .nextTrack)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.fetchNowPlayingInfo()
         }
     }
 
     func previousTrack() {
-        MediaRemoteBridge.sendCommand(.previousTrack)
+        sendPlaybackCommand(.previousTrack, fallback: .previousTrack)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.fetchNowPlayingInfo()
+        }
+    }
+
+    func openCurrentPlayer() {
+        guard let currentSource else { return }
+        ScriptingBridgeHelper.activate(currentSource)
+    }
+
+    private func sendPlaybackCommand(
+        _ command: ScriptingBridgeHelper.PlaybackCommand,
+        fallback: MediaRemoteCommand
+    ) {
+        guard let currentSource else {
+            MediaRemoteBridge.sendCommand(fallback)
+            return
+        }
+
+        Task {
+            let succeeded = await ScriptingBridgeHelper.sendCommand(command, to: currentSource)
+            if !succeeded {
+                MediaRemoteBridge.sendCommand(fallback)
+            }
         }
     }
 

@@ -7,6 +7,59 @@ final class LyricsManager {
     var currentLine: String = ""
     var isFetching = false
 
+    /// 当前是否有同步歌词可供推进 — timer 启动条件之一
+    var hasLyrics: Bool { !lyrics.isEmpty }
+    /// 仅有纯歌词、无同步时间轴 — 由 UI 兜底显示
+    private(set) var plainLyricsText: String = ""
+
+    /// 纯歌词的预览首句：取第一段非空、非元数据的行，截断到 80 字符
+    /// 仅用于"有歌词内容但无时间轴"时的兜底显示
+    var plainLyricPreview: String {
+        Self.previewLine(from: plainLyricsText)
+    }
+
+    /// 从纯歌词全文中提取预览首句（纯函数，便于测试）
+    static func previewLine(from plainText: String) -> String {
+        guard !plainText.isEmpty else { return "" }
+        for raw in plainText.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            // 跳过空行
+            if line.isEmpty { continue }
+            // 跳过 LRC 元数据行（[ti:..] / [ar:..] / 时间标签残留）
+            if line.hasPrefix("[") { continue }
+            // 跳过纯音乐/间奏标记：LRCLIB 这类内容显示出来无意义
+            if isInstrumentalOrPlaceholder(line) { continue }
+            // 截断过长行
+            if line.count > 80 {
+                return String(line.prefix(80)) + "…"
+            }
+            return line
+        }
+        return ""
+    }
+
+    /// 判断是否为纯音乐/间奏/占位符等无意义标记（大小写不敏感）
+    private static func isInstrumentalOrPlaceholder(_ line: String) -> Bool {
+        let lower = line.lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[](){}.,!?"))
+            .trimmingCharacters(in: .whitespaces)
+        let placeholders: Set<String> = [
+            "instrumental",
+            "inst.",
+            "music",
+            "interlude",
+            "intro",
+            "outro",
+            "solo",
+            "piano solo",
+            "guitar solo",
+            "[music]",
+            "♪",
+            "·"
+        ]
+        return placeholders.contains(lower) || lower.contains("instrumental")
+    }
+
     private var lyrics: [LrcLine] = []
     private var currentTitle = ""
     private var currentArtist = ""
@@ -15,6 +68,16 @@ final class LyricsManager {
     private var fetchGeneration: Int = 0
     /// 当前歌词请求任务，用于取消旧请求
     private var fetchTask: Task<Void, Never>?
+
+    /// 歌词状态变化回调：歌词加载完成、缓存命中、或 reset 后触发。
+    /// MediaManager 用它来重新评估 progressTimer 是否需要启动，
+    /// 避免歌词加载完成后 timer 仍未启动导致歌词卡住不滚动。
+    var onLyricsStateChanged: (() -> Void)?
+
+    /// 在状态可能影响 timer 决策的变化点统一触发回调
+    private func notifyStateChanged() {
+        onLyricsStateChanged?()
+    }
 
     // MARK: - LRC 解析
 
@@ -56,6 +119,7 @@ final class LyricsManager {
         let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
         guard lyricsEnabled else {
             lyrics = []
+            plainLyricsText = ""
             currentLine = ""
             return
         }
@@ -67,6 +131,7 @@ final class LyricsManager {
         currentArtist = artist
         currentAlbum = album
         lyrics = []
+        plainLyricsText = ""
         currentLine = ""
         isFetching = true
         fetchGeneration += 1  // 递增代际标识
@@ -75,36 +140,103 @@ final class LyricsManager {
         // 取消旧的歌词请求
         fetchTask?.cancel()
 
-        fetchTask = Task {
-            do {
-                guard let decoded = try await Self.fetchResponse(
-                    title: title,
-                    artist: artist,
-                    album: album,
-                    duration: duration
-                ) else {
-                    // 代际不匹配时不要修改状态
-                    if generation == self.fetchGeneration {
-                        self.isFetching = false
-                    }
-                    return
-                }
+        // 先尝试磁盘缓存：命中即出，避免网络往返
+        // 缓存命中后仍允许后台刷新（最新版本），但前台体验由缓存主导
+        if let cached = LyricsCache.read(title: title, artist: artist, album: album, duration: duration),
+           generation == fetchGeneration {
+            apply(entry: cached)
+            self.isFetching = false
+            // 缓存命中后立刻通知 MediaManager 评估 timer：歌词已就位，可以推进
+            notifyStateChanged()
+            // 命中缓存后即返回：网络刷新作为可选优化留给后台，避免重复请求
+            // （LRCLIB 数据稳定，没必要每次都刷新）
+            return
+        }
 
-                // 代际检查：如果切歌了，丢弃本次结果
-                guard generation == self.fetchGeneration else { return }
-                if let synced = decoded.syncedLyrics, !synced.isEmpty {
-                    self.lyrics = Self.parseLrc(synced)
-                } else {
-                    // 普通歌词没有可信时间轴，不能伪装成同步歌词。
-                    self.lyrics = []
-                }
-                self.isFetching = false
-            } catch {
-                if generation == self.fetchGeneration {
-                    self.isFetching = false
+        fetchTask = Task {
+            // 网络偶发失败时有限重试：切歌瞬间网络抖动不应让整首歌没歌词。
+            // 404/无数据 不重试（确无歌词）；仅对可恢复错误（超时、连接失败）重试。
+            let maxAttempts = 2
+            var lastError: Error?
+            var decoded: LrcResponse?
+            for attempt in 1...maxAttempts {
+                do {
+                    decoded = try await Self.fetchResponse(
+                        title: title,
+                        artist: artist,
+                        album: album,
+                        duration: duration
+                    )
+                    lastError = nil
+                    break
+                } catch {
+                    lastError = error
+                    // 切歌或取消：立即退出不重试
+                    if generation != self.fetchGeneration || Task.isCancelled { break }
+                    // 最后一次失败也不重试
+                    if attempt == maxAttempts { break }
+                    // 指数退避：1s → 2s
+                    let delay = UInt64(attempt) * 1_000_000_000
+                    try? await Task.sleep(nanoseconds: delay)
+                    if generation != self.fetchGeneration { break }
                 }
             }
+
+            // 代际检查：如果切歌了，丢弃本次结果
+            guard generation == self.fetchGeneration else { return }
+
+            if let decoded {
+                if let synced = decoded.syncedLyrics, !synced.isEmpty {
+                    self.lyrics = Self.parseLrc(synced)
+                    self.plainLyricsText = ""
+                    LyricsCache.write(
+                        title: title,
+                        artist: artist,
+                        album: album,
+                        duration: duration,
+                        type: .synced,
+                        payload: synced
+                    )
+                } else if let plain = decoded.plainLyrics, !plain.isEmpty {
+                    // 无同步时间轴：保留纯歌词全文供 UI 兜底显示
+                    self.lyrics = []
+                    self.plainLyricsText = plain
+                    LyricsCache.write(
+                        title: title,
+                        artist: artist,
+                        album: album,
+                        duration: duration,
+                        type: .plain,
+                        payload: plain
+                    )
+                } else {
+                    self.lyrics = []
+                    self.plainLyricsText = ""
+                }
+                self.isFetching = false
+                // 网络加载完成：歌词就位（或确认无歌词），通知 MediaManager 评估 timer
+                self.notifyStateChanged()
+            } else {
+                // 全部重试失败：记录但不影响功能（ticker 回退到标题显示）
+                _ = lastError
+                self.isFetching = false
+                // 加载失败也要通知：让 timer 评估在没有歌词时是否应停止
+                self.notifyStateChanged()
+            }
         }
+    }
+
+    /// 把缓存项应用到当前状态（同步歌词解析时间轴；纯歌词保留全文）
+    private func apply(entry: LyricsCache.Entry) {
+        switch entry.type {
+        case .synced:
+            lyrics = Self.parseLrc(entry.payload)
+            plainLyricsText = ""
+        case .plain:
+            lyrics = []
+            plainLyricsText = entry.payload
+        }
+        currentLine = ""
     }
 
     static func bestSearchResult(
@@ -263,12 +395,15 @@ final class LyricsManager {
     func reset() {
         fetchTask?.cancel()
         lyrics = []
+        plainLyricsText = ""
         currentLine = ""
         currentTitle = ""
         currentArtist = ""
         currentAlbum = ""
         isFetching = false
         fetchGeneration += 1  // 使旧的异步请求失效
+        // reset 后 hasLyrics 变 false，通知 MediaManager 停止 timer（避免空转）
+        notifyStateChanged()
     }
 }
 

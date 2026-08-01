@@ -164,19 +164,50 @@ final class MediaManagerTests: XCTestCase {
         )
     }
 
-    func testLyricTimelineRequiresPlayingStateAndAuthoritativePosition() {
+    func testLyricTimelineRequiresPlayingStateAndLyrics() {
+        // 没有歌词时不推进
         XCTAssertFalse(
             MediaManager.shouldAdvanceLyricTimeline(
                 isPlaying: true,
                 lyricsEnabled: true,
-                hasAuthoritativePlaybackPosition: false
+                hasLyrics: false,
+                hasAuthoritativePlaybackPosition: true
             )
         )
+        // 暂停时不推进
+        XCTAssertFalse(
+            MediaManager.shouldAdvanceLyricTimeline(
+                isPlaying: false,
+                lyricsEnabled: true,
+                hasLyrics: true,
+                hasAuthoritativePlaybackPosition: true
+            )
+        )
+        // 关闭歌词时不推进
+        XCTAssertFalse(
+            MediaManager.shouldAdvanceLyricTimeline(
+                isPlaying: true,
+                lyricsEnabled: false,
+                hasLyrics: true,
+                hasAuthoritativePlaybackPosition: true
+            )
+        )
+        // 有歌词 + 权威位置：推进
         XCTAssertTrue(
             MediaManager.shouldAdvanceLyricTimeline(
                 isPlaying: true,
                 lyricsEnabled: true,
+                hasLyrics: true,
                 hasAuthoritativePlaybackPosition: true
+            )
+        )
+        // 有歌词但 AppleScript 暂时拿不到位置：仍推进，避免歌词时间轴停滞
+        XCTAssertTrue(
+            MediaManager.shouldAdvanceLyricTimeline(
+                isPlaying: true,
+                lyricsEnabled: true,
+                hasLyrics: true,
+                hasAuthoritativePlaybackPosition: false
             )
         )
     }

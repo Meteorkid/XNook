@@ -101,6 +101,9 @@ final class MediaManager {
     var currentArtist: String = ""
     var currentAlbum: String = ""
     var currentLyricLine: String = ""
+    /// 当 LRCLIB 仅返回纯歌词（无同步时间轴）时的预览首句。
+    /// 仅在 currentLyricLine 为空时由 UI 兜底使用，避免误以为是同步歌词。
+    var plainLyricPreview: String { lyricsManager.plainLyricPreview }
     /// 仅存储原始 Data，NSImage 按需创建，避免同时持有两份图像数据
     var currentArtworkData: Data?
     /// 封面版本号，每次切歌递增，用于 SwiftUI 强制刷新
@@ -147,6 +150,11 @@ final class MediaManager {
         let available = MediaRemoteBridge.isAvailable
         isAvailable = available
         mediaRemoteAvailable = available
+        // 歌词状态变化时重新评估 progressTimer：
+        // 歌词加载完成后立刻启动 timer 推进，避免歌词卡在第一行不滚动
+        lyricsManager.onLyricsStateChanged = { [weak self] in
+            self?.startProgressTimerIfNeeded()
+        }
         // MediaRemote 可用时注册系统通知（快速响应）
         // 不可用时仍可通过 ScriptingBridge 轮询获取信息
         if available {
@@ -193,6 +201,7 @@ final class MediaManager {
         let needsTimer = Self.shouldAdvanceLyricTimeline(
             isPlaying: isPlaying,
             lyricsEnabled: lyricsEnabled,
+            hasLyrics: lyricsManager.hasLyrics,
             hasAuthoritativePlaybackPosition: hasAuthoritativePlaybackPosition
         )
 
@@ -292,9 +301,19 @@ final class MediaManager {
     static func shouldAdvanceLyricTimeline(
         isPlaying: Bool,
         lyricsEnabled: Bool,
+        hasLyrics: Bool,
         hasAuthoritativePlaybackPosition: Bool
     ) -> Bool {
-        isPlaying && lyricsEnabled && hasAuthoritativePlaybackPosition
+        // 同步歌词 + 已知播放进度：本地 0.05s 推进
+        if isPlaying && lyricsEnabled && hasLyrics && hasAuthoritativePlaybackPosition {
+            return true
+        }
+        // 同步歌词但暂时拿不到权威位置：仍允许 timer 运行，靠下一轮 fetch 校准
+        // 避免 AppleScript 偶发失败时歌词时间轴完全停滞
+        if isPlaying && lyricsEnabled && hasLyrics {
+            return true
+        }
+        return false
     }
 
     /// 用位置的采样时刻补偿 AppleScript 取值到应用之间的延迟，
@@ -423,10 +442,15 @@ final class MediaManager {
                 }
 
                 // 更新歌词当前行
+                // 注意：没有权威播放位置时不要清空 currentLyricLine。
+                // AppleScript 取 player position 偶发失败/超时会导致一次返回空，
+                // 一旦清空就会让 ticker 闪烁回标题再恢复下一帧 —— 视觉上"歌词不显示"。
+                // 保留上一行内容，等下一次成功采样再校准。
                 if self.hasAuthoritativePlaybackPosition {
                     self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
-                } else {
-                    self.currentLyricLine = ""
+                    if self.lyricsManager.currentLine != self.currentLyricLine {
+                        self.currentLyricLine = self.lyricsManager.currentLine
+                    }
                 }
 
                 // 根据当前状态决定是否需要 progressTimer

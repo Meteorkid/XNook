@@ -227,6 +227,8 @@ struct NotchContentView: View {
     private static let expandSpring = Animation.spring(response: 0.4, dampingFraction: 0.82)
     private static let collapseSpring = Animation.spring(response: 0.35, dampingFraction: 0.8)
     private static let contentFade = Animation.easeInOut(duration: 0.2)
+    /// Ticker 文本切换的淡入淡出动画：歌词行变化时不硬切
+    private static let tickerTextTransition = Animation.easeInOut(duration: 0.25)
 
     // MARK: - 主视图
 
@@ -322,7 +324,12 @@ struct NotchContentView: View {
                     .foregroundColor(IslandStyle.tertiaryText(for: colorScheme))
                     .frame(width: shapeWidth, height: tickerLineHeight)
                     .offset(y: collapsedShapeHeight - 8)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    // 文本变化时淡入淡出，避免歌词行切换时的硬切闪烁
+                    .id(tickerText)
+                    .transition(
+                        .opacity.combined(with: .move(edge: .top))
+                    )
+                    .animation(Self.tickerTextTransition, value: tickerText)
                 }
             }
             .frame(width: shapeWidth, height: collapsedTotalHeight)
@@ -1038,11 +1045,16 @@ struct NotchContentView: View {
         }
     }
 
-    /// Ticker 显示文本：开启歌词时优先显示歌词，否则显示 标题 — 艺术家
+    /// Ticker 显示文本优先级：
+    /// 1. 同步歌词当前行
+    /// 2. 纯歌词首句兜底（无时间轴，仍有歌词可读）
+    /// 3. 标题 — 艺术家
     private var tickerText: String {
         if showLyrics {
-            let lyricsLine = mediaManager.currentLyricLine
-            if !lyricsLine.isEmpty { return lyricsLine }
+            let syncedLine = mediaManager.currentLyricLine
+            if !syncedLine.isEmpty { return syncedLine }
+            let plainPreview = mediaManager.plainLyricPreview
+            if !plainPreview.isEmpty { return plainPreview }
         }
 
         let title = mediaManager.currentTitle

@@ -91,4 +91,69 @@ final class LyricsManagerTests: XCTestCase {
 
         XCTAssertTrue(selected.hasSyncedLyrics)
     }
+
+    // MARK: - hasLyrics / plainLyricPreview
+
+    func testHasLyricsFalseByDefault() {
+        let manager = LyricsManager()
+        XCTAssertFalse(manager.hasLyrics)
+        XCTAssertEqual(manager.plainLyricPreview, "")
+    }
+
+    func testPreviewLineReturnsEmptyForEmptyInput() {
+        XCTAssertEqual(LyricsManager.previewLine(from: ""), "")
+    }
+
+    func testPreviewLineSkipsBlankAndMetadataLines() {
+        let plain = """
+
+        [ti:Song Title]
+        [ar:Artist]
+
+        First real line
+        Second line
+        """
+        XCTAssertEqual(LyricsManager.previewLine(from: plain), "First real line")
+    }
+
+    func testPreviewLineTruncatesLongLines() {
+        let longLine = String(repeating: "A", count: 120)
+        let preview = LyricsManager.previewLine(from: longLine)
+        XCTAssertEqual(preview.count, 81)  // 80 字符 + 省略号
+        XCTAssertTrue(preview.hasSuffix("…"))
+    }
+
+    func testPreviewLineReturnsFirstNonEmptyLine() {
+        let plain = "Only line\nSecond"
+        XCTAssertEqual(LyricsManager.previewLine(from: plain), "Only line")
+    }
+
+    func testPreviewLineSkipsInstrumentalMarkers() {
+        let plain = """
+        Instrumental
+
+        [music]
+
+        First real line
+        """
+        XCTAssertEqual(LyricsManager.previewLine(from: plain), "First real line")
+    }
+
+    func testPreviewLineSkipsSoloMarker() {
+        XCTAssertEqual(LyricsManager.previewLine(from: "Guitar Solo"), "")
+    }
+
+    func testPreviewLineReturnsEmptyForAllInstrumental() {
+        XCTAssertEqual(LyricsManager.previewLine(from: "Instrumental"), "")
+    }
+
+    // MARK: - onLyricsStateChanged 回调
+
+    func testLyricsStateChangedFiresOnReset() {
+        let manager = LyricsManager()
+        var callCount = 0
+        manager.onLyricsStateChanged = { callCount += 1 }
+        manager.reset()
+        XCTAssertEqual(callCount, 1)
+    }
 }

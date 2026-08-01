@@ -157,7 +157,6 @@ final class LyricsManager {
             // 网络偶发失败时有限重试：切歌瞬间网络抖动不应让整首歌没歌词。
             // 404/无数据 不重试（确无歌词）；仅对可恢复错误（超时、连接失败）重试。
             let maxAttempts = 2
-            var lastError: Error?
             var decoded: LrcResponse?
             for attempt in 1...maxAttempts {
                 do {
@@ -167,17 +166,14 @@ final class LyricsManager {
                         album: album,
                         duration: duration
                     )
-                    lastError = nil
                     break
                 } catch {
-                    lastError = error
                     // 切歌或取消：立即退出不重试
                     if generation != self.fetchGeneration || Task.isCancelled { break }
                     // 最后一次失败也不重试
                     if attempt == maxAttempts { break }
-                    // 指数退避：1s → 2s
-                    let delay = UInt64(attempt) * 1_000_000_000
-                    try? await Task.sleep(nanoseconds: delay)
+                    // 退避 1s 后重试
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
                     if generation != self.fetchGeneration { break }
                 }
             }
@@ -217,8 +213,7 @@ final class LyricsManager {
                 // 网络加载完成：歌词就位（或确认无歌词），通知 MediaManager 评估 timer
                 self.notifyStateChanged()
             } else {
-                // 全部重试失败：记录但不影响功能（ticker 回退到标题显示）
-                _ = lastError
+                // 全部重试失败：不影响功能（ticker 回退到标题显示）
                 self.isFetching = false
                 // 加载失败也要通知：让 timer 评估在没有歌词时是否应停止
                 self.notifyStateChanged()
@@ -247,23 +242,82 @@ final class LyricsManager {
     ) -> LrcResponse? {
         let normalizedTitle = normalize(title)
         let normalizedArtist = normalize(artist)
+        let coreTitle = Self.coreTitle(normalizedTitle)
 
-        return candidates
-            .filter { candidate in
-                guard candidate.hasLyrics else { return false }
-                let candidateTitle = normalize(candidate.trackName ?? "")
-                let candidateArtist = normalize(candidate.artistName ?? "")
-                let titleMatches = candidateTitle == normalizedTitle
-                    || candidateTitle.contains(normalizedTitle)
-                    || normalizedTitle.contains(candidateTitle)
-                let artistMatches = normalizedArtist.isEmpty
-                    || candidateArtist.contains(normalizedArtist)
-                    || normalizedArtist.contains(candidateArtist)
-                return titleMatches && artistMatches
+        // 第一轮：严格匹配（完整 normalize 字符串双向 contains）
+        let strict = candidates.filter { candidate in
+            matches(candidate, normalizedTitle: normalizedTitle, normalizedArtist: normalizedArtist)
+        }
+        if let best = strict.max(by: { searchScore($0, duration: duration) < searchScore($1, duration: duration) }) {
+            return best
+        }
+
+        // 第二轮：核心歌名匹配（去括号后比较）—— 解决括号内版本/来源标注不匹配
+        // 例：Music "光亮 (大型纪录片...主题歌)" vs LRCLIB "光亮 (大型紀錄片...主題歌)"
+        guard !coreTitle.isEmpty else { return nil }
+        let core = candidates.filter { candidate in
+            guard candidate.hasLyrics else { return false }
+            let candidateCore = Self.coreTitle(normalize(candidate.trackName ?? ""))
+            guard !candidateCore.isEmpty else { return false }
+            let titleMatches = Self.titleMatches(candidateCore, coreTitle)
+            let candidateArtist = normalize(candidate.artistName ?? "")
+            let artistMatches = normalizedArtist.isEmpty
+                || candidateArtist.contains(normalizedArtist)
+                || normalizedArtist.contains(candidateArtist)
+            return titleMatches && artistMatches
+        }
+        if let best = core.max(by: { searchScore($0, duration: duration) < searchScore($1, duration: duration) }) {
+            return best
+        }
+
+        // 第三轮：核心歌名完全相等 + duration 接近时忽略 artist —— 解决翻唱/cover 问题
+        // 例：Music "心墙" by 林俊杰（翻唱） vs LRCLIB "心墙" by 郭静（原唱）
+        let coverMatch = candidates.filter { candidate in
+            guard candidate.hasLyrics else { return false }
+            let candidateCore = Self.coreTitle(normalize(candidate.trackName ?? ""))
+            guard candidateCore == coreTitle else { return false }
+            // duration 容差 ±15s，避免同名不同歌
+            if let duration, let candDur = candidate.duration {
+                return abs(candDur - duration) <= 15
             }
-            .max { lhs, rhs in
-                searchScore(lhs, duration: duration) < searchScore(rhs, duration: duration)
-            }
+            return true  // 无 duration 信息时仅凭歌名
+        }
+        return coverMatch.max(by: { searchScore($0, duration: duration) < searchScore($1, duration: duration) })
+    }
+
+    /// 判断候选是否严格匹配（完整 normalize 字符串）
+    private static func matches(
+        _ candidate: LrcResponse,
+        normalizedTitle: String,
+        normalizedArtist: String
+    ) -> Bool {
+        guard candidate.hasLyrics else { return false }
+        let candidateTitle = normalize(candidate.trackName ?? "")
+        let candidateArtist = normalize(candidate.artistName ?? "")
+        let titleMatches = Self.titleMatches(candidateTitle, normalizedTitle)
+        let artistMatches = normalizedArtist.isEmpty
+            || candidateArtist.contains(normalizedArtist)
+            || normalizedArtist.contains(candidateArtist)
+        return titleMatches && artistMatches
+    }
+
+    /// 判断两个归一化后的标题是否匹配。
+    /// 完全相等总是匹配；短标题（≤2 字符）要求完全相等，避免"光"误匹配"光年"；
+    /// 长标题允许双向 contains，覆盖"歌名 (Live)"等带后缀变体。
+    private static func titleMatches(_ candidateTitle: String, _ targetTitle: String) -> Bool {
+        if candidateTitle == targetTitle { return true }
+        if candidateTitle.count <= 2 || targetTitle.count <= 2 { return false }
+        return candidateTitle.contains(targetTitle) || targetTitle.contains(candidateTitle)
+    }
+
+    /// 提取括号前的核心歌名，去掉版本/来源标注
+    /// "光亮 (大型纪录片《紫禁城》主题歌)" → "光亮"
+    /// "大鱼" → "大鱼"
+    private static func coreTitle(_ normalized: String) -> String {
+        if let bracketIdx = normalized.firstIndex(where: { $0 == "(" || $0 == "[" }) {
+            return String(normalized[..<bracketIdx]).trimmingCharacters(in: .whitespaces)
+        }
+        return normalized
     }
 
     private static func fetchResponse(
@@ -299,12 +353,31 @@ final class LyricsManager {
             return nil
         }
         let candidates = try JSONDecoder().decode([LrcResponse].self, from: searchData)
-        return bestSearchResult(
+        var best = bestSearchResult(
             from: candidates,
             title: title,
             artist: artist,
             duration: duration
         )
+
+        // 兜底：track_name+artist_name 搜索无匹配结果时，用 q= 全文搜索重试
+        // LRCLIB 两个端点索引不同，q= 能命中更多中文/跨语言变体
+        if best == nil, let fallbackURL = fallbackSearchURL(title: title) {
+            try Task.checkCancellation()
+            let (fbData, fbResponse) = try await URLSession.shared.data(for: request(for: fallbackURL))
+            try Task.checkCancellation()
+            if let fbHTTP = fbResponse as? HTTPURLResponse, fbHTTP.statusCode == 200 {
+                let fbCandidates = try JSONDecoder().decode([LrcResponse].self, from: fbData)
+                best = bestSearchResult(
+                    from: fbCandidates,
+                    title: title,
+                    artist: artist,
+                    duration: duration
+                )
+            }
+        }
+
+        return best
     }
 
     private static let lyricsAPIBaseURL = "https://lrclib.net/api"
@@ -335,6 +408,18 @@ final class LyricsManager {
         components?.queryItems = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist),
+        ]
+        return components?.url
+    }
+
+    /// q= 全文搜索兜底：LRCLIB 的 track_name+artist_name 与 q= 索引不同，
+    /// 前者无果时用核心歌名做 q= 搜索能命中更多变体
+    private static func fallbackSearchURL(title: String) -> URL? {
+        let core = coreTitle(normalize(title))
+        guard !core.isEmpty else { return nil }
+        var components = URLComponents(string: "\(lyricsAPIBaseURL)/search")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: core),
         ]
         return components?.url
     }

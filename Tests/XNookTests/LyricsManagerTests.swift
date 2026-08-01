@@ -92,6 +92,54 @@ final class LyricsManagerTests: XCTestCase {
         XCTAssertTrue(selected.hasSyncedLyrics)
     }
 
+    // MARK: - 短歌名匹配（防回归）
+
+    func testShortTitleExactMatchStillWorks() throws {
+        // 单字歌名完全相等应能匹配
+        let candidates = [
+            LrcResponse(
+                trackName: "光",
+                artistName: "Artist",
+                duration: 180,
+                syncedLyrics: "[00:01.00]Correct",
+                plainLyrics: nil
+            ),
+        ]
+
+        let selected = try XCTUnwrap(
+            LyricsManager.bestSearchResult(
+                from: candidates,
+                title: "光",
+                artist: "Artist",
+                duration: 180
+            )
+        )
+
+        XCTAssertEqual(selected.trackName, "光")
+    }
+
+    func testShortTitleDoesNotMatchLongerCandidate() {
+        // 短歌名"光"不应误匹配"光年"——避免 contains 方向导致的误匹配
+        let candidates = [
+            LrcResponse(
+                trackName: "光年",
+                artistName: "Artist",
+                duration: 180,
+                syncedLyrics: "[00:01.00]Wrong",
+                plainLyrics: nil
+            ),
+        ]
+
+        let selected = LyricsManager.bestSearchResult(
+            from: candidates,
+            title: "光",
+            artist: "Artist",
+            duration: 180
+        )
+
+        XCTAssertNil(selected)
+    }
+
     // MARK: - hasLyrics / plainLyricPreview
 
     func testHasLyricsFalseByDefault() {

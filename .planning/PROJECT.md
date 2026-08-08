@@ -40,7 +40,7 @@ X Nook 是一款 macOS 灵动岛风格的工具中心应用，作为 X Island �
 ### 竞品分析
 
 - **NotchNook**：闭源商业软件，$25 买断，功能丰富（媒体、日历、笔记、文件架、蓝牙、摄像头）
-- **X Island**：开源 AI Agent 监控器，MIT 许可，已有 Notch 窗口管理实现
+- **X Island**：源码可用的 AI Agent 监控器（非商业许可），已有 Notch 窗口管理实现
 - **NookX**：闭源全能工具箱，功能最丰富（50+ 类），使用 WKWebView 实现笔记编辑器
 
 ### 技术决策
@@ -64,7 +64,7 @@ X Nook 是一款 macOS 灵动岛风格的工具中心应用，作为 X Island �
 | 从 X Island 借鉴 NotchWindow | 复用成熟的窗口管理实现，减少开发时间 | ✓ Good |
 | 使用 URL Scheme 进行应用切换 | 标准的 macOS 应用间通信方式，简单可靠 | — Pending |
 | 使用 SwiftUI + AppKit 混合 | SwiftUI 用于 Widget 视图，AppKit 用于窗口管理 | — Pending |
-| 开源免费（MIT 许可） | 社区共建，与 X Island 保持一致 | — Pending |
+| 源码可用（非商业许可） | 学习参考，与 X Island 保持一致 | — Pending |
 
 ## Evolution
 

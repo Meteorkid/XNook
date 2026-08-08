@@ -41,7 +41,7 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 - 基于 X Island 的 NotchWindow 实现进行扩展
 - 使用 URL Scheme 进行应用切换
-- 开源免费（MIT 许可）
+- 源码可用（非商业许可）
 
 ---
 *Last updated: 2026-06-13*

@@ -33,7 +33,7 @@
 
 ---
 
-### 2. X Island（开源 AI Agent 监控）
+### 2. X Island（源码可用的 AI Agent 监控，非商业许可）
 
 **核心功能**：
 - 多 Agent 监控（Claude Code、Cursor 等 19 种）
@@ -50,7 +50,7 @@
 - 零配置管理（ZeroConfigManager）
 
 **架构特点**：
-- 开源可学习
+- 源码可学习
 - SessionManager 核心状态机
 - SocketServer 与 Agent 通信
 - 56 个 Swift 文件，结构清晰
@@ -95,7 +95,7 @@
 - 开发者（可扩展）
 
 ### 核心差异化
-1. **开源免费** — MIT 许可
+1. **源码可用** — 非商业许可
 2. **应用切换** — 与 X Island 联动
 3. **模块化** — 可选功能，按需启用
 4. **现代架构** — Swift Concurrency、Observation

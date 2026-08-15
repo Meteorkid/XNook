@@ -64,6 +64,8 @@ final class LyricsManager {
     private var currentTitle = ""
     private var currentArtist = ""
     private var currentAlbum = ""
+    /// 上次请求所用的 duration，用于判断"duration 迟到"是否值得重试一次
+    private var currentDuration: TimeInterval?
     /// 代际标识：每次切歌递增，防止旧异步请求覆盖新状态
     private var fetchGeneration: Int = 0
     /// 当前歌词请求任务，用于取消旧请求
@@ -124,12 +126,20 @@ final class LyricsManager {
             return
         }
 
-        guard !title.isEmpty,
-              (title != currentTitle || artist != currentArtist || album != currentAlbum)
-        else { return }
+        let identityChanged = title != currentTitle
+            || artist != currentArtist
+            || album != currentAlbum
+        // duration 常常比曲目信息晚一拍到达，缺 duration 时 LRCLIB 的精确匹配用不上。
+        // 因此仅在"还没拿到任何歌词"时允许 duration 到位后重试一次；
+        // 已有歌词就不必为 duration 变化重复请求。
+        let shouldRetryWithDuration = duration != currentDuration
+            && lyrics.isEmpty
+            && plainLyricsText.isEmpty
+        guard !title.isEmpty, identityChanged || shouldRetryWithDuration else { return }
         currentTitle = title
         currentArtist = artist
         currentAlbum = album
+        currentDuration = duration
         lyrics = []
         plainLyricsText = ""
         currentLine = ""
@@ -140,24 +150,28 @@ final class LyricsManager {
         // 取消旧的歌词请求
         fetchTask?.cancel()
 
-        // 先尝试磁盘缓存：命中即出，避免网络往返
-        // 缓存命中后仍允许后台刷新（最新版本），但前台体验由缓存主导
-        if let cached = LyricsCache.read(title: title, artist: artist, album: album, duration: duration),
-           generation == fetchGeneration {
-            apply(entry: cached)
-            self.isFetching = false
-            // 缓存命中后立刻通知 MediaManager 评估 timer：歌词已就位，可以推进
-            notifyStateChanged()
-            // 命中缓存后即返回：网络刷新作为可选优化留给后台，避免重复请求
-            // （LRCLIB 数据稳定，没必要每次都刷新）
-            return
-        }
-
         fetchTask = Task {
+            // 先尝试磁盘缓存：命中即出，避免网络往返。
+            // 读取放到后台队列 —— JSON 解码与 mtime 刷新都是阻塞 syscall，
+            // 在 MainActor 上执行会在磁盘繁忙时卡掉 UI 帧。
+            let cached = await LyricsCache.readAsync(title: title, artist: artist, album: album)
+            guard generation == self.fetchGeneration else { return }
+            // apply 返回 false 表示缓存内容解析后为空（数据损坏/曾写入坏数据），
+            // 此时不能直接返回，否则该曲目会永远卡在坏缓存上，落回网络重新获取。
+            if let cached, self.apply(entry: cached) {
+                self.isFetching = false
+                // 缓存命中后立刻通知 MediaManager 评估 timer：歌词已就位，可以推进
+                self.notifyStateChanged()
+                // 命中缓存后即返回：网络刷新作为可选优化留给后台，避免重复请求
+                // （LRCLIB 数据稳定，没必要每次都刷新）
+                return
+            }
+
             // 网络偶发失败时有限重试：切歌瞬间网络抖动不应让整首歌没歌词。
             // 404/无数据 不重试（确无歌词）；仅对可恢复错误（超时、连接失败）重试。
             let maxAttempts = 2
             var decoded: LrcResponse?
+            var lastError: Error?
             for attempt in 1...maxAttempts {
                 do {
                     decoded = try await Self.fetchResponse(
@@ -170,8 +184,9 @@ final class LyricsManager {
                 } catch {
                     // 切歌或取消：立即退出不重试
                     if generation != self.fetchGeneration || Task.isCancelled { break }
-                    // 最后一次失败也不重试
-                    if attempt == maxAttempts { break }
+                    lastError = error
+                    // 最后一次失败、或错误本身不可恢复（解码失败、HTTP 语义错误）都不重试
+                    guard attempt < maxAttempts, Self.isRetryable(error) else { break }
                     // 退避 1s 后重试
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     if generation != self.fetchGeneration { break }
@@ -189,7 +204,6 @@ final class LyricsManager {
                         title: title,
                         artist: artist,
                         album: album,
-                        duration: duration,
                         type: .synced,
                         payload: synced
                     )
@@ -201,7 +215,6 @@ final class LyricsManager {
                         title: title,
                         artist: artist,
                         album: album,
-                        duration: duration,
                         type: .plain,
                         payload: plain
                     )
@@ -213,7 +226,12 @@ final class LyricsManager {
                 // 网络加载完成：歌词就位（或确认无歌词），通知 MediaManager 评估 timer
                 self.notifyStateChanged()
             } else {
-                // 全部重试失败：不影响功能（ticker 回退到标题显示）
+                // 全部重试失败：不影响功能（ticker 回退到标题显示）。
+                // 但要留下痕迹，否则线上"没歌词"完全无从判断是网络问题还是确无歌词。
+                // 只打印错误本身，不打印曲目信息，避免把用户的听歌记录写进日志。
+                if let lastError {
+                    print("[Lyrics] 歌词获取失败: \(lastError.localizedDescription)")
+                }
                 self.isFetching = false
                 // 加载失败也要通知：让 timer 评估在没有歌词时是否应停止
                 self.notifyStateChanged()
@@ -221,17 +239,40 @@ final class LyricsManager {
         }
     }
 
+    /// 仅对可恢复的网络错误重试。超时、连接失败重试有意义；
+    /// 解码失败、HTTP 语义错误这类确定性结果重试只是白白多打一次请求。
+    static func isRetryable(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .networkConnectionLost,
+             .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// 把缓存项应用到当前状态（同步歌词解析时间轴；纯歌词保留全文）
-    private func apply(entry: LyricsCache.Entry) {
+    /// - Returns: 缓存内容是否可用。解析后为空说明缓存已损坏，调用方应落回网络。
+    @discardableResult
+    private func apply(entry: LyricsCache.Entry) -> Bool {
         switch entry.type {
         case .synced:
-            lyrics = Self.parseLrc(entry.payload)
+            let parsed = Self.parseLrc(entry.payload)
+            guard !parsed.isEmpty else { return false }
+            lyrics = parsed
             plainLyricsText = ""
         case .plain:
+            guard !entry.payload.isEmpty else { return false }
             lyrics = []
             plainLyricsText = entry.payload
         }
         currentLine = ""
+        return true
     }
 
     static func bestSearchResult(
@@ -242,7 +283,9 @@ final class LyricsManager {
     ) -> LrcResponse? {
         let normalizedTitle = normalize(title)
         let normalizedArtist = normalize(artist)
-        let coreTitle = Self.coreTitle(normalizedTitle)
+        // 注意：coreTitle 必须从原始标题提取。normalize 会剥掉括号，
+        // 先 normalize 再找括号永远找不到，第二/三轮会退化成第一轮的重复。
+        let coreTitle = Self.coreTitle(title)
 
         // 第一轮：严格匹配（完整 normalize 字符串双向 contains）
         let strict = candidates.filter { candidate in
@@ -257,7 +300,7 @@ final class LyricsManager {
         guard !coreTitle.isEmpty else { return nil }
         let core = candidates.filter { candidate in
             guard candidate.hasLyrics else { return false }
-            let candidateCore = Self.coreTitle(normalize(candidate.trackName ?? ""))
+            let candidateCore = Self.coreTitle(candidate.trackName ?? "")
             guard !candidateCore.isEmpty else { return false }
             let titleMatches = Self.titleMatches(candidateCore, coreTitle)
             let candidateArtist = normalize(candidate.artistName ?? "")
@@ -272,15 +315,18 @@ final class LyricsManager {
 
         // 第三轮：核心歌名完全相等 + duration 接近时忽略 artist —— 解决翻唱/cover 问题
         // 例：Music "心墙" by 林俊杰（翻唱） vs LRCLIB "心墙" by 郭静（原唱）
+        //
+        // duration 是本轮唯一的安全阀：一旦缺失就只剩歌名相等，会把同名不同曲
+        // （Adele "Hello" vs Lionel Richie "Hello"）整首显示成错误歌词。
+        // 切歌初期 duration 为 0、部分播放源不提供时长都会命中这种情况，
+        // 代价远大于"翻唱匹配不上"，因此 duration 未知时直接放弃本轮。
+        guard let duration else { return nil }
         let coverMatch = candidates.filter { candidate in
             guard candidate.hasLyrics else { return false }
-            let candidateCore = Self.coreTitle(normalize(candidate.trackName ?? ""))
-            guard candidateCore == coreTitle else { return false }
+            guard let candidateDuration = candidate.duration else { return false }
+            guard Self.coreTitle(candidate.trackName ?? "") == coreTitle else { return false }
             // duration 容差 ±15s，避免同名不同歌
-            if let duration, let candDur = candidate.duration {
-                return abs(candDur - duration) <= 15
-            }
-            return true  // 无 duration 信息时仅凭歌名
+            return abs(candidateDuration - duration) <= 15
         }
         return coverMatch.max(by: { searchScore($0, duration: duration) < searchScore($1, duration: duration) })
     }
@@ -310,14 +356,22 @@ final class LyricsManager {
         return candidateTitle.contains(targetTitle) || targetTitle.contains(candidateTitle)
     }
 
-    /// 提取括号前的核心歌名，去掉版本/来源标注
+    /// 截断括号及其后内容，保留原始字符（含空格、大小写）
     /// "光亮 (大型纪录片《紫禁城》主题歌)" → "光亮"
-    /// "大鱼" → "大鱼"
-    private static func coreTitle(_ normalized: String) -> String {
-        if let bracketIdx = normalized.firstIndex(where: { $0 == "(" || $0 == "[" }) {
-            return String(normalized[..<bracketIdx]).trimmingCharacters(in: .whitespaces)
-        }
-        return normalized
+    /// "Shape of You (Remix)" → "Shape of You"
+    /// 整个标题都在括号里时保留原串，避免产生空查询
+    static func strippedTitle(_ raw: String) -> String {
+        let openers: Set<Character> = ["(", "[", "（", "【"]
+        let head = raw.firstIndex(where: { openers.contains($0) })
+            .map { String(raw[..<$0]) } ?? raw
+        let trimmed = head.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? raw.trimmingCharacters(in: .whitespacesAndNewlines) : trimmed
+    }
+
+    /// 去掉版本/来源标注后再归一化的核心歌名，用于候选比较。
+    /// 必须传入原始标题：normalize 会剥掉括号，先归一化就再也切不出核心歌名了。
+    static func coreTitle(_ raw: String) -> String {
+        normalize(strippedTitle(raw))
     }
 
     private static func fetchResponse(
@@ -362,7 +416,7 @@ final class LyricsManager {
 
         // 兜底：track_name+artist_name 搜索无匹配结果时，用 q= 全文搜索重试
         // LRCLIB 两个端点索引不同，q= 能命中更多中文/跨语言变体
-        if best == nil, let fallbackURL = fallbackSearchURL(title: title) {
+        if best == nil, let fallbackURL = fallbackSearchURL(title: title, artist: artist) {
             try Task.checkCancellation()
             let (fbData, fbResponse) = try await URLSession.shared.data(for: request(for: fallbackURL))
             try Task.checkCancellation()
@@ -413,13 +467,22 @@ final class LyricsManager {
     }
 
     /// q= 全文搜索兜底：LRCLIB 的 track_name+artist_name 与 q= 索引不同，
-    /// 前者无果时用核心歌名做 q= 搜索能命中更多变体
-    private static func fallbackSearchURL(title: String) -> URL? {
-        let core = coreTitle(normalize(title))
+    /// 前者无果时用核心歌名做 q= 搜索能命中更多变体。
+    ///
+    /// 这里必须用去括号后的**原始**标题，不能用 normalize 的结果：
+    /// q= 是分词全文检索，"Shape of You" 被归一化成 "shapeofyou" 这种粘连串后
+    /// 几乎不可能命中。artist 一并带上以缩小结果集。
+    static func fallbackSearchURL(title: String, artist: String) -> URL? {
+        let core = strippedTitle(title)
         guard !core.isEmpty else { return nil }
+        var query = core
+        let trimmedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedArtist.isEmpty {
+            query += " " + trimmedArtist
+        }
         var components = URLComponents(string: "\(lyricsAPIBaseURL)/search")
         components?.queryItems = [
-            URLQueryItem(name: "q", value: core),
+            URLQueryItem(name: "q", value: query),
         ]
         return components?.url
     }
@@ -485,6 +548,7 @@ final class LyricsManager {
         currentTitle = ""
         currentArtist = ""
         currentAlbum = ""
+        currentDuration = nil
         isFetching = false
         fetchGeneration += 1  // 使旧的异步请求失效
         // reset 后 hasLyrics 变 false，通知 MediaManager 停止 timer（避免空转）

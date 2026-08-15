@@ -209,6 +209,9 @@ final class MediaManager {
             let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
+                    // 与轮询路径保持同一判定：没有权威位置时不推进、也不覆盖
+                    // currentLyricLine，否则会用未校准的时间把上一行冲掉
+                    guard self.hasAuthoritativePlaybackPosition else { return }
                     let now = Date()
                     let delta = now.timeIntervalSince(self.lastSyncTime) * self.playbackRate
                     self.elapsedTime = self.syncedElapsedTime + delta
@@ -304,16 +307,16 @@ final class MediaManager {
         hasLyrics: Bool,
         hasAuthoritativePlaybackPosition: Bool
     ) -> Bool {
-        // 同步歌词 + 已知播放进度：本地 0.05s 推进
-        if isPlaying && lyricsEnabled && hasLyrics && hasAuthoritativePlaybackPosition {
-            return true
-        }
-        // 同步歌词但暂时拿不到权威位置：仍允许 timer 运行，靠下一轮 fetch 校准
-        // 避免 AppleScript 偶发失败时歌词时间轴完全停滞
-        if isPlaying && lyricsEnabled && hasLyrics {
-            return true
-        }
-        return false
+        // 同步歌词 + 已知播放进度：本地 0.05s 推进。
+        //
+        // hasAuthoritativePlaybackPosition 是必要条件，不能放宽：timer 用
+        // syncedElapsedTime + (now - lastSyncTime) * rate 外推，没有权威位置时
+        // 基准是陈旧的，误差只会单调累积而永远得不到校准，表现为歌词行乱跳、
+        // 进度条乱走，同时 20Hz timer 持续空转耗电。
+        //
+        // 这里不必担心 AppleScript 偶发失败导致时间轴停滞：该标志只在切歌时
+        // 复位，一次取值失败并不会把它打回 false。
+        return isPlaying && lyricsEnabled && hasLyrics && hasAuthoritativePlaybackPosition
     }
 
     /// 用位置的采样时刻补偿 AppleScript 取值到应用之间的延迟，
@@ -365,6 +368,9 @@ final class MediaManager {
                     self.syncedElapsedTime = 0
                     self.elapsedTime = 0
                     self.duration = 0
+                    // 同步基准也要归零：否则 timer 会用上一首歌残留的 lastSyncTime
+                    // 外推，新歌开头就得到一个凭空累积出来的巨大 elapsedTime
+                    self.lastSyncTime = Date()
                 }
                 self.currentTitle = newTitle
                 self.currentArtist = newArtist

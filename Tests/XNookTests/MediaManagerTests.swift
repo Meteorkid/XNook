@@ -201,8 +201,9 @@ final class MediaManagerTests: XCTestCase {
                 hasAuthoritativePlaybackPosition: true
             )
         )
-        // 有歌词但 AppleScript 暂时拿不到位置：仍推进，避免歌词时间轴停滞
-        XCTAssertTrue(
+        // 没有权威位置：不推进。timer 的外推基准此时是陈旧的，
+        // 继续推进只会让误差单调累积且永不校准，同时 20Hz timer 持续空转耗电。
+        XCTAssertFalse(
             MediaManager.shouldAdvanceLyricTimeline(
                 isPlaying: true,
                 lyricsEnabled: true,

@@ -324,11 +324,11 @@ struct NotchContentView: View {
                     .foregroundColor(IslandStyle.tertiaryText(for: colorScheme))
                     .frame(width: shapeWidth, height: tickerLineHeight)
                     .offset(y: collapsedShapeHeight - 8)
-                    // 文本变化时淡入淡出，避免歌词行切换时的硬切闪烁
-                    .id(tickerText)
-                    .transition(
-                        .opacity.combined(with: .move(edge: .top))
-                    )
+                    // 不要用 .id(tickerText) 做转场：那会让每次歌词换行都销毁重建
+                    // MarqueeText，其 @State textWidth 归零后要等一轮 preference
+                    // 测量才恢复，反而在换行瞬间抖一下；且 0.25s 过渡期内新旧两个
+                    // TimelineView(.animation) 会同时逐帧渲染。
+                    // 滚动位置的重置由 MarqueeText 自身的 onChange(of: text) 负责。
                     .animation(Self.tickerTextTransition, value: tickerText)
                 }
             }

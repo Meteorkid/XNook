@@ -363,6 +363,16 @@ final class LyricsManagerTests: XCTestCase {
         XCTAssertEqual(LyricsManager.previewLine(from: "Instrumental"), "")
     }
 
+    func testPreviewLineSkipsInstrumentalBreakMarker() {
+        XCTAssertEqual(LyricsManager.previewLine(from: "Instrumental Break\nReal line"), "Real line")
+    }
+
+    func testPreviewLineKeepsLyricContainingInstrumental() {
+        // 整行不是间奏标记、只是正文里含该词，不应被当作占位符跳过
+        let line = "The instrumental section moved me more than the words"
+        XCTAssertEqual(LyricsManager.previewLine(from: line), line)
+    }
+
     // MARK: - onLyricsStateChanged 回调
 
     func testLyricsStateChangedFiresOnReset() {

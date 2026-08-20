@@ -40,6 +40,52 @@ enum ScriptingBridgeHelper {
         return obj.value(forKey: key)
     }
 
+    // MARK: - AppleScript 执行
+
+    /// 已编译脚本的复用容器。
+    ///
+    /// NSAppleScript 的主要开销在编译而非执行，而这里的脚本源码都是常量：
+    /// 每秒轮询都重新 `NSAppleScript(source:)` 一次纯属浪费。
+    ///
+    /// NSAppleScript 不是线程安全的 —— 原先靠"每次新建实例"绕开，复用后必须自己
+    /// 序列化。每个播放器一条独立串行队列：应用内部本来就是串行 await，不损失并发；
+    /// Music 与 Spotify 之间仍可并行，不会让轮询延迟翻倍。
+    /// 字典只在该队列上访问，因此 @unchecked Sendable 是成立的。
+    private final class ScriptRunner: @unchecked Sendable {
+        private let queue: DispatchQueue
+        private var compiled: [String: NSAppleScript] = [:]
+
+        init(label: String) {
+            queue = DispatchQueue(label: label, qos: .userInitiated)
+        }
+
+        func run(_ source: String) async -> NSAppleEventDescriptor? {
+            await withCheckedContinuation { continuation in
+                queue.async {
+                    guard let script = self.compiled[source] ?? NSAppleScript(source: source) else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    self.compiled[source] = script
+                    var error: NSDictionary?
+                    let result = script.executeAndReturnError(&error)
+                    continuation.resume(returning: error == nil ? result : nil)
+                }
+            }
+        }
+    }
+
+    private static let scriptRunners: [SupportedApp: ScriptRunner] = [
+        .music: ScriptRunner(label: "com.xnook.applescript.music"),
+        .spotify: ScriptRunner(label: "com.xnook.applescript.spotify"),
+    ]
+
+    /// 在目标应用对应的串行队列上执行脚本，复用已编译实例。出错返回 nil。
+    private static func runScript(_ source: String, on app: SupportedApp) async -> NSAppleEventDescriptor? {
+        guard let runner = scriptRunners[app] else { return nil }
+        return await runner.run(source)
+    }
+
     /// 从 Music.app 获取当前播放信息
     static func getNowPlayingFromMusic() async -> [String: Any]? {
         guard let app = SBApplication(bundleIdentifier: "com.apple.Music") else { return nil }
@@ -76,6 +122,12 @@ enum ScriptingBridgeHelper {
             result["positionTimestamp"] = Date()
         }
 
+        // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
+        // 用 AppleScript 获取播放状态。必须排在封面之前：封面能否拉取取决于是否在播放。
+        if let rate = await fetchPlaybackRateViaAppleScript(app: .music) {
+            result["playbackRate"] = rate
+        }
+
         // 用 AppleScript 获取封面（ScriptingBridge 的 artwork 属性不可用）
         // 封面 payload 大、传输慢，按曲目缓存，仅切歌时重新拉取
         let trackKey = artworkCacheKey(
@@ -83,14 +135,9 @@ enum ScriptingBridgeHelper {
             artist: result["artist"] as? String ?? "",
             album: result["album"] as? String ?? ""
         )
-        if let artworkData = await musicArtworkData(for: trackKey) {
+        let isPlaying = (result["playbackRate"] as? Double ?? 0) > 0
+        if let artworkData = await musicArtworkData(for: trackKey, isPlaying: isPlaying) {
             result["artworkData"] = artworkData
-        }
-
-        // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
-        // 用 AppleScript 获取播放状态
-        if let rate = await fetchPlaybackRateViaAppleScript(app: .music) {
-            result["playbackRate"] = rate
         }
 
         return result.isEmpty ? nil : result
@@ -98,9 +145,8 @@ enum ScriptingBridgeHelper {
 
     /// 通过 AppleScript 获取指定应用的播放状态（异步执行，不阻塞调用线程）
     private static func fetchPlaybackRateViaAppleScript(app: SupportedApp) async -> Double? {
-        let appName = app.rawValue
         let source = """
-        tell application "\(appName)"
+        tell application "\(app.rawValue)"
             if player state is playing then
                 return 1
             else
@@ -108,47 +154,18 @@ enum ScriptingBridgeHelper {
             end if
         end tell
         """
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                var error: NSDictionary?
-                guard let script = NSAppleScript(source: source) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let result = script.executeAndReturnError(&error)
-                guard error == nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                continuation.resume(returning: result.doubleValue)
-            }
-        }
+        return await runScript(source, on: app)?.doubleValue
     }
 
     /// 通过 AppleScript 获取指定应用的真实播放位置（秒）
     private static func fetchPlaybackPositionViaAppleScript(app: SupportedApp) async -> Double? {
-        let appName = app.rawValue
         let source = """
-        tell application "\(appName)"
+        tell application "\(app.rawValue)"
             return player position
         end tell
         """
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                var error: NSDictionary?
-                guard let script = NSAppleScript(source: source) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let result = script.executeAndReturnError(&error)
-                guard error == nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let position = result.doubleValue
-                continuation.resume(returning: position.isFinite && position >= 0 ? position : nil)
-            }
-        }
+        guard let position = await runScript(source, on: app)?.doubleValue else { return nil }
+        return position.isFinite && position >= 0 ? position : nil
     }
 
     // MARK: - 封面缓存
@@ -179,10 +196,14 @@ enum ScriptingBridgeHelper {
         [title, artist, album].joined(separator: "\u{1F}")
     }
 
-    /// 获取 Music.app 封面：命中缓存直接返回；未命中才走 AppleScript
-    private static func musicArtworkData(for trackKey: String) async -> Data? {
+    /// 获取 Music.app 封面：命中缓存直接返回；未命中且正在播放才走 AppleScript。
+    ///
+    /// 暂停时必须跳过：取封面的脚本自身带 `player state is playing` 判断，暂停时
+    /// 必然返回空，而失败结果又不写缓存 —— 没有这道判断就会每秒重试一次注定失败的
+    /// AppleScript 往返。暂停期间的封面由 MediaManager 保留上一次的结果。
+    private static func musicArtworkData(for trackKey: String, isPlaying: Bool) async -> Data? {
         if let cached = await artworkCache.data(for: trackKey) { return cached }
-        // 拉取失败（如暂停时脚本返回空）不写缓存，下个轮询周期重试
+        guard isPlaying else { return nil }
         guard let data = await fetchMusicArtwork() else { return nil }
         await artworkCache.store(data, for: trackKey)
         return data
@@ -200,22 +221,8 @@ enum ScriptingBridgeHelper {
             end if
         end tell
         """
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                var error: NSDictionary?
-                guard let script = NSAppleScript(source: source) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let result = script.executeAndReturnError(&error)
-                guard error == nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let data = result.data
-                continuation.resume(returning: data.isEmpty ? nil : data)
-            }
-        }
+        guard let data = await runScript(source, on: .music)?.data, !data.isEmpty else { return nil }
+        return data
     }
 
     /// 从 Spotify 获取当前播放信息
@@ -286,17 +293,7 @@ enum ScriptingBridgeHelper {
             \(command.appleScriptStatement)
         end tell
         """
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                var error: NSDictionary?
-                guard let script = NSAppleScript(source: source) else {
-                    continuation.resume(returning: false)
-                    return
-                }
-                _ = script.executeAndReturnError(&error)
-                continuation.resume(returning: error == nil)
-            }
-        }
+        return await runScript(source, on: app) != nil
     }
 
     @MainActor

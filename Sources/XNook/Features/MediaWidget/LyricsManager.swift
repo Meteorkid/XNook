@@ -53,11 +53,15 @@ final class LyricsManager {
             "solo",
             "piano solo",
             "guitar solo",
-            "[music]",
             "♪",
             "·"
         ]
-        return placeholders.contains(lower) || lower.contains("instrumental")
+        // 注意：这里不列 "[music]" 之类带括号的写法 —— 比较前括号已被 trim 掉，
+        // 那种条目永远匹配不到（何况 previewLine 更早就跳过了 "[" 开头的行）。
+        if placeholders.contains(lower) { return true }
+        // 只认"整行以该标记开头且很短"的间奏标注（如 "Instrumental Break"）。
+        // 用 contains 做全文匹配会误杀正文里恰好含该词的真实歌词行。
+        return lower.hasPrefix("instrumental") && lower.count <= 20
     }
 
     private var lyrics: [LrcLine] = []

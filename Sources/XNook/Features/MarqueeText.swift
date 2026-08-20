@@ -13,19 +13,22 @@ struct MarqueeText: View {
     private var needsScroll: Bool { textWidth > availableWidth + 4 }
 
     var body: some View {
-        TimelineView(.animation) { context in
-            let offset = calculateOffset(at: context.date)
-            Text(text)
-                .font(font)
-                .fixedSize(horizontal: true, vertical: false)
-                .offset(x: offset)
+        Group {
+            if needsScroll {
+                TimelineView(.animation) { context in
+                    label
+                        .offset(x: calculateOffset(at: context.date))
+                }
+            } else {
+                // 文字放得下时不要套 TimelineView：它跟随屏幕刷新率逐帧重建，
+                // 而此时偏移恒为 0 —— 在 ProMotion 上等于常态 120fps 重绘一行静止文本。
+                label
+            }
         }
         .frame(width: availableWidth, height: 14)
         .clipped()
         .background(
-            Text(text)
-                .font(font)
-                .fixedSize(horizontal: true, vertical: false)
+            label
                 .background(
                     GeometryReader { proxy in
                         Color.clear.preference(key: TextWidthKey.self, value: proxy.size.width)
@@ -38,6 +41,12 @@ struct MarqueeText: View {
         }
         .onChange(of: text) { _, _ in startTime = .now }
         .onAppear { startTime = .now }
+    }
+
+    private var label: some View {
+        Text(text)
+            .font(font)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private func calculateOffset(at date: Date) -> CGFloat {

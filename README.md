@@ -11,6 +11,8 @@
   The companion app to X Island — media, calendar, notes, and file tray at your fingertips.
 </p>
 
+> Downloads · docs · updates: <https://www.imagentx.top/en/products/xnook>
+
 ## Demo
 
 <p align="center">

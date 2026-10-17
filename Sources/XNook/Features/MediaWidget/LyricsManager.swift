@@ -4,6 +4,40 @@ import Observation
 /// 歌词管理器 — 从 LRCLIB 获取同步歌词，解析 LRC 格式
 @Observable @MainActor
 final class LyricsManager {
+    typealias RequestLoader = @MainActor (URLRequest) async throws -> (Data, URLResponse)
+    typealias CacheReader = @MainActor (String, String, String) async -> LyricsCache.Entry?
+    typealias CacheWriter = @MainActor (String, String, String, LyricsCache.EntryType, String) -> Void
+
+    private let defaults: UserDefaults
+    private let loadRequest: RequestLoader
+    private let readCache: CacheReader
+    private let writeCache: CacheWriter
+    private let sleep: @MainActor (Duration) async throws -> Void
+    private let now: () -> Date
+
+    init(
+        defaults: UserDefaults = .standard,
+        loadRequest: @escaping RequestLoader = { try await URLSession.shared.data(for: $0) },
+        readCache: @escaping CacheReader = { await LyricsCache.readAsync(title: $0, artist: $1, album: $2) },
+        writeCache: @escaping CacheWriter = { LyricsCache.write(title: $0, artist: $1, album: $2, type: $3, payload: $4) },
+        sleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.defaults = defaults
+        self.loadRequest = loadRequest
+        self.readCache = readCache
+        self.writeCache = writeCache
+        self.sleep = sleep
+        self.now = now
+    }
+
+    private var retryAfter: Date?
+    private var consecutiveFailures = 0
+
+    var shouldRetryCurrentTrack: Bool {
+        guard !isFetching, let retryAfter else { return false }
+        return now() >= retryAfter
+    }
     var currentLine: String = ""
     var isFetching = false
 
@@ -122,11 +156,9 @@ final class LyricsManager {
         duration: TimeInterval? = nil
     ) {
         // 检查歌词功能是否开启（默认开启，可在设置中关闭）
-        let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
+        let lyricsEnabled = defaults.bool(forKey: "showLyrics")
         guard lyricsEnabled else {
-            lyrics = []
-            plainLyricsText = ""
-            currentLine = ""
+            reset()
             return
         }
 
@@ -135,11 +167,16 @@ final class LyricsManager {
             || album != currentAlbum
         // duration 常常比曲目信息晚一拍到达，缺 duration 时 LRCLIB 的精确匹配用不上。
         // 因此仅在"还没拿到任何歌词"时允许 duration 到位后重试一次；
-        // 已有歌词就不必为 duration 变化重复请求。
-        let shouldRetryWithDuration = duration != currentDuration
+        // 已有歌词就不必为 duration 变化重复请求；忽略不足一秒的浮点波动，
+        // 否则慢请求可能在每次轮询时被取消，始终无法完成。
+        let durationChanged = (duration ?? 0) > 0
+            && ((currentDuration ?? 0) <= 0 || abs((duration ?? 0) - (currentDuration ?? 0)) >= 1)
+        let shouldRetryWithDuration = durationChanged
             && lyrics.isEmpty
             && plainLyricsText.isEmpty
-        guard !title.isEmpty, identityChanged || shouldRetryWithDuration else { return }
+        guard !title.isEmpty, identityChanged || shouldRetryWithDuration || shouldRetryCurrentTrack else { return }
+        if identityChanged { consecutiveFailures = 0 }
+        retryAfter = nil
         currentTitle = title
         currentArtist = artist
         currentAlbum = album
@@ -158,12 +195,13 @@ final class LyricsManager {
             // 先尝试磁盘缓存：命中即出，避免网络往返。
             // 读取放到后台队列 —— JSON 解码与 mtime 刷新都是阻塞 syscall，
             // 在 MainActor 上执行会在磁盘繁忙时卡掉 UI 帧。
-            let cached = await LyricsCache.readAsync(title: title, artist: artist, album: album)
+            let cached = await self.readCache(title, artist, album)
             guard generation == self.fetchGeneration else { return }
             // apply 返回 false 表示缓存内容解析后为空（数据损坏/曾写入坏数据），
             // 此时不能直接返回，否则该曲目会永远卡在坏缓存上，落回网络重新获取。
             if let cached, self.apply(entry: cached) {
                 self.isFetching = false
+                self.consecutiveFailures = 0
                 // 缓存命中后立刻通知 MediaManager 评估 timer：歌词已就位，可以推进
                 self.notifyStateChanged()
                 // 命中缓存后即返回：网络刷新作为可选优化留给后台，避免重复请求
@@ -182,8 +220,15 @@ final class LyricsManager {
                         title: title,
                         artist: artist,
                         album: album,
-                        duration: duration
+                        duration: duration,
+                        loadRequest: self.loadRequest,
+                        onPlainLyrics: { plain in
+                            guard generation == self.fetchGeneration else { return }
+                            self.plainLyricsText = plain
+                            self.notifyStateChanged()
+                        }
                     )
+                    lastError = nil
                     break
                 } catch {
                     // 切歌或取消：立即退出不重试
@@ -192,7 +237,7 @@ final class LyricsManager {
                     // 最后一次失败、或错误本身不可恢复（解码失败、HTTP 语义错误）都不重试
                     guard attempt < maxAttempts, Self.isRetryable(error) else { break }
                     // 退避 1s 后重试
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    try? await self.sleep(.seconds(1))
                     if generation != self.fetchGeneration { break }
                 }
             }
@@ -201,31 +246,21 @@ final class LyricsManager {
             guard generation == self.fetchGeneration else { return }
 
             if let decoded {
-                if let synced = decoded.syncedLyrics, !synced.isEmpty {
-                    self.lyrics = Self.parseLrc(synced)
+                let parsed = Self.parseLrc(decoded.syncedLyrics ?? "")
+                if let synced = decoded.syncedLyrics, !parsed.isEmpty {
+                    self.lyrics = parsed
                     self.plainLyricsText = ""
-                    LyricsCache.write(
-                        title: title,
-                        artist: artist,
-                        album: album,
-                        type: .synced,
-                        payload: synced
-                    )
+                    self.writeCache(title, artist, album, .synced, synced)
                 } else if let plain = decoded.plainLyrics, !plain.isEmpty {
                     // 无同步时间轴：保留纯歌词全文供 UI 兜底显示
                     self.lyrics = []
                     self.plainLyricsText = plain
-                    LyricsCache.write(
-                        title: title,
-                        artist: artist,
-                        album: album,
-                        type: .plain,
-                        payload: plain
-                    )
+                    self.writeCache(title, artist, album, .plain, plain)
                 } else {
                     self.lyrics = []
                     self.plainLyricsText = ""
                 }
+                self.consecutiveFailures = 0
                 self.isFetching = false
                 // 网络加载完成：歌词就位（或确认无歌词），通知 MediaManager 评估 timer
                 self.notifyStateChanged()
@@ -235,6 +270,11 @@ final class LyricsManager {
                 // 只打印错误本身，不打印曲目信息，避免把用户的听歌记录写进日志。
                 if let lastError {
                     print("[Lyrics] 歌词获取失败: \(lastError.localizedDescription)")
+                    if Self.isRetryable(lastError) {
+                        self.consecutiveFailures += 1
+                        let delay = 15.0 * Double(1 << min(self.consecutiveFailures - 1, 3))
+                        self.retryAfter = self.now().addingTimeInterval(delay)
+                    }
                 }
                 self.isFetching = false
                 // 加载失败也要通知：让 timer 评估在没有歌词时是否应停止
@@ -246,6 +286,9 @@ final class LyricsManager {
     /// 仅对可恢复的网络错误重试。超时、连接失败重试有意义；
     /// 解码失败、HTTP 语义错误这类确定性结果重试只是白白多打一次请求。
     static func isRetryable(_ error: Error) -> Bool {
+        if case LookupError.httpStatus(let status) = error {
+            return status == 429 || (500...599).contains(status)
+        }
         guard let urlError = error as? URLError else { return false }
         switch urlError.code {
         case .timedOut,
@@ -382,60 +425,107 @@ final class LyricsManager {
         title: String,
         artist: String,
         album: String,
-        duration: TimeInterval?
+        duration: TimeInterval?,
+        loadRequest: RequestLoader,
+        onPlainLyrics: @MainActor (String) -> Void
     ) async throws -> LrcResponse? {
         try Task.checkCancellation()
+        var exactFallback: LrcResponse?
+        var exactFailure: Error?
 
         if let duration,
            shouldUseExactLookup(album: album, duration: duration),
            let exactURL = exactLyricsURL(title: title, artist: artist, album: album, duration: duration) {
-            let (exactData, exactResponse) = try await URLSession.shared.data(for: request(for: exactURL))
-            try Task.checkCancellation()
-            if let exactHTTP = exactResponse as? HTTPURLResponse, exactHTTP.statusCode == 200 {
-                let exactResult = try JSONDecoder().decode(LrcResponse.self, from: exactData)
-                if exactResult.hasSyncedLyrics {
-                    return exactResult
+            do {
+                let (exactData, exactResponse) = try await loadRequest(request(for: exactURL))
+                try Task.checkCancellation()
+                let status = try responseStatus(exactResponse)
+                if status == 200 {
+                    let exactResult = try JSONDecoder().decode(LrcResponse.self, from: exactData)
+                    if !parseLrc(exactResult.syncedLyrics ?? "").isEmpty {
+                        return exactResult
+                    }
+                    if let plain = exactResult.plainLyrics, !plain.isEmpty {
+                        exactFallback = exactResult
+                        onPlainLyrics(plain)
+                    }
+                } else if status != 404 {
+                    throw LookupError.httpStatus(status)
                 }
+            } catch {
+                try Task.checkCancellation()
+                // 整个网络不可用时不再请求同一主机；单个端点超时仍可尝试搜索。
+                if let urlError = error as? URLError,
+                   [.notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(urlError.code) {
+                    throw error
+                }
+                exactFailure = error
             }
         }
 
         guard let searchURL = searchLyricsURL(title: title, artist: artist) else {
-            return nil
+            return exactFallback
         }
 
-        try Task.checkCancellation()
-        let (searchData, searchResponse) = try await URLSession.shared.data(for: request(for: searchURL))
-        try Task.checkCancellation()
-        guard let searchHTTP = searchResponse as? HTTPURLResponse,
-              searchHTTP.statusCode == 200 else {
-            return nil
-        }
-        let candidates = try JSONDecoder().decode([LrcResponse].self, from: searchData)
-        var best = bestSearchResult(
-            from: candidates,
-            title: title,
-            artist: artist,
-            duration: duration
-        )
+        do {
+            try Task.checkCancellation()
+            let (searchData, searchResponse) = try await loadRequest(request(for: searchURL))
+            try Task.checkCancellation()
+            let status = try responseStatus(searchResponse)
+            guard status == 200 else { throw LookupError.httpStatus(status) }
+            let candidates = try JSONDecoder().decode([LrcResponse].self, from: searchData)
+            var best = bestSearchResult(
+                from: candidates,
+                title: title,
+                artist: artist,
+                duration: duration
+            )
 
-        // 兜底：track_name+artist_name 搜索无匹配结果时，用 q= 全文搜索重试
-        // LRCLIB 两个端点索引不同，q= 能命中更多中文/跨语言变体
-        if best == nil, let fallbackURL = fallbackSearchURL(title: title, artist: artist) {
+            // 兜底：track_name+artist_name 搜索无匹配结果时，用 q= 全文搜索重试
+            // LRCLIB 两个端点索引不同，q= 能命中更多中文/跨语言变体
+            if best == nil, let fallbackURL = fallbackSearchURL(title: title, artist: artist) {
+                try Task.checkCancellation()
+                let (fbData, fbResponse) = try await loadRequest(request(for: fallbackURL))
+                try Task.checkCancellation()
+                let fallbackStatus = try responseStatus(fbResponse)
+                if fallbackStatus == 200 {
+                    let fbCandidates = try JSONDecoder().decode([LrcResponse].self, from: fbData)
+                    best = bestSearchResult(
+                        from: fbCandidates,
+                        title: title,
+                        artist: artist,
+                        duration: duration
+                    )
+                } else {
+                    throw LookupError.httpStatus(fallbackStatus)
+                }
+            }
+
+            if let best, !parseLrc(best.syncedLyrics ?? "").isEmpty { return best }
+            if let result = exactFallback ?? best { return result }
+            if let exactFailure { throw exactFailure }
+            return nil
+        } catch {
             try Task.checkCancellation()
-            let (fbData, fbResponse) = try await URLSession.shared.data(for: request(for: fallbackURL))
-            try Task.checkCancellation()
-            if let fbHTTP = fbResponse as? HTTPURLResponse, fbHTTP.statusCode == 200 {
-                let fbCandidates = try JSONDecoder().decode([LrcResponse].self, from: fbData)
-                best = bestSearchResult(
-                    from: fbCandidates,
-                    title: title,
-                    artist: artist,
-                    duration: duration
-                )
+            // 搜索只是尝试补充同步时间轴，失败不能抹掉精确查询已取得的歌词。
+            if let exactFallback { return exactFallback }
+            throw error
+        }
+    }
+
+    private enum LookupError: LocalizedError {
+        case httpStatus(Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .httpStatus(let status): return "歌词服务返回 HTTP \(status)"
             }
         }
+    }
 
-        return best
+    private static func responseStatus(_ response: URLResponse) throws -> Int {
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        return http.statusCode
     }
 
     private static let lyricsAPIBaseURL = "https://lrclib.net/api"
@@ -553,6 +643,8 @@ final class LyricsManager {
         currentArtist = ""
         currentAlbum = ""
         currentDuration = nil
+        retryAfter = nil
+        consecutiveFailures = 0
         isFetching = false
         fetchGeneration += 1  // 使旧的异步请求失效
         // reset 后 hasLyrics 变 false，通知 MediaManager 停止 timer（避免空转）

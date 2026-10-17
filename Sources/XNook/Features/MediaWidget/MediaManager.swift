@@ -90,7 +90,7 @@ struct MediaInfoFetchGate {
     }
 }
 
-/// 媒体播放管理器 — 通过 MediaRemote 私有框架控制系统级播放器
+/// 聚合播放器快照与歌词时间轴，MediaRemote 提供通知和控制兜底。
 @Observable @MainActor
 final class MediaManager {
     // MARK: - Published Properties
@@ -127,7 +127,12 @@ final class MediaManager {
     }
 
     /// 歌词管理器
-    let lyricsManager = LyricsManager()
+    let lyricsManager: LyricsManager
+    private let defaults: UserDefaults
+    private let infoProvider: @MainActor () async -> [String: Any]
+    private let artworkProvider: @MainActor ([String: Any]) async -> Data?
+    private let clock: () -> Date
+    private let timersEnabled: Bool
 
     // MARK: - Private Properties
 
@@ -146,27 +151,42 @@ final class MediaManager {
 
     // MARK: - Init
 
-    init() {
-        let available = MediaRemoteBridge.isAvailable
+    init(
+        startMonitoring: Bool = true,
+        defaults: UserDefaults = .standard,
+        lyricsManager: LyricsManager? = nil,
+        infoProvider: @escaping @MainActor () async -> [String: Any] = { await ScriptingBridgeHelper.getNowPlayingInfo() },
+        artworkProvider: @escaping @MainActor ([String: Any]) async -> Data? = { await ScriptingBridgeHelper.getArtwork(for: $0) },
+        clock: @escaping () -> Date = Date.init
+    ) {
+        self.defaults = defaults
+        self.lyricsManager = lyricsManager ?? LyricsManager(defaults: defaults)
+        self.infoProvider = infoProvider
+        self.artworkProvider = artworkProvider
+        self.clock = clock
+        timersEnabled = startMonitoring
+        let available = startMonitoring && MediaRemoteBridge.isAvailable
         isAvailable = available
         mediaRemoteAvailable = available
         // 歌词状态变化时重新评估 progressTimer：
         // 歌词加载完成后立刻启动 timer 推进，避免歌词卡在第一行不滚动
-        lyricsManager.onLyricsStateChanged = { [weak self] in
+        self.lyricsManager.onLyricsStateChanged = { [weak self] in
+            self?.refreshLyricLine()
             self?.startProgressTimerIfNeeded()
         }
+        guard startMonitoring else { return }
         // MediaRemote 可用时注册系统通知（快速响应）
-        // 不可用时仍可通过 ScriptingBridge 轮询获取信息
+        // 不可用时仍可通过 AppleScript 轮询获取信息
         if available {
             registerNotifications()
         }
-        // 立即获取一次（ScriptingBridge 不依赖 MediaRemote）
+        // 立即获取一次（AppleScript 不依赖 MediaRemote）
         fetchNowPlayingInfo()
         // 延迟再获取一次
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             self?.fetchNowPlayingInfo()
         }
-        // 启动定时器轮询 ScriptingBridge（始终运行）
+        // 启动播放器快照轮询
         startTimers()
     }
 
@@ -180,7 +200,7 @@ final class MediaManager {
     // MARK: - 双定时器架构
 
     private func startTimers() {
-        // 慢速轮询：拉取 ScriptingBridge（歌曲信息 + 封面 + 位置校准）
+        // 慢速轮询：获取歌曲信息并校准位置，封面独立读取。
         // .common mode：菜单跟踪、拖拽等 event tracking 期间保持歌词推进不冻结
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -197,29 +217,20 @@ final class MediaManager {
 
     /// 根据当前播放状态决定是否启动/停止 progressTimer
     private func startProgressTimerIfNeeded() {
-        let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
+        guard timersEnabled else { return }
+        let lyricsEnabled = defaults.bool(forKey: "showLyrics")
         let needsTimer = Self.shouldAdvanceLyricTimeline(
             isPlaying: isPlaying,
             lyricsEnabled: lyricsEnabled,
             hasLyrics: lyricsManager.hasLyrics,
-            hasAuthoritativePlaybackPosition: hasAuthoritativePlaybackPosition
+            hasAuthoritativePlaybackPosition: hasFreshPlaybackPosition
         )
 
         if needsTimer && !cleanup.hasProgressTimer() {
             let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
-                    // 与轮询路径保持同一判定：没有权威位置时不推进、也不覆盖
-                    // currentLyricLine，否则会用未校准的时间把上一行冲掉
-                    guard self.hasAuthoritativePlaybackPosition else { return }
-                    let now = Date()
-                    let delta = now.timeIntervalSince(self.lastSyncTime) * self.playbackRate
-                    self.elapsedTime = self.syncedElapsedTime + delta
-                    // 先根据时间推进更新歌词行，再比较避免无意义赋值触发重绘
-                    self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
-                    if self.lyricsManager.currentLine != self.currentLyricLine {
-                        self.currentLyricLine = self.lyricsManager.currentLine
-                    }
+                    self.refreshLyricLine()
                 }
             }
             RunLoop.main.add(timer, forMode: .common)
@@ -227,6 +238,27 @@ final class MediaManager {
         } else if !needsTimer && cleanup.hasProgressTimer() {
             cleanup.invalidateProgressTimer()
         }
+    }
+
+    func refreshLyricLine() {
+        guard hasAuthoritativePlaybackPosition else { return }
+        guard !isPlaying || hasFreshPlaybackPosition else {
+            stopProgressTimer()
+            return
+        }
+        if isPlaying {
+            let estimated = Self.compensatedElapsedTime(position: syncedElapsedTime,
+                sampledAt: lastSyncTime, now: clock(), playbackRate: playbackRate)
+            elapsedTime = duration > 0 ? min(estimated, duration) : estimated
+        }
+        lyricsManager.updateCurrentLine(elapsedTime: elapsedTime)
+        if lyricsManager.currentLine != currentLyricLine {
+            currentLyricLine = lyricsManager.currentLine
+        }
+    }
+
+    private var hasFreshPlaybackPosition: Bool {
+        hasAuthoritativePlaybackPosition && max(0, clock().timeIntervalSince(lastSyncTime)) <= 5
     }
 
     /// 停止 progressTimer（用于无播放内容时彻底停止）
@@ -314,8 +346,7 @@ final class MediaManager {
         // 基准是陈旧的，误差只会单调累积而永远得不到校准，表现为歌词行乱跳、
         // 进度条乱走，同时 20Hz timer 持续空转耗电。
         //
-        // 这里不必担心 AppleScript 偶发失败导致时间轴停滞：该标志只在切歌时
-        // 复位，一次取值失败并不会把它打回 false。
+        // 一次取值失败不清空已有位置；调用方会检查采样新鲜度，限制外推时间。
         return isPlaying && lyricsEnabled && hasLyrics && hasAuthoritativePlaybackPosition
     }
 
@@ -333,165 +364,183 @@ final class MediaManager {
 
     /// 防止 AppleScript 偶发慢于轮询间隔时请求堆积、旧位置乱序覆盖新位置。
     private var infoFetchGate = MediaInfoFetchGate()
+    private var artworkTask: Task<Void, Never>?
+    private var artworkRequestID = 0
+    private var nextArtworkRetry = Date.distantPast
     private static let infoFetchTimeoutNanoseconds: UInt64 = 5_000_000_000
 
     func fetchNowPlayingInfo() {
-        guard let requestID = infoFetchGate.begin() else { return }
+        Task { [weak self] in await self?.refreshNowPlayingInfo() }
+    }
 
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.infoFetchTimeoutNanoseconds)
-            guard !Task.isCancelled else { return }
+    /// 与定时器、播放通知共享的可等待入口，便于复现完整取值链路。
+    func refreshNowPlayingInfo() async {
+        guard let requestID = infoFetchGate.begin() else { return }
+        let timeout = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: Self.infoFetchTimeoutNanoseconds) }
+            catch { return }
             self?.infoFetchGate.timeout(requestID: requestID)
         }
+        let info = await infoProvider()
+        timeout.cancel()
+        guard infoFetchGate.finish(requestID: requestID) else { return }
+        applyNowPlayingInfo(info)
+    }
 
-        Task.detached { [weak self] in
-            // ScriptingBridge 获取（MediaRemote 在非沙盒环境中返回空）
-            let info = await ScriptingBridgeHelper.getNowPlayingInfo()
-            guard let self else { return }
+    private func applyNowPlayingInfo(_ info: [String: Any]) {
+        // 临时超时不是“播放器已关闭”，保留最后一次可靠内容，等下次轮询校准。
+        if info["fetchFailed"] as? Bool == true {
+            if !defaults.bool(forKey: "showLyrics") {
+                lyricsManager.reset()
+                currentLyricLine = ""
+                lastLyricsEnabled = false
+            }
+            refreshLyricLine()
+            startProgressTimerIfNeeded()
+            return
+        }
+        if info.isEmpty {
+            isPlaying = false
+            playbackRate = 0
+        }
+        let newTitle = info["title"] as? String ?? ""
+        let newArtist = info["artist"] as? String ?? ""
+        let newAlbum = info["album"] as? String ?? ""
+        let newSource = ScriptingBridgeHelper.supportedApp(from: info)
+        let trackChanged = newSource != currentSource || Self.hasTrackIdentityChanged(
+            title: newTitle,
+            artist: newArtist,
+            album: newAlbum,
+            previousTitle: self.currentTitle,
+            previousArtist: self.currentArtist,
+            previousAlbum: self.currentAlbum
+        )
+        if trackChanged {
+            artworkRequestID += 1
+            artworkTask?.cancel()
+            artworkTask = nil
+            nextArtworkRetry = .distantPast
+            currentArtworkData = nil
+            self.currentLyricLine = ""
+            self.hasAuthoritativePlaybackPosition = false
+            self.syncedElapsedTime = 0
+            self.elapsedTime = 0
+            self.duration = 0
+            // 同步基准也要归零：否则 timer 会用上一首歌残留的 lastSyncTime
+            // 外推，新歌开头就得到一个凭空累积出来的巨大 elapsedTime
+            self.lastSyncTime = self.clock()
+        }
+        self.currentTitle = newTitle
+        self.currentArtist = newArtist
+        self.currentAlbum = newAlbum
+        self.currentSource = newSource
 
-            await MainActor.run {
-                guard self.infoFetchGate.finish(requestID: requestID) else { return }
-                let newTitle = info["title"] as? String ?? ""
-                let newArtist = info["artist"] as? String ?? ""
-                let newAlbum = info["album"] as? String ?? ""
-                let trackChanged = Self.hasTrackIdentityChanged(
-                    title: newTitle,
-                    artist: newArtist,
-                    album: newAlbum,
-                    previousTitle: self.currentTitle,
-                    previousArtist: self.currentArtist,
-                    previousAlbum: self.currentAlbum
-                )
-                if trackChanged {
-                    self.currentLyricLine = ""
-                    self.hasAuthoritativePlaybackPosition = false
-                    self.syncedElapsedTime = 0
-                    self.elapsedTime = 0
-                    self.duration = 0
-                    // 同步基准也要归零：否则 timer 会用上一首歌残留的 lastSyncTime
-                    // 外推，新歌开头就得到一个凭空累积出来的巨大 elapsedTime
-                    self.lastSyncTime = Date()
-                }
-                self.currentTitle = newTitle
-                self.currentArtist = newArtist
-                self.currentAlbum = newAlbum
-                self.currentSource = ScriptingBridgeHelper.supportedApp(from: info)
+        // 封面提取 — 有新数据才更新，暂停时保留当前封面
+        let oldArtworkData = self.currentArtworkData
+        if let data = info["artworkData"] as? Data, !data.isEmpty {
+            self.currentArtworkData = data
+        } else if let data = Self.extractArtworkData(from: info) {
+            self.currentArtworkData = data
+        }
+        // 切歌或封面变化时递增版本号，强制 SwiftUI 刷新
+        if trackChanged || self.currentArtworkData != oldArtworkData {
+            self.artworkVersion += 1
+        }
 
-                // 封面提取 — 有新数据才更新，暂停时保留当前封面
-                let oldArtworkData = self.currentArtworkData
-                if let data = info["artworkData"] as? Data, !data.isEmpty {
-                    self.currentArtworkData = data
-                } else if let data = Self.extractArtworkData(from: info) {
-                    self.currentArtworkData = data
-                }
-                // 切歌或封面变化时递增版本号，强制 SwiftUI 刷新
-                if trackChanged || self.currentArtworkData != oldArtworkData {
-                    self.artworkVersion += 1
-                }
+        if let dur = info["duration"] as? TimeInterval, dur.isFinite, dur >= 0 {
+            self.duration = dur
+        }
+        // 先更新播放速率，位置补偿计算依赖最新速率
+        if let rate = info["playbackRate"] as? Double, rate.isFinite, rate >= 0 {
+            self.playbackRate = rate
+            // 用户手动操作后的保护期内，不覆盖状态
+            if self.clock() > self.userActionDeadline {
+                self.isPlaying = rate > 0
+            }
+        }
+        // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
+        // lastSyncTime 取采样时刻，补偿调度和等待另一播放器的时间。
+        if let pos = info["playerPosition"] as? TimeInterval, pos.isFinite, pos >= 0 {
+            let sampledAt = info["positionTimestamp"] as? Date ?? self.clock()
+            self.hasAuthoritativePlaybackPosition = true
+            self.syncedElapsedTime = pos
+            self.lastSyncTime = sampledAt
+            self.elapsedTime = Self.compensatedElapsedTime(
+                position: pos,
+                sampledAt: sampledAt,
+                now: self.clock(),
+                playbackRate: self.playbackRate
+            )
+        }
 
-                if let dur = info["duration"] as? TimeInterval {
-                    self.duration = dur
-                }
-                // 先更新播放速率，位置补偿计算依赖最新速率
-                if let rate = info["playbackRate"] as? Double {
-                    self.playbackRate = rate
-                    // 用户手动操作后的保护期内，不覆盖状态
-                    if Date() > self.userActionDeadline {
-                        self.isPlaying = rate > 0
-                    }
-                }
-                // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
-                // lastSyncTime 取采样时刻：封面等后续 AppleScript 耗时不再拖累时间轴
-                if let pos = info["playerPosition"] as? TimeInterval {
-                    let sampledAt = info["positionTimestamp"] as? Date ?? Date()
-                    self.hasAuthoritativePlaybackPosition = true
-                    self.syncedElapsedTime = pos
-                    self.lastSyncTime = sampledAt
-                    self.elapsedTime = Self.compensatedElapsedTime(
-                        position: pos,
-                        sampledAt: sampledAt,
-                        now: Date(),
-                        playbackRate: self.playbackRate
-                    )
-                }
-
-                // 切歌或歌词开关变化时同步歌词状态
-                let lyricsEnabled = UserDefaults.standard.bool(forKey: "showLyrics")
-                let lyricDuration = self.duration > 0 ? self.duration : nil
-                if Self.shouldSyncLyrics(
+        // 切歌或歌词开关变化时同步歌词状态
+        let lyricsEnabled = self.defaults.bool(forKey: "showLyrics")
+        let lyricDuration = self.duration > 0 ? self.duration : nil
+        if Self.shouldSyncLyrics(
+            title: self.currentTitle,
+            artist: self.currentArtist,
+            album: self.currentAlbum,
+            duration: lyricDuration,
+            isEnabled: lyricsEnabled,
+            previousTitle: self.lastFetchedTitle,
+            previousArtist: self.lastFetchedArtist,
+            previousAlbum: self.lastFetchedAlbum,
+            previousDuration: self.lastFetchedDuration,
+            wasEnabled: self.lastLyricsEnabled
+        ) || (isPlaying && lyricsManager.shouldRetryCurrentTrack) {
+            self.lastFetchedTitle = self.currentTitle
+            self.lastFetchedArtist = self.currentArtist
+            self.lastFetchedAlbum = self.currentAlbum
+            self.lastFetchedDuration = lyricDuration
+            self.lastLyricsEnabled = lyricsEnabled
+            if lyricsEnabled && !self.currentTitle.isEmpty {
+                self.lyricsManager.fetchLyrics(
                     title: self.currentTitle,
                     artist: self.currentArtist,
                     album: self.currentAlbum,
-                    duration: lyricDuration,
-                    isEnabled: lyricsEnabled,
-                    previousTitle: self.lastFetchedTitle,
-                    previousArtist: self.lastFetchedArtist,
-                    previousAlbum: self.lastFetchedAlbum,
-                    previousDuration: self.lastFetchedDuration,
-                    wasEnabled: self.lastLyricsEnabled
-                ) {
-                    self.lastFetchedTitle = self.currentTitle
-                    self.lastFetchedArtist = self.currentArtist
-                    self.lastFetchedAlbum = self.currentAlbum
-                    self.lastFetchedDuration = lyricDuration
-                    self.lastLyricsEnabled = lyricsEnabled
-                    if lyricsEnabled && !self.currentTitle.isEmpty {
-                        self.lyricsManager.fetchLyrics(
-                            title: self.currentTitle,
-                            artist: self.currentArtist,
-                            album: self.currentAlbum,
-                            duration: lyricDuration
-                        )
-                    } else {
-                        self.lyricsManager.reset()
-                    }
-                }
-
-                // 更新歌词当前行
-                // 注意：没有权威播放位置时不要清空 currentLyricLine。
-                // AppleScript 取 player position 偶发失败/超时会导致一次返回空，
-                // 一旦清空就会让 ticker 闪烁回标题再恢复下一帧 —— 视觉上"歌词不显示"。
-                // 保留上一行内容，等下一次成功采样再校准。
-                if self.hasAuthoritativePlaybackPosition {
-                    self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
-                    if self.lyricsManager.currentLine != self.currentLyricLine {
-                        self.currentLyricLine = self.lyricsManager.currentLine
-                    }
-                }
-
-                // 根据当前状态决定是否需要 progressTimer
-                self.startProgressTimerIfNeeded()
+                    duration: lyricDuration
+                )
+            } else {
+                self.lyricsManager.reset()
             }
         }
+
+        // 更新歌词当前行
+        // 注意：没有权威播放位置时不要清空 currentLyricLine。
+        // AppleScript 取 player position 偶发失败/超时会导致一次返回空，
+        // 一旦清空就会让 ticker 闪烁回标题再恢复下一帧 —— 视觉上"歌词不显示"。
+        // 保留上一行内容，等下一次成功采样再校准。
+        if self.hasAuthoritativePlaybackPosition {
+            self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
+            if self.lyricsManager.currentLine != self.currentLyricLine {
+                self.currentLyricLine = self.lyricsManager.currentLine
+            }
+        }
+
+        // 根据当前状态决定是否需要 progressTimer
+        self.startProgressTimerIfNeeded()
+        requestArtworkIfNeeded(for: info)
     }
 
-    private func fetchPlaybackState() {
-        Task.detached { [weak self] in
-            let info = await ScriptingBridgeHelper.getNowPlayingInfo()
-            guard let self else { return }
+    func fetchPlaybackState() {
+        fetchNowPlayingInfo()
+    }
 
-            await MainActor.run {
-                if let rate = info["playbackRate"] as? Double {
-                    self.playbackRate = rate
-                    // 用户手动操作后的保护期内，不覆盖状态
-                    if Date() > self.userActionDeadline {
-                        self.isPlaying = rate > 0
-                    }
-                }
-                // 播放/暂停切换时重新校准进度
-                if let pos = info["playerPosition"] as? TimeInterval {
-                    let sampledAt = info["positionTimestamp"] as? Date ?? Date()
-                    self.hasAuthoritativePlaybackPosition = true
-                    self.syncedElapsedTime = pos
-                    self.lastSyncTime = sampledAt
-                    self.elapsedTime = Self.compensatedElapsedTime(
-                        position: pos,
-                        sampledAt: sampledAt,
-                        now: Date(),
-                        playbackRate: self.playbackRate
-                    )
-                }
-                self.startProgressTimerIfNeeded()
+    private func requestArtworkIfNeeded(for info: [String: Any]) {
+        guard currentSource == .music, isPlaying, !currentTitle.isEmpty,
+              currentArtworkData == nil, artworkTask == nil, clock() >= nextArtworkRetry else { return }
+        artworkRequestID += 1
+        let requestID = artworkRequestID
+        let provider = artworkProvider
+        artworkTask = Task { [weak self] in
+            let data = await provider(info)
+            guard !Task.isCancelled, let self, self.artworkRequestID == requestID else { return }
+            self.artworkTask = nil
+            if let data, !data.isEmpty {
+                self.currentArtworkData = data
+                self.artworkVersion += 1
+            } else {
+                self.nextArtworkRetry = self.clock().addingTimeInterval(30)
             }
         }
     }

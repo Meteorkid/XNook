@@ -1,5 +1,4 @@
 import AppKit
-import ScriptingBridge
 
 // MARK: - 脚本桥接获取播放信息
 
@@ -34,18 +33,17 @@ enum ScriptingBridgeHelper {
         }
     }
 
-    /// 安全获取 NSObject 的值
-    private static func safeValue(_ object: NSObject?, key: String) -> Any? {
-        guard let obj = object, obj.responds(to: NSSelectorFromString(key)) else { return nil }
-        return obj.value(forKey: key)
+    typealias ScriptExecution = (String, SupportedApp) async -> NSAppleEventDescriptor?
+
+    static func isRunning(_ app: SupportedApp) -> Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleIdentifier).isEmpty
     }
 
     // MARK: - AppleScript 执行
 
     /// 已编译脚本的复用容器。
     ///
-    /// NSAppleScript 的主要开销在编译而非执行，而这里的脚本源码都是常量：
-    /// 每秒轮询都重新 `NSAppleScript(source:)` 一次纯属浪费。
+    /// 脚本源码是常量，复用实例可避免每秒轮询都重新编译。
     ///
     /// NSAppleScript 不是线程安全的 —— 原先靠"每次新建实例"绕开，复用后必须自己
     /// 序列化。每个播放器一条独立串行队列：应用内部本来就是串行 await，不损失并发；
@@ -86,186 +84,179 @@ enum ScriptingBridgeHelper {
         return await runner.run(source)
     }
 
-    /// 从 Music.app 获取当前播放信息
-    static func getNowPlayingFromMusic() async -> [String: Any]? {
-        guard let app = SBApplication(bundleIdentifier: "com.apple.Music") else { return nil }
-
-        var result: [String: Any] = ["source": SupportedApp.music.rawValue]
-
-        guard app.responds(to: NSSelectorFromString("currentTrack")),
-              let track = app.value(forKey: "currentTrack") as? NSObject else { return nil }
-
-        if let name = safeValue(track, key: "name") as? String {
-            result["title"] = name
-        }
-        if let artist = safeValue(track, key: "artist") as? String {
-            result["artist"] = artist
-        }
-        if let album = safeValue(track, key: "album") as? String {
-            result["album"] = album
-        }
-        if let duration = safeValue(track, key: "duration") as? Double {
-            result["duration"] = duration
-        }
-
-        // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴。
-        // Music 的 ScriptingBridge 可能持续返回 0，优先用 AppleScript 的真实位置。
-        let scriptingBridgePosition = app.value(forKey: "playerPosition") as? Double
-        let appleScriptPosition = await fetchPlaybackPositionViaAppleScript(app: .music)
-        if let position = resolvedPlaybackPosition(
-            scriptingBridgePosition: scriptingBridgePosition,
-            appleScriptPosition: appleScriptPosition
-        ) {
-            result["playerPosition"] = position
-            // 采样时间戳：后续封面/播放状态的 AppleScript 调用耗时数百毫秒，
-            // 消费方须以采样时刻（而非收到时刻）为基准补偿，否则歌词时间轴滞后
-            result["positionTimestamp"] = Date()
-        }
-
-        // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
-        // 用 AppleScript 获取播放状态。必须排在封面之前：封面能否拉取取决于是否在播放。
-        if let rate = await fetchPlaybackRateViaAppleScript(app: .music) {
-            result["playbackRate"] = rate
-        }
-
-        // 用 AppleScript 获取封面（ScriptingBridge 的 artwork 属性不可用）
-        // 封面 payload 大、传输慢，按曲目缓存，仅切歌时重新拉取
-        let trackKey = artworkCacheKey(
-            title: result["title"] as? String ?? "",
-            artist: result["artist"] as? String ?? "",
-            album: result["album"] as? String ?? ""
-        )
-        let isPlaying = (result["playbackRate"] as? Double ?? 0) > 0
-        if let artworkData = await musicArtworkData(for: trackKey, isPlaying: isPlaying) {
-            result["artworkData"] = artworkData
-        }
-
-        return result.isEmpty ? nil : result
+    /// 单次脚本往返收集元数据；位置最后采样，封面走独立队列。
+    static func snapshotScript(for app: SupportedApp) -> String {
+        """
+        with timeout of 2 seconds
+            if application id "\(app.bundleIdentifier)" is not running then return missing value
+            tell application id "\(app.bundleIdentifier)"
+                set snapshotState to player state
+                if snapshotState is stopped then return {"", "", "", 0, 0, missing value}
+                set snapshotTrack to current track
+                set snapshotTitle to name of snapshotTrack
+                set snapshotArtist to artist of snapshotTrack
+                set snapshotAlbum to album of snapshotTrack
+                set snapshotDuration to duration of snapshotTrack
+                set snapshotRate to 0
+                if snapshotState is playing then set snapshotRate to 1
+                set snapshotPosition to player position
+                return {snapshotTitle, snapshotArtist, snapshotAlbum, snapshotDuration, snapshotRate, snapshotPosition}
+            end tell
+        end timeout
+        """
     }
 
-    /// 通过 AppleScript 获取指定应用的播放状态（异步执行，不阻塞调用线程）
-    private static func fetchPlaybackRateViaAppleScript(app: SupportedApp) async -> Double? {
-        let source = """
-        tell application "\(app.rawValue)"
-            if player state is playing then
-                return 1
-            else
-                return 0
-            end if
-        end tell
-        """
-        return await runScript(source, on: app)?.doubleValue
+    /// AppleEvent 的 missing value / 文本不能被 doubleValue 静默转换成有效的 0 秒。
+    private static func numericValue(_ descriptor: NSAppleEventDescriptor?) -> Double? {
+        guard let descriptor else { return nil }
+        switch descriptor.descriptorType {
+        case typeSInt16, typeSInt32, typeUInt32, typeSInt64, typeUInt64,
+             typeIEEE32BitFloatingPoint, typeIEEE64BitFloatingPoint, type128BitFloatingPoint:
+            let value = descriptor.doubleValue
+            return value.isFinite && value >= 0 ? value : nil
+        default:
+            return nil
+        }
     }
 
-    /// 通过 AppleScript 获取指定应用的真实播放位置（秒）
-    private static func fetchPlaybackPositionViaAppleScript(app: SupportedApp) async -> Double? {
-        let source = """
-        tell application "\(app.rawValue)"
-            return player position
-        end tell
-        """
-        guard let position = await runScript(source, on: app)?.doubleValue else { return nil }
-        return position.isFinite && position >= 0 ? position : nil
+    static func parseSnapshot(
+        _ descriptor: NSAppleEventDescriptor,
+        from app: SupportedApp,
+        sampledAt: Date = Date()
+    ) -> [String: Any]? {
+        guard descriptor.descriptorType == typeAEList, descriptor.numberOfItems == 6,
+              let title = descriptor.atIndex(1)?.stringValue,
+              let artist = descriptor.atIndex(2)?.stringValue,
+              let album = descriptor.atIndex(3)?.stringValue,
+              let rate = numericValue(descriptor.atIndex(5)), rate == 0 || rate == 1 else { return nil }
+        guard !title.isEmpty || rate == 0 else { return nil }
+        var info: [String: Any] = [
+            "source": app.rawValue, "title": title, "artist": artist,
+            "album": album, "playbackRate": rate,
+        ]
+        if let duration = numericValue(descriptor.atIndex(4)) {
+            info["duration"] = app == .spotify ? duration / 1000 : duration
+        }
+        if let position = numericValue(descriptor.atIndex(6)) {
+            info["playerPosition"] = position
+            info["positionTimestamp"] = sampledAt
+        }
+        return info
+    }
+
+    static func getNowPlayingFromMusic(
+        isRunning: (SupportedApp) -> Bool = isRunning,
+        execute: ScriptExecution = runScript
+    ) async -> [String: Any]? {
+        await getSnapshot(from: .music, isRunning: isRunning, execute: execute)
+    }
+
+    static func getNowPlayingFromSpotify(
+        isRunning: (SupportedApp) -> Bool = isRunning,
+        execute: ScriptExecution = runScript
+    ) async -> [String: Any]? {
+        await getSnapshot(from: .spotify, isRunning: isRunning, execute: execute)
+    }
+
+    private static func getSnapshot(
+        from app: SupportedApp,
+        isRunning: (SupportedApp) -> Bool,
+        execute: ScriptExecution
+    ) async -> [String: Any]? {
+        guard isRunning(app), let descriptor = await execute(snapshotScript(for: app), app) else { return nil }
+        return parseSnapshot(descriptor, from: app, sampledAt: Date())
     }
 
     // MARK: - 封面缓存
 
-    private struct ArtworkCacheEntry: Sendable {
-        let trackKey: String
-        let data: Data
-    }
+    /// 封面失败也缓存短暂结果，避免无封面的流媒体每秒发送一次慢请求。
+    actor ArtworkCache {
+        private let retryDelay: TimeInterval
+        private var entry: (trackKey: String, data: Data?, retryAfter: Date)?
+        private var pending: [String: Task<Data?, Never>] = [:]
 
-    private actor ArtworkCache {
-        private var entry: ArtworkCacheEntry?
-
-        func data(for trackKey: String) -> Data? {
-            guard entry?.trackKey == trackKey else { return nil }
-            return entry?.data
+        init(retryDelay: TimeInterval = 30) {
+            self.retryDelay = retryDelay
         }
 
-        func store(_ data: Data, for trackKey: String) {
-            entry = ArtworkCacheEntry(trackKey: trackKey, data: data)
+        func data(
+            for trackKey: String,
+            allowLoading: Bool = true,
+            now: Date = Date(),
+            load: @escaping () async -> Data?
+        ) async -> Data? {
+            if let entry, entry.trackKey == trackKey {
+                if let data = entry.data { return data }
+                if now < entry.retryAfter { return nil }
+            }
+            guard allowLoading else { return nil }
+            if let task = pending[trackKey] { return await task.value }
+            let task = Task { await load() }
+            pending[trackKey] = task
+            let data = await task.value
+            pending[trackKey] = nil
+            entry = (trackKey, data, now.addingTimeInterval(retryDelay))
+            return data
         }
     }
 
     private static let artworkCache = ArtworkCache()
+    private static let artworkRunner = ScriptRunner(label: "com.xnook.applescript.music.artwork")
 
-    /// 曲目标识，用于判断是否需要重新拉取封面
     static func artworkCacheKey(title: String, artist: String, album: String) -> String {
-        // 用不可见分隔符拼接，避免字段内容串位导致 key 冲突
         [title, artist, album].joined(separator: "\u{1F}")
     }
 
-    /// 获取 Music.app 封面：命中缓存直接返回；未命中且正在播放才走 AppleScript。
-    ///
-    /// 暂停时必须跳过：取封面的脚本自身带 `player state is playing` 判断，暂停时
-    /// 必然返回空，而失败结果又不写缓存 —— 没有这道判断就会每秒重试一次注定失败的
-    /// AppleScript 往返。暂停期间的封面由 MediaManager 保留上一次的结果。
-    private static func musicArtworkData(for trackKey: String, isPlaying: Bool) async -> Data? {
-        if let cached = await artworkCache.data(for: trackKey) { return cached }
-        guard isPlaying else { return nil }
-        guard let data = await fetchMusicArtwork() else { return nil }
-        await artworkCache.store(data, for: trackKey)
-        return data
-    }
-
-    /// 通过 AppleScript 获取 Music.app 当前曲目封面（异步执行，不阻塞调用线程）
-    private static func fetchMusicArtwork() async -> Data? {
-        let source = """
-        tell application "Music"
-            if player state is playing then
-                set t to current track
-                if (count of artwork of t) > 0 then
-                    return raw data of artwork 1 of t
-                end if
-            end if
+    static let musicArtworkScript = """
+    with timeout of 2 seconds
+        if application id "com.apple.Music" is not running then return missing value
+        tell application id "com.apple.Music"
+            if player state is not playing then return missing value
+            set artworkTrack to current track
+            set beforeTitle to name of artworkTrack
+            set beforeArtist to artist of artworkTrack
+            set beforeAlbum to album of artworkTrack
+            if (count of artwork of artworkTrack) is 0 then return missing value
+            set artworkBytes to raw data of artwork 1 of artworkTrack
+            set afterTrack to current track
+            return {beforeTitle, beforeArtist, beforeAlbum, artworkBytes, name of afterTrack, artist of afterTrack, album of afterTrack}
         end tell
-        """
-        guard let data = await runScript(source, on: .music)?.data, !data.isEmpty else { return nil }
-        return data
+    end timeout
+    """
+
+    static func parseArtwork(_ descriptor: NSAppleEventDescriptor, expectedTrackKey: String) -> Data? {
+        guard descriptor.descriptorType == typeAEList, descriptor.numberOfItems == 7,
+              let beforeTitle = descriptor.atIndex(1)?.stringValue,
+              let beforeArtist = descriptor.atIndex(2)?.stringValue,
+              let beforeAlbum = descriptor.atIndex(3)?.stringValue,
+              let afterTitle = descriptor.atIndex(5)?.stringValue,
+              let afterArtist = descriptor.atIndex(6)?.stringValue,
+              let afterAlbum = descriptor.atIndex(7)?.stringValue,
+              artworkCacheKey(title: beforeTitle, artist: beforeArtist, album: beforeAlbum) == expectedTrackKey,
+              artworkCacheKey(title: afterTitle, artist: afterArtist, album: afterAlbum) == expectedTrackKey,
+              let dataDescriptor = descriptor.atIndex(4),
+              dataDescriptor.descriptorType != typeNull,
+              dataDescriptor.descriptorType != typeType,
+              !dataDescriptor.data.isEmpty else { return nil }
+        return dataDescriptor.data
     }
 
-    /// 从 Spotify 获取当前播放信息
-    static func getNowPlayingFromSpotify() async -> [String: Any]? {
-        guard let app = SBApplication(bundleIdentifier: "com.spotify.client") else { return nil }
-
-        var result: [String: Any] = ["source": SupportedApp.spotify.rawValue]
-
-        guard app.responds(to: NSSelectorFromString("currentTrack")),
-              let track = app.value(forKey: "currentTrack") as? NSObject else { return nil }
-
-        if let name = safeValue(track, key: "name") as? String {
-            result["title"] = name
+    /// 元数据获取不等待封面；调用方需在接收结果时再次核对当前曲目。
+    static func getArtwork(
+        for info: [String: Any],
+        cache: ArtworkCache = artworkCache,
+        isRunning: (SupportedApp) -> Bool = isRunning,
+        execute: @escaping ScriptExecution = { source, _ in await artworkRunner.run(source) }
+    ) async -> Data? {
+        guard supportedApp(from: info) == .music, isRunning(.music),
+              let title = info["title"] as? String, !title.isEmpty else { return nil }
+        let key = artworkCacheKey(
+            title: title, artist: info["artist"] as? String ?? "", album: info["album"] as? String ?? ""
+        )
+        return await cache.data(for: key, allowLoading: (info["playbackRate"] as? Double ?? 0) > 0) {
+            guard let descriptor = await execute(musicArtworkScript, .music) else { return nil }
+            return parseArtwork(descriptor, expectedTrackKey: key)
         }
-        if let artist = safeValue(track, key: "artist") as? String {
-            result["artist"] = artist
-        }
-        if let album = safeValue(track, key: "album") as? String {
-            result["album"] = album
-        }
-        if let duration = safeValue(track, key: "duration") as? Double {
-            result["duration"] = duration / 1000.0
-        }
-
-        // playerPosition 是真实的播放位置（秒），用于同步歌词时间轴。
-        // 优先用 AppleScript 的真实位置，避免 ScriptingBridge 的静态值阻塞歌词时间轴。
-        let scriptingBridgePosition = app.value(forKey: "playerPosition") as? Double
-        let appleScriptPosition = await fetchPlaybackPositionViaAppleScript(app: .spotify)
-        if let position = resolvedPlaybackPosition(
-            scriptingBridgePosition: scriptingBridgePosition,
-            appleScriptPosition: appleScriptPosition
-        ) {
-            result["playerPosition"] = position
-            result["positionTimestamp"] = Date()
-        }
-
-        // playerState 是 FourCC 枚举（playing=1800426320），ScriptingBridge 无法直接比较
-        // 用 AppleScript 获取播放状态
-        if let rate = await fetchPlaybackRateViaAppleScript(app: .spotify) {
-            result["playbackRate"] = rate
-        }
-
-        return result.isEmpty ? nil : result
     }
 
     static func selectNowPlayingInfo(
@@ -287,13 +278,21 @@ enum ScriptingBridgeHelper {
     }
 
     /// 对当前来源应用执行控制命令。使用 AppleScript 可可靠命中 Music 和 Spotify。
-    static func sendCommand(_ command: PlaybackCommand, to app: SupportedApp) async -> Bool {
-        let source = """
-        tell application "\(app.rawValue)"
-            \(command.appleScriptStatement)
-        end tell
+    static func commandScript(_ command: PlaybackCommand, for app: SupportedApp) -> String {
         """
-        return await runScript(source, on: app) != nil
+        with timeout of 2 seconds
+            if application id "\(app.bundleIdentifier)" is not running then return missing value
+            tell application id "\(app.bundleIdentifier)"
+                \(command.appleScriptStatement)
+            end tell
+            return true
+        end timeout
+        """
+    }
+
+    static func sendCommand(_ command: PlaybackCommand, to app: SupportedApp) async -> Bool {
+        guard isRunning(app) else { return false }
+        return await runScript(commandScript(command, for: app), on: app)?.booleanValue == true
     }
 
     @MainActor
@@ -322,19 +321,18 @@ enum ScriptingBridgeHelper {
         return nil
     }
 
-    /// 获取当前播放信息（优先选择正在播放的来源）
-    static func getNowPlayingInfo() async -> [String: Any] {
-        let musicRunning = !NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.apple.Music"
-        ).isEmpty
-        let spotifyRunning = !NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.spotify.client"
-        ).isEmpty
-
-        // 并行获取两个播放器的信息
-        async let musicInfo: [String: Any]? = musicRunning ? getNowPlayingFromMusic() : nil
-        async let spotifyInfo: [String: Any]? = spotifyRunning ? getNowPlayingFromSpotify() : nil
-
-        return selectNowPlayingInfo(music: await musicInfo, spotify: await spotifyInfo)
+    /// 将暂时读取失败与播放器全部退出分开，避免短暂超时清空歌词和时间轴。
+    static func getNowPlayingInfo(
+        isRunning: (SupportedApp) -> Bool = isRunning,
+        execute: ScriptExecution = runScript
+    ) async -> [String: Any] {
+        let musicRunning = isRunning(.music)
+        let spotifyRunning = isRunning(.spotify)
+        guard musicRunning || spotifyRunning else { return [:] }
+        async let musicInfo = musicRunning ? getNowPlayingFromMusic(isRunning: isRunning, execute: execute) : nil
+        async let spotifyInfo = spotifyRunning ? getNowPlayingFromSpotify(isRunning: isRunning, execute: execute) : nil
+        let selected = await selectNowPlayingInfo(music: musicInfo, spotify: spotifyInfo)
+        guard selected.isEmpty else { return selected }
+        return isRunning(.music) || isRunning(.spotify) ? ["fetchFailed": true] : [:]
     }
 }

@@ -262,32 +262,32 @@ final class MediaManagerTests: XCTestCase {
     // MARK: - formatTime
 
     func testFormatTimeZero() {
-        let manager = MediaManager()
+        let manager = MediaManager(startMonitoring: false)
         XCTAssertEqual(manager.formatTime(0), "0:00")
     }
 
     func testFormatTimeSeconds() {
-        let manager = MediaManager()
+        let manager = MediaManager(startMonitoring: false)
         XCTAssertEqual(manager.formatTime(45), "0:45")
     }
 
     func testFormatTimeMinutes() {
-        let manager = MediaManager()
+        let manager = MediaManager(startMonitoring: false)
         XCTAssertEqual(manager.formatTime(120), "2:00")
     }
 
     func testFormatTimeMinutesAndSeconds() {
-        let manager = MediaManager()
+        let manager = MediaManager(startMonitoring: false)
         XCTAssertEqual(manager.formatTime(125), "2:05")
     }
 
     func testFormatTimeLargeDuration() {
-        let manager = MediaManager()
+        let manager = MediaManager(startMonitoring: false)
         XCTAssertEqual(manager.formatTime(3661), "61:01")
     }
 
     func testFormatTimeFractionalSecondsTruncated() {
-        let manager = MediaManager()
+        let manager = MediaManager(startMonitoring: false)
         XCTAssertEqual(manager.formatTime(90.7), "1:30")
     }
 }

@@ -24,19 +24,22 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
 @Observable @MainActor
 final class ThemeManager {
     private static let storageKey = "appearanceMode"
+    private let defaults: UserDefaults
 
     var onSchemeChange: (() -> Void)?
 
     var mode: AppearanceMode {
         didSet {
-            UserDefaults.standard.set(mode.rawValue, forKey: Self.storageKey)
-            updateResolvedScheme()
+            guard mode != oldValue else { return }
+            defaults.set(mode.rawValue, forKey: Self.storageKey)
+            stopObservingSystemAppearance()
+            // 先解除旧的强制外观，再读取系统配色，否则切回 system 会读到旧值。
             syncAppAppearance()
-            onSchemeChange?()
+            let previousScheme = resolvedScheme
+            updateResolvedScheme()
+            if resolvedScheme != previousScheme { onSchemeChange?() }
             if mode == .system {
                 startObservingSystemAppearance()
-            } else {
-                stopObservingSystemAppearance()
             }
         }
     }
@@ -44,9 +47,10 @@ final class ThemeManager {
     private(set) var resolvedScheme: ColorScheme
     var effectiveAppearanceObservation: NSKeyValueObservation?
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         let initialMode: AppearanceMode = {
-            if let raw = UserDefaults.standard.string(forKey: Self.storageKey),
+            if let raw = defaults.string(forKey: Self.storageKey),
                let saved = AppearanceMode(rawValue: raw) {
                 return saved
             }
@@ -55,8 +59,8 @@ final class ThemeManager {
 
         mode = initialMode
         resolvedScheme = initialMode == .dark ? .dark : .light
-        updateResolvedScheme()
         syncAppAppearance()
+        updateResolvedScheme()
 
         if initialMode == .system {
             startObservingSystemAppearance()
@@ -64,14 +68,16 @@ final class ThemeManager {
     }
 
     func startObservingSystemAppearance() {
-        guard effectiveAppearanceObservation == nil else { return }
+        guard mode == .system, effectiveAppearanceObservation == nil else { return }
         guard NSApp != nil else { return }
 
         effectiveAppearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
             Task { @MainActor [weak self] in
-                self?.updateResolvedScheme()
-                self?.syncAppAppearance()
-                self?.onSchemeChange?()
+                guard let self, self.mode == .system else { return }
+                let previousScheme = self.resolvedScheme
+                self.updateResolvedScheme()
+                // 观察回调只能读取外观；回写 appearance 会重新触发同一个 KVO。
+                if self.resolvedScheme != previousScheme { self.onSchemeChange?() }
             }
         }
     }
@@ -101,13 +107,16 @@ final class ThemeManager {
     private func syncAppAppearance() {
         guard NSApp != nil else { return }
 
+        let appearanceName: NSAppearance.Name?
         switch mode {
         case .dark:
-            NSApp.appearance = NSAppearance(named: .darkAqua)
+            appearanceName = .darkAqua
         case .light:
-            NSApp.appearance = NSAppearance(named: .aqua)
+            appearanceName = .aqua
         case .system:
-            NSApp.appearance = nil
+            appearanceName = nil
         }
+        guard NSApp.appearance?.name != appearanceName else { return }
+        NSApp.appearance = appearanceName.flatMap(NSAppearance.init(named:))
     }
 }

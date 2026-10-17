@@ -7,7 +7,7 @@ enum SettingsDefaults {
         "expandedInactivityAutoHideDelay": 1.0,
         "hoverExitCollapseDelay": 0.2,
         "panelWidth": 800.0,
-        "panelBaseHeight": 400.0,
+        "panelBaseHeight": 200.0,
         "islandWidth": 253.0,
         "islandHeight": 40.0,
         "islandWidthWithLyrics": 263.0,

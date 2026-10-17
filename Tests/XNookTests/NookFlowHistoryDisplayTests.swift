@@ -27,7 +27,7 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
     }
 
     func testPanelBaseHeightUsesDefault() {
-        XCTAssertEqual(SettingsDefaults.double(for: "panelBaseHeight"), 400, accuracy: 0.001)
+        XCTAssertEqual(SettingsDefaults.double(for: "panelBaseHeight"), 200, accuracy: 0.001)
     }
 
     func testHistoryDisplayLimitUsesDefaultAndClampsToSupportedRange() {

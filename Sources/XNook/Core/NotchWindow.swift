@@ -64,6 +64,11 @@ final class NotchWindow: NSPanel {
     private var dragTracking = false
     private var dragStartWindowX: CGFloat = 0
     private var dragStartMouseX: CGFloat = 0
+    private let defaults: UserDefaults
+    private let markVisible: @MainActor () -> Void
+    private let onExplicitShow: @MainActor () -> Void
+    private let fullscreenProbe: (@Sendable () async -> Bool)?
+    private var visibilityGeneration: UInt64 = 0
     private var mouseTrackingTimer: Timer?
     private var lastActiveScreenID: CGDirectDisplayID?
     private var cachedBestScreen: NSScreen?
@@ -73,15 +78,37 @@ final class NotchWindow: NSPanel {
     /// 灵动岛当前状态（由 NotchContentView 同步）
     var islandState: IslandState = .collapsed
     /// 正在切换应用时临时禁用 activeSpaceDidChange 的自动显示
-    var isSwitchingApps = false
+    var isSwitchingApps = false {
+        didSet {
+            if oldValue != isSwitchingApps { visibilityGeneration &+= 1 }
+        }
+    }
     /// 已让位给另一个灵动岛，收到显式显示命令前禁止自动显示
-    var isHiddenByIslandSwitch = false
+    var isHiddenByIslandSwitch = false {
+        didSet {
+            if oldValue != isHiddenByIslandSwitch { visibilityGeneration &+= 1 }
+        }
+    }
     /// 用户主动隐藏后，不应因桌面或全屏状态变化重新出现
     private(set) var isHiddenByUser = false
+    private(set) var lastExplicitShowTime: TimeInterval = 0
 
     // MARK: - Init
 
-    init() {
+    init(
+        defaults: UserDefaults = .standard,
+        markVisible: @escaping @MainActor () -> Void = {
+            if let currentIsland = AppSwitcher.shared.currentIsland {
+                IslandIntegrationSettings.markVisible(currentIsland)
+            }
+        },
+        onExplicitShow: @escaping @MainActor () -> Void = { AppSwitcher.shared.cancelSwitch() },
+        fullscreenProbe: (@Sendable () async -> Bool)? = nil
+    ) {
+        self.defaults = defaults
+        self.markVisible = markVisible
+        self.onExplicitShow = onExplicitShow
+        self.fullscreenProbe = fullscreenProbe
         let width = Self.defaultWidth
         let height = Self.defaultHeight
         let initialFrame: NSRect
@@ -151,25 +178,35 @@ final class NotchWindow: NSPanel {
     // MARK: - Window Visibility
 
     func showWindow() {
+        lastExplicitShowTime = Date().timeIntervalSince1970
+        onExplicitShow()
+        visibilityGeneration &+= 1
         isHiddenByIslandSwitch = false
         isHiddenByUser = false
-        if let currentIsland = AppSwitcher.shared.currentIsland {
-            IslandIntegrationSettings.markVisible(currentIsland)
-        }
+        markVisible()
         orderFrontRegardless()
     }
     func hideWindow() {
+        visibilityGeneration &+= 1
         isHiddenByUser = true
+        orderOut(nil)
+    }
+    func hideWindowForIslandSwitch() {
+        visibilityGeneration &+= 1
+        isHiddenByIslandSwitch = true
+        isSwitchingApps = true
         orderOut(nil)
     }
     func toggleVisibility() { isVisible ? hideWindow() : showWindow() }
 
     /// 在鼠标所在屏幕显示窗口（URL Scheme 唤醒时调用）
     func showAtMouseScreen() {
+        lastExplicitShowTime = Date().timeIntervalSince1970
+        onExplicitShow()
+        visibilityGeneration &+= 1
         isHiddenByIslandSwitch = false
-        if let currentIsland = AppSwitcher.shared.currentIsland {
-            IslandIntegrationSettings.markVisible(currentIsland)
-        }
+        isHiddenByUser = false
+        markVisible()
         let mouseLocation = NSEvent.mouseLocation
         guard let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) else {
             orderFrontRegardless()
@@ -234,7 +271,7 @@ final class NotchWindow: NSPanel {
     }
 
     func applySpaceBehavior() {
-        let allSpaces = UserDefaults.standard.bool(forKey: "showOnAllSpaces")
+        let allSpaces = defaults.bool(forKey: "showOnAllSpaces")
         if allSpaces {
             collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         } else {
@@ -243,13 +280,21 @@ final class NotchWindow: NSPanel {
     }
 
     @objc private func activeSpaceDidChange(_ note: Notification) {
-        // 切换应用期间不自动显示窗口
-        guard !isSwitchingApps, !isHiddenByIslandSwitch else { return }
+        refreshFullscreenVisibility()
+    }
 
-        let hideInFullscreen = UserDefaults.standard.bool(forKey: "hideInFullscreen")
+    @discardableResult
+    func refreshFullscreenVisibility() -> Task<Void, Never>? {
+        // 新的桌面检查或显式显示意图都会淘汰之前的异步结果。
+        visibilityGeneration &+= 1
+        let generation = visibilityGeneration
+        // 切换应用期间不自动显示窗口
+        guard !isSwitchingApps, !isHiddenByIslandSwitch else { return nil }
+
+        let hideInFullscreen = defaults.bool(forKey: "hideInFullscreen")
         guard hideInFullscreen else {
             // 不再自动显示窗口——窗口只在明确命令时显示
-            return
+            return nil
         }
         // 主线程：提取所有 NSScreen 属性为值类型（CGRect, NSWindow.StyleMask）
         let mainScreenFrame = NSScreen.main?.frame
@@ -257,28 +302,31 @@ final class NotchWindow: NSPanel {
             NSApplication.shared.windows.map { ($0.screen?.frame, $0.styleMask) }
         let frontApp = NSWorkspace.shared.frontmostApplication
 
-        // 捕获标志值为局部常量，避免异步 Task 中的竞争条件
-        let wasSwitchingApps = isSwitchingApps
-        let wasHiddenByIslandSwitch = isHiddenByIslandSwitch
+        let fullscreenProbe = fullscreenProbe
 
-        Task.detached(priority: .userInitiated) { [weak self] in
+        return Task { [weak self] in
+            let inFullscreen: Bool
+            if let fullscreenProbe {
+                inFullscreen = await fullscreenProbe()
+            } else {
+                inFullscreen = await Task.detached(priority: .userInitiated) {
+                    Self.isScreenInFullscreenOffMain(
+                        mainScreenFrame: mainScreenFrame,
+                        windowSnapshots: windowSnapshots,
+                        frontApp: frontApp
+                    )
+                }.value
+            }
             guard let self else { return }
-            let inFullscreen = Self.isScreenInFullscreenOffMain(
-                mainScreenFrame: mainScreenFrame,
-                windowSnapshots: windowSnapshots,
-                frontApp: frontApp
-            )
-            await MainActor.run {
-                // 使用捕获时的标志值，而非重新读取（避免竞争）
-                guard !wasSwitchingApps, !wasHiddenByIslandSwitch else { return }
-                guard !self.isSwitchingApps, !self.isHiddenByIslandSwitch else { return }
-                if inFullscreen {
-                    self.pauseMouseTracking()
-                    self.orderOut(nil)
-                } else if !self.isHiddenByUser {
-                    self.resumeMouseTracking()
-                    self.orderFrontRegardless()
-                }
+            guard self.visibilityGeneration == generation,
+                  self.defaults.bool(forKey: "hideInFullscreen"),
+                  !self.isSwitchingApps, !self.isHiddenByIslandSwitch else { return }
+            if inFullscreen {
+                self.pauseMouseTracking()
+                self.orderOut(nil)
+            } else if !self.isHiddenByUser {
+                self.resumeMouseTracking()
+                self.orderFrontRegardless()
             }
         }
     }

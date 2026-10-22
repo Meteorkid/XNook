@@ -8,7 +8,12 @@ final class AppSwitcherTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        appSwitcher = AppSwitcher.shared
+        appSwitcher = AppSwitcher(environment: .init(
+            applicationURL: { _ in nil }, open: { _, _, _ in },
+            isVisible: { _ in false }, isFrontmost: { _ in false },
+            setSwitching: { _ in }, hideSource: {}, restoreSource: {},
+            schedule: { _, _ in {} }
+        ))
     }
 
     override func tearDown() {

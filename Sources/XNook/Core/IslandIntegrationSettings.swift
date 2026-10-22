@@ -141,12 +141,12 @@ enum IslandIntegrationSettings {
     /// 原子仲裁：用文件锁包装 read-then-write，确保跨进程互斥
     /// - Parameter currentApp: 当前应用
     /// - Parameter isInstalled: 检查某个 IslandApp 是否已安装的闭包
-    /// - Parameter isRunning: 检查某个 IslandApp 是否正在运行的闭包
+    /// - Parameter isVisible: 检查某个 IslandApp 的岛窗口是否已显示的闭包
     /// - Returns: true 表示获得了显示权，false 表示应隐藏
     static func claimVisibility(
         currentApp: IslandApp,
         isInstalled: (IslandApp) -> Bool,
-        isRunning: (IslandApp) -> Bool
+        isVisible: (IslandApp) -> Bool
     ) -> Bool {
         let lockPath = NSTemporaryDirectory() + "xnook_island_visibility.lock"
         let fd = open(lockPath, O_CREAT | O_RDWR, 0o644)
@@ -162,8 +162,8 @@ enum IslandIntegrationSettings {
 
         // 在锁内读取，确保与写入的原子性
         if let lastApp = lastShownIsland {
-            // lastShownIsland 指向的应用如果已安装且正在运行，说明它已声明了显示权
-            if lastApp != currentApp && isInstalled(lastApp) && isRunning(lastApp) {
+            // lastShownIsland 指向的应用如果已安装且窗口可见，才继续保留它的显示权
+            if lastApp != currentApp && isInstalled(lastApp) && isVisible(lastApp) {
                 return false
             }
             // lastShownIsland 指向的应用未安装，忽略其仲裁权
@@ -194,8 +194,8 @@ enum IslandIntegrationSettings {
     static func shouldShowOnLaunch(
         currentApp: IslandApp,
         preferredApp: IslandApp,
-        preferredAppRunning: Bool
+        preferredAppVisible: Bool
     ) -> Bool {
-        currentApp == preferredApp || !preferredAppRunning
+        currentApp == preferredApp || !preferredAppVisible
     }
 }

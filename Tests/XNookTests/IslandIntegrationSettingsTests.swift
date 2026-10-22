@@ -69,19 +69,19 @@ final class IslandIntegrationSettingsTests: XCTestCase {
         )
     }
 
-    func testShouldShowOnLaunchFallsBackWhenPreferredAppIsNotRunning() {
+    func testShouldShowOnLaunchFallsBackWhenPreferredAppIsNotVisible() {
         XCTAssertTrue(
             IslandIntegrationSettings.shouldShowOnLaunch(
                 currentApp: .xisland,
                 preferredApp: .xnook,
-                preferredAppRunning: false
+                preferredAppVisible: false
             )
         )
         XCTAssertFalse(
             IslandIntegrationSettings.shouldShowOnLaunch(
                 currentApp: .xisland,
                 preferredApp: .xnook,
-                preferredAppRunning: true
+                preferredAppVisible: true
             )
         )
     }
@@ -96,7 +96,7 @@ final class IslandIntegrationSettingsTests: XCTestCase {
             IslandIntegrationSettings.claimVisibility(
                 currentApp: .xnook,
                 isInstalled: { $0 == .xisland },
-                isRunning: { _ in false }
+                isVisible: { _ in false }
             )
         )
         XCTAssertEqual(IslandIntegrationSettings.lastShownIsland, .xnook)
@@ -112,7 +112,7 @@ final class IslandIntegrationSettingsTests: XCTestCase {
             IslandIntegrationSettings.claimVisibility(
                 currentApp: .xnook,
                 isInstalled: { $0 == .xisland },
-                isRunning: { $0 == .xisland }
+                isVisible: { $0 == .xisland }
             )
         )
         XCTAssertEqual(IslandIntegrationSettings.lastShownIsland, .xisland)

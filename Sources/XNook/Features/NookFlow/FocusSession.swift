@@ -47,7 +47,7 @@ struct LinkedFile: Codable, Equatable {
     let id: UUID
     let name: String
     let icon: String
-    /// 保留已有开发版本记录的文件访问凭据，旧记录可缺少此字段。
+    /// 历史任务可独立于文件架打开文件；旧记录可缺少此字段，届时由调用方按 id 回退到文件架中的引用。
     let bookmarkData: Data?
 
     init(id: UUID, name: String, icon: String, bookmarkData: Data? = nil) {

@@ -1,71 +1,102 @@
 import SwiftUI
 
-/// NookFlow 区域视图 — 三态自适应
-///
-/// 显示策略：
-/// - 有 activeSession：任务卡片（标题、开始时间、时长、关联笔记入口、关联文件架入口、结束任务按钮）
-/// - 无 activeSession 但 history 非空：按用户设置显示最近 1–5 条任务记录
-/// - 两者皆空：EmptyView（不占布局，由父视图条件渲染避免调用）
+/// 任务入口、当前任务与资料历史共用一块区域；资源打开由父视图协调各 Manager。
 struct FocusSessionView: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var titleFocused: Bool
+    @State private var taskTitle = ""
+    @State private var isHistoryPresented = false
+    @State private var isFilesPresented = false
+    @State private var selectedHistoryID: UUID?
+    @State private var resourceError: String?
     @State private var linkSessionID: UUID?
     @State private var isEditingLink = false
 
     let manager: FocusSessionManager
-    /// 用户设置的最近任务显示上限（1–5）
     let historyDisplayLimit: Int
-    /// 当前文件架文件数量，由 NotchContentView 传入，用于空态反馈
     let trayFileCount: Int
-    // 由 NotchContentView 提供的协调回调（关联操作立即写入快照）
-    let onCreateLinkedNote: () -> Void
+    let onCreateLinkedNote: () -> Bool
     let onLinkTrayFiles: () -> Void
     let onEndSession: () -> Void
+    let showHistory: Bool
+    let onOpenNote: ((UUID) -> Bool)?
+    let onOpenFile: ((LinkedFile) -> Bool)?
+    let onInteractionChanged: (Bool) -> Void
+    /// 链接面板展示状态回调：展开期间父视图需要暂停面板自动收起。
     var onLinksPresentationChanged: (Bool) -> Void = { _ in }
+
+    init(
+        manager: FocusSessionManager,
+        historyDisplayLimit: Int,
+        trayFileCount: Int,
+        onCreateLinkedNote: @escaping () -> Bool,
+        onLinkTrayFiles: @escaping () -> Void,
+        onEndSession: @escaping () -> Void,
+        showHistory: Bool = true,
+        onOpenNote: ((UUID) -> Bool)? = nil,
+        onOpenFile: ((LinkedFile) -> Bool)? = nil,
+        onInteractionChanged: @escaping (Bool) -> Void = { _ in },
+        onLinksPresentationChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.manager = manager
+        self.historyDisplayLimit = historyDisplayLimit
+        self.trayFileCount = trayFileCount
+        self.onCreateLinkedNote = onCreateLinkedNote
+        self.onLinkTrayFiles = onLinkTrayFiles
+        self.onEndSession = onEndSession
+        self.showHistory = showHistory
+        self.onOpenNote = onOpenNote
+        self.onOpenFile = onOpenFile
+        self.onInteractionChanged = onInteractionChanged
+        self.onLinksPresentationChanged = onLinksPresentationChanged
+    }
 
     static let storageIssueHeight: CGFloat = 28
     static let defaultHistoryDisplayLimit = 3
     static let historyDisplayLimitRange = 1...5
-
-    /// 单条历史记录在列表中占用的总高度（文本行高 + 行间距）。
+    // 保留原尺寸估算 API 供旧调用方使用；新面板按内容测量，不限制可点击行高度。
     static let historyRowHeight: CGFloat = 15
-    private static let historyHeaderHeight: CGFloat = 12
-    private static let historyVerticalPadding: CGFloat = 6
 
     static func sanitizedHistoryDisplayLimit(_ value: Int) -> Int {
         min(max(value, historyDisplayLimitRange.lowerBound), historyDisplayLimitRange.upperBound)
     }
 
-    /// 历史列表的确定性高度，与下方 header、行高、间距和内边距保持一致。
     static func historyListHeight(for recordCount: Int) -> CGFloat {
-        historyVerticalPadding * 2 + historyContentHeight(for: recordCount)
+        24 + CGFloat(max(0, recordCount)) * historyRowHeight
     }
 
-    private static func historyContentHeight(for recordCount: Int) -> CGFloat {
-        historyHeaderHeight + CGFloat(max(0, recordCount)) * historyRowHeight
-    }
-
-    private var visibleHistoryRecordCount: Int {
-        min(manager.history.count, Self.sanitizedHistoryDisplayLimit(historyDisplayLimit))
+    private var isInteracting: Bool {
+        titleFocused || isHistoryPresented || isFilesPresented || linkSessionID != nil
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 8) {
             if let error = manager.storageError {
-                HStack(spacing: 6) {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .lineLimit(1).help(error)
-                    Spacer()
-                    Button(L10n.flowRetry) { manager.retryLoadingStorage() }
-                }
-                .font(.system(size: 10))
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 12)
-                .frame(height: Self.storageIssueHeight)
+                feedback(error)
+                Button(L10n.flowRetry) { manager.retryLoadingStorage() }
+                    .buttonStyle(.bordered)
             }
+            taskAndHistory
+            if let message = manager.activityMessage {
+                feedback(message)
+            }
+            if let error = resourceError, !isHistoryPresented, !isFilesPresented {
+                feedback(error)
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(IslandStyle.primaryText)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .onChange(of: isInteracting) { _, interacting in
+            onInteractionChanged(interacting)
+        }
+        .onDisappear { onInteractionChanged(false) }
+        .popover(isPresented: $isHistoryPresented, arrowEdge: .bottom) {
+            historyBrowser
+        }
+        .popover(isPresented: $isFilesPresented, arrowEdge: .bottom) {
             if let session = manager.activeSession {
-                activeCard(for: session)
-            } else if !manager.history.isEmpty {
-                historyList
+                resourceBrowser(for: session)
             }
         }
         .popover(isPresented: Self.guardedPresentationBinding(
@@ -83,7 +114,11 @@ struct FocusSessionView: View {
         .onDisappear { onLinksPresentationChanged(false) }
     }
 
-    static func guardedPresentationBinding(_ presented: Binding<Bool>, isEditing: @escaping () -> Bool) -> Binding<Bool> {
+    /// 编辑未结束时不允许外部收起链接面板，避免丢失正在编辑的内容。
+    static func guardedPresentationBinding(
+        _ presented: Binding<Bool>,
+        isEditing: @escaping () -> Bool
+    ) -> Binding<Bool> {
         Binding(get: { presented.wrappedValue }, set: { value in
             if value || !isEditing() { presented.wrappedValue = value }
         })
@@ -95,209 +130,335 @@ struct FocusSessionView: View {
         onLinksPresentationChanged(true)
     }
 
-    // MARK: - 活跃任务卡片
+    @ViewBuilder
+    private var taskAndHistory: some View {
+        if showHistory, !manager.history.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    taskContent
+                        .frame(minWidth: 220, idealWidth: 220, maxWidth: .infinity, alignment: .topLeading)
+                    historyList
+                        .frame(minWidth: 250, idealWidth: 250, maxWidth: .infinity, alignment: .topLeading)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    taskContent
+                    Divider()
+                    historyList
+                }
+            }
+        } else {
+            taskContent
+        }
+    }
+
+    @ViewBuilder
+    private var taskContent: some View {
+        if let session = manager.activeSession {
+            activeCard(for: session)
+        } else {
+            manualTaskEntry
+        }
+    }
+
+    private var manualTaskEntry: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.sectionNookFlow)
+                .font(.system(size: 13, weight: .semibold))
+            TextField(L10n.flowTaskPlaceholder, text: $taskTitle)
+                .textFieldStyle(.roundedBorder)
+                .focused($titleFocused)
+                .onSubmit(startManualTask)
+                .disabled(manager.storageError != nil)
+            Button(action: startManualTask) {
+                Label(L10n.flowStartTask, systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(manager.storageError != nil)
+        }
+    }
+
+    private func startManualTask() {
+        guard manager.start(title: taskTitle) != nil else { return }
+        taskTitle = ""
+        titleFocused = false
+        resourceError = nil
+    }
 
     private func activeCard(for session: FocusSession) -> some View {
-        VStack(spacing: 6) {
-            // 标题行
-            HStack(spacing: 4) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 6))
-                    .foregroundStyle(.green)
-                Button { showLinks(for: session.id) } label: {
-                    Text(session.title)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            Label(L10n.flowActive, systemImage: "circle.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.green)
+            Text(session.title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Text(L10n.flowStarted(session.startedAt.formatted(date: .omitted, time: .shortened)))
+                    Spacer(minLength: 8)
+                    elapsedTime(for: session)
                 }
-                .buttonStyle(.plain)
-                .help(L10n.flowWebLinks)
-                .accessibilityLabel(L10n.flowWebLinks + " " + session.title)
-                Spacer()
-                Text("进行中")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.green)
-            }
-
-            // 时间行：开始时间 + 已进行时长（TimelineView 安全刷新）
-            HStack(spacing: 6) {
-                Text(startTimeString(from: session.startedAt))
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
-                Spacer()
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(elapsedString(from: session.startedAt, to: context.date))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.flowStarted(session.startedAt.formatted(date: .omitted, time: .shortened)))
+                    elapsedTime(for: session)
                 }
             }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(IslandStyle.secondaryText)
 
-            // 关联状态 + 操作按钮
-            HStack(spacing: 6) {
-                // 关联笔记：已关联时显示标题并禁用，避免重复创建
-                noteButton(for: session)
-
-                // 关联文件架：文件架为空时禁用并提示
-                trayButton(for: session)
-
-                Spacer()
-
-                // 结束任务
-                Button(action: onEndSession) {
-                    Text("结束任务")
-                        .font(.system(size: 9, weight: .medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.red.opacity(0.2))
-                        .foregroundStyle(.red)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+            noteButton(for: session)
+            webLinkButton(for: session)
+            if !session.linkedFiles.isEmpty {
+                Button {
+                    resourceError = nil
+                    isFilesPresented = true
+                } label: {
+                    Label(L10n.flowFileCount(session.linkedFiles.count), systemImage: "folder")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
-                .disabled(manager.storageError != nil)
+                .buttonStyle(.bordered)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    linkTrayButton
+                    endSessionButton
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    linkTrayButton
+                    endSessionButton
+                }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
-    // MARK: - 按钮构建
+    private func elapsedTime(for session: FocusSession) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(elapsedString(from: session.startedAt, to: context.date))
+                .monospacedDigit()
+        }
+    }
 
-    /// 关联笔记按钮：已关联时显示"已关联：<标题>"并禁用，避免重复创建
+    private func webLinkButton(for session: FocusSession) -> some View {
+        Button { showLinks(for: session.id) } label: {
+            Label(
+                session.taskURLs.isEmpty ? L10n.flowWebLinks : L10n.flowWebLinks + " (\(session.taskURLs.count))",
+                systemImage: "link"
+            )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(.bordered)
+        .disabled(manager.storageError != nil)
+        .help(L10n.flowWebLinks)
+        .accessibilityLabel(L10n.flowWebLinks + " " + session.title)
+    }
+
     private func noteButton(for session: FocusSession) -> some View {
-        let isLinked = session.linkedNote != nil
-        let title = isLinked ? "已关联：\(session.linkedNote?.title ?? "")" : "创建关联笔记"
-        return Button(action: { if !isLinked { onCreateLinkedNote() } }) {
-            HStack(spacing: 3) {
-                Image(systemName: isLinked ? "checkmark.circle.fill" : "note.text")
-                    .font(.system(size: 9))
-                Text(title)
-                    .font(.system(size: 9))
-                    .lineLimit(1)
+        Button {
+            resourceError = nil
+            if let note = session.linkedNote {
+                openNote(note)
+            } else {
+                if !onCreateLinkedNote() {
+                    resourceError = L10n.flowNoteCreationFailed
+                }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(IslandStyle.insetFill(for: colorScheme))
-            .foregroundStyle(isLinked ? IslandStyle.secondaryText : IslandStyle.primaryText)
-            .opacity(isLinked ? 0.6 : 1.0)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+        } label: {
+            Label(session.linkedNote?.title ?? L10n.flowCreateNote, systemImage: "note.text")
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .disabled(isLinked || manager.storageError != nil)
+        .buttonStyle(.bordered)
+        .disabled(manager.storageError != nil && session.linkedNote == nil)
     }
 
-    /// 关联文件架按钮：文件架为空时显示"文件架为空"并禁用
-    private func trayButton(for session: FocusSession) -> some View {
-        let isTrayEmpty = trayFileCount == 0
-        let title = isTrayEmpty
-            ? "文件架为空"
-            : (session.linkedFiles.isEmpty ? "关联文件架" : "文件 \(session.linkedFiles.count)")
-        return Button(action: { if !isTrayEmpty { onLinkTrayFiles() } }) {
-            HStack(spacing: 3) {
-                Image(systemName: isTrayEmpty ? "tray" : "tray.full")
-                    .font(.system(size: 9))
-                Text(title)
-                    .font(.system(size: 9))
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(IslandStyle.insetFill(for: colorScheme))
-            .foregroundStyle(isTrayEmpty ? IslandStyle.secondaryText : IslandStyle.primaryText)
-            .opacity(isTrayEmpty ? 0.6 : 1.0)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+    private var linkTrayButton: some View {
+        Button(action: onLinkTrayFiles) {
+            Label(trayFileCount == 0 ? L10n.flowEmptyTray : L10n.flowLinkTray, systemImage: "tray")
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(.plain)
-        .disabled(isTrayEmpty || manager.storageError != nil)
+        .buttonStyle(.bordered)
+        .disabled(trayFileCount == 0 || manager.storageError != nil)
     }
 
-    // MARK: - 历史记录列表
+    private var endSessionButton: some View {
+        Button(L10n.flowEndTask) {
+            resourceError = nil
+            isFilesPresented = false
+            onEndSession()
+        }
+        .buttonStyle(.bordered)
+        .disabled(manager.storageError != nil)
+    }
 
     private var historyList: some View {
-        VStack(spacing: 4) {
-            // 标题行
-            HStack(spacing: 4) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 9))
-                    .foregroundStyle(IslandStyle.secondaryText)
-                Text("最近任务")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(IslandStyle.secondaryText)
-                Spacer()
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.flowRecentTasks)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(IslandStyle.secondaryText)
+            ForEach(manager.history.prefix(Self.sanitizedHistoryDisplayLimit(historyDisplayLimit))) { record in
+                Button {
+                    selectedHistoryID = record.id
+                    resourceError = nil
+                    isHistoryPresented = true
+                } label: {
+                    historyRow(record)
+                }
+                .buttonStyle(.plain)
             }
-            .frame(height: Self.historyHeaderHeight)
-
-            ForEach(manager.history.prefix(visibleHistoryRecordCount)) { record in
-                historyRow(record)
+            Button(L10n.flowViewAll(manager.history.count)) {
+                selectedHistoryID = nil
+                resourceError = nil
+                isHistoryPresented = true
             }
+            .buttonStyle(.bordered)
         }
-        .frame(height: Self.historyContentHeight(for: visibleHistoryRecordCount))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 
     private func historyRow(_ record: FocusSession) -> some View {
-        Button { showLinks(for: record.id) } label: {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(.gray.opacity(0.4))
-                    .frame(width: 4, height: 4)
+        HStack(spacing: 8) {
+            Text(record.title)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(IslandStyle.secondaryText)
+        }
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+        .contentShape(Rectangle())
+    }
 
-                Text(record.title)
-                    .font(.system(size: 9, weight: .medium))
-                    .lineLimit(1)
-
-                Spacer()
-
-                // 关联数量摘要
-                HStack(spacing: 3) {
-                    if record.linkedNote != nil {
-                        Image(systemName: "note.text")
-                            .font(.system(size: 8))
-                    }
-                    if !record.linkedFiles.isEmpty {
-                        Text("\(record.linkedFiles.count)")
-                            .font(.system(size: 8, design: .monospaced))
+    private var historyBrowser: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                if selectedHistoryID != nil {
+                    Button {
+                        selectedHistoryID = nil
+                        resourceError = nil
+                    } label: {
+                        Label(L10n.back, systemImage: "chevron.left")
                     }
                 }
-                .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
-
-                // 结束时间
-                if let endedAt = record.endedAt {
-                    Text(endTimeString(from: endedAt))
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
+                Text(L10n.flowAllTasks).font(.headline)
+                Spacer()
+                Button(L10n.flowClose) { isHistoryPresented = false }
+            }
+            ScrollView {
+                if let record = manager.history.first(where: { $0.id == selectedHistoryID }) {
+                    sessionDetails(record)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(manager.history) { record in
+                            Button {
+                                selectedHistoryID = record.id
+                                resourceError = nil
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    historyRow(record)
+                                    if let endedAt = record.endedAt {
+                                        Text(endedAt.formatted(date: .abbreviated, time: .shortened))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Divider()
+                        }
+                    }
                 }
             }
-            .frame(height: Self.historyRowHeight - 4)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(L10n.flowWebLinks + " " + record.title)
+        .font(.system(size: 13))
+        .padding(16)
+        .frame(width: 340, height: 400)
     }
 
-    // MARK: - 时间格式化
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    private func startTimeString(from date: Date) -> String {
-        "开始 \(Self.timeFormatter.string(from: date))"
+    private func resourceBrowser(for session: FocusSession) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(L10n.flowTaskDetails).font(.headline)
+                Spacer()
+                Button(L10n.flowClose) { isFilesPresented = false }
+            }
+            ScrollView { sessionDetails(session) }
+        }
+        .font(.system(size: 13))
+        .padding(16)
+        .frame(width: 340, height: 360)
     }
 
-    private func endTimeString(from date: Date) -> String {
-        Self.timeFormatter.string(from: date)
+    private func sessionDetails(_ session: FocusSession) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(session.title).font(.headline).textSelection(.enabled)
+            Text(L10n.flowStarted(session.startedAt.formatted(date: .abbreviated, time: .shortened)))
+                .font(.caption).foregroundStyle(.secondary)
+            if let endedAt = session.endedAt {
+                Text(L10n.flowEnded(endedAt.formatted(date: .abbreviated, time: .shortened)))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let note = session.linkedNote {
+                Text(L10n.flowLinkedNote).font(.subheadline).foregroundStyle(.secondary)
+                Button { openNote(note) } label: {
+                    Label(note.title, systemImage: "note.text")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+            }
+            if !session.linkedFiles.isEmpty {
+                Text(L10n.flowLinkedFiles).font(.subheadline).foregroundStyle(.secondary)
+                ForEach(session.linkedFiles, id: \.id) { file in
+                    Button { openFile(file) } label: {
+                        Label(file.name, systemImage: file.icon)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            if session.linkedNote == nil, session.linkedFiles.isEmpty {
+                Text(L10n.flowNoResources).foregroundStyle(.secondary)
+            }
+            webLinkButton(for: session)
+            if let error = resourceError {
+                feedback(error)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// 已进行时长，格式 mm:ss 或 h:mm:ss
+    private func openNote(_ note: LinkedNote) {
+        if onOpenNote?(note.id) == true {
+            resourceError = nil
+            isHistoryPresented = false
+            isFilesPresented = false
+        } else {
+            resourceError = L10n.flowNoteUnavailable
+        }
+    }
+
+    private func openFile(_ file: LinkedFile) {
+        resourceError = onOpenFile?(file) == true ? nil : L10n.flowFileUnavailable
+    }
+
+    private func feedback(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.circle")
+            .font(.system(size: 12))
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private func elapsedString(from start: Date, to now: Date) -> String {
-        let interval = max(0, now.timeIntervalSince(start))
-        let total = Int(interval)
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        let s = total % 60
-        if h > 0 {
-            return String(format: "%d:%02d:%02d", h, m, s)
+        let total = Int(max(0, now.timeIntervalSince(start)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         }
-        return String(format: "%02d:%02d", m, s)
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 }

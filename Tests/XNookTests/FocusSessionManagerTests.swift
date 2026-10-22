@@ -175,12 +175,37 @@ final class FocusSessionManagerTests: XCTestCase {
         XCTAssertNil(manager.activityMessage)
     }
 
+    func testFileBookmarkSurvivesEndAndReload() {
+        let manager = FocusSessionManager(userDefaults: suite)
+        let bookmark = Data([1, 7, 9, 4])
+        manager.start(title: "手动任务")
+        manager.linkFile(id: UUID(), name: "草图.png", icon: "photo", bookmarkData: bookmark)
+        manager.end()
+
+        let restored = FocusSessionManager(userDefaults: suite)
+        XCTAssertEqual(restored.history.first?.linkedFiles.first?.bookmarkData, bookmark)
+    }
+
     func testLegacyFileWithoutBookmarkStillDecodes() throws {
         let id = UUID()
         let data = Data("{\"id\":\"\(id.uuidString)\",\"name\":\"旧文件\",\"icon\":\"doc\"}".utf8)
         let file = try JSONDecoder().decode(LinkedFile.self, from: data)
         XCTAssertEqual(file.id, id)
         XCTAssertNil(file.bookmarkData)
+    }
+
+    func testRelinkingLegacyFileAddsBookmarkWithoutDuplicatingOrRenaming() {
+        let manager = FocusSessionManager(userDefaults: suite)
+        let id = UUID()
+        let bookmark = Data([4, 2, 1])
+        manager.start(title: "旧任务")
+        manager.linkFile(id: id, name: "原文件名", icon: "doc")
+        manager.linkFile(id: id, name: "新文件名", icon: "photo", bookmarkData: bookmark)
+
+        XCTAssertEqual(manager.activeSession?.linkedFiles.count, 1)
+        XCTAssertEqual(manager.activeSession?.linkedFiles.first?.name, "原文件名")
+        XCTAssertEqual(manager.activeSession?.linkedFiles.first?.bookmarkData, bookmark)
+        XCTAssertEqual(FocusSessionManager(userDefaults: suite).activeSession?.linkedFiles.first?.bookmarkData, bookmark)
     }
 
     func testCorruptedStoreIsNotOverwrittenByAnySessionOperation() {

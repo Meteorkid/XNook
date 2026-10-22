@@ -1,171 +1,329 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// 笔记 Widget 视图
+/// 概览保留最近笔记，详情提供完整列表和编辑空间。
 struct NotesWidgetView: View {
     var notesManager: NotesManager
-    @State private var editingContent: String = ""
+    var isDetail: Bool = false
+    var onShowAll: (() -> Void)? = nil
+    var onInteractionChanged: (Bool) -> Void = { _ in }
+    @Environment(\.colorScheme) private var colorScheme
+    private var noteAccent: Color { colorScheme == .dark ? .yellow : Color(red: 0.55, green: 0.32, blue: 0.02) }
+
+    @State private var showsStorageIssue = false
+    @State private var searchQuery = ""
+    @State private var exportError: String?
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case search, title, content
+    }
 
     var body: some View {
-        VStack(spacing: 6) {
-            // 标题
-            HStack {
-                Image(systemName: "note.text")
-                    .font(.system(size: 10))
-                    .foregroundColor(.yellow)
-                Text(L10n.widgetNotes)
-                    .font(.system(size: 10, weight: .semibold))
-                Spacer()
-                Button(action: {
-                    notesManager.createNote()
-                    editingContent = ""
-                }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(.yellow)
-                }
-                .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: isDetail ? 12 : 6) {
+            header
+
+            if notesManager.canUndoDelete {
+                undoDeleteBar
             }
 
             if notesManager.isEditing, let note = notesManager.currentNote {
-                // 编辑器
                 noteEditor(note: note)
             } else {
-                // 笔记列表
+                if isDetail {
+                    TextField(L10n.notesSearch, text: $searchQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 13))
+                        .focused($focusedField, equals: .search)
+                        .accessibilityLabel(L10n.notesSearch)
+                }
                 noteList
             }
+
+            if !isDetail, let onShowAll {
+                Button(L10n.notesShowAll(notesManager.notes.count), action: onShowAll)
+                    .font(.system(size: 11, weight: .medium))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(noteAccent)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .onChange(of: notesManager.currentNote?.id, initial: true) { _, id in
+            guard id != nil, !notesManager.isStorageReadOnly else { return }
+            focusedField = notesManager.currentNote?.content.isEmpty == true ? .title : .content
+        }
+        .onChange(of: showsStorageIssue) { _, isPresented in
+            onInteractionChanged(isPresented)
+        }
+        .onDisappear {
+            notesManager.flushPendingChanges()
+            onInteractionChanged(false)
+        }
+        .alert(L10n.notesExportFailed, isPresented: Binding(
+            get: { exportError != nil },
+            set: { if !$0 { exportError = nil } }
+        )) {
+            Button(L10n.notesDone, role: .cancel) { exportError = nil }
+        } message: {
+            Text(exportError ?? "")
         }
     }
 
-    // MARK: - 笔记列表
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "note.text")
+                .foregroundStyle(noteAccent)
+            Text(L10n.widgetNotes)
+                .fontWeight(.semibold)
+            Spacer(minLength: 0)
+            if notesManager.storageErrorMessage != nil || notesManager.recoveryBackupURL != nil {
+                Button(action: { showsStorageIssue = true }) {
+                    Image(systemName: notesManager.storageErrorMessage == nil ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(notesManager.storageErrorMessage == nil ? .green : .orange)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(notesManager.storageErrorMessage == nil ? L10n.notesShowBackup : L10n.notesStorageWarning)
+                .accessibilityLabel(notesManager.storageErrorMessage == nil ? L10n.notesShowBackup : L10n.notesStorageWarning)
+                .popover(isPresented: $showsStorageIssue) { storageIssue }
+            }
+            Button(action: createNote) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(noteAccent)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(notesManager.isStorageReadOnly)
+            .help(L10n.notesNew)
+            .accessibilityLabel(L10n.notesNew)
+        }
+        .font(.system(size: isDetail ? 13 : 11))
+    }
+
+    private var undoDeleteBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Text(L10n.notesDeleted).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                undoDeleteButton
+            }
+            undoDeleteButton
+        }
+        .font(.system(size: isDetail ? 12 : 10))
+    }
+
+    private var undoDeleteButton: some View {
+        // 不注册 Command-Z，文字编辑器继续使用自身的撤销栈。
+        Button(L10n.notesUndoDelete) { notesManager.undoDelete() }
+            .buttonStyle(.plain)
+            .foregroundStyle(noteAccent)
+            .padding(.vertical, 5)
+    }
+
+    private var storageIssue: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(notesManager.storageErrorMessage ?? L10n.notesRecovered)
+                .font(.system(size: 12))
+            if notesManager.storageErrorMessage != nil {
+                HStack {
+                    Button(L10n.notesRetry) {
+                        if notesManager.retryPersistence() { showsStorageIssue = false }
+                    }
+                    if notesManager.isStorageReadOnly {
+                        Button(L10n.notesRecover) {
+                            if notesManager.recoverStorage() { showsStorageIssue = false }
+                        }
+                    }
+                }
+            }
+            if let backupURL = notesManager.recoveryBackupURL {
+                Button(L10n.notesShowBackup) {
+                    NSWorkspace.shared.activateFileViewerSelecting([backupURL])
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 300)
+    }
+
+    private var visibleNotes: [NotesManager.Note] {
+        isDetail ? notesManager.filteredNotes(matching: searchQuery) : Array(notesManager.notes.prefix(4))
+    }
 
     private var noteList: some View {
-        VStack(spacing: 4) {
-            if notesManager.notes.isEmpty {
-                VStack(spacing: 6) {
+        LazyVStack(alignment: .leading, spacing: isDetail ? 6 : 4) {
+            if visibleNotes.isEmpty {
+                VStack(spacing: 8) {
                     Image(systemName: "note.text")
-                        .font(.system(size: 18))
-                        .foregroundColor(.secondary)
-                    Text(L10n.noNotes)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 20))
+                    Text(notesManager.notes.isEmpty ? L10n.noNotes : L10n.notesNoMatches)
+                    if isDetail {
+                        Text(notesManager.notes.isEmpty ? L10n.notesEmptyHint : L10n.notesSearchHint)
+                            .font(.system(size: 12))
+                    }
                 }
+                .font(.system(size: isDetail ? 13 : 11))
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 16)
             } else {
-                ForEach(notesManager.notes.prefix(4)) { note in
+                if isDetail {
+                    Text(L10n.notesCount(visibleNotes.count))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(visibleNotes) { note in
                     noteRow(note: note)
                 }
             }
         }
     }
 
-    // MARK: - 笔记行
-
     private func noteRow(note: NotesManager.Note) -> some View {
-        HStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(note.isMarkdown ? Color.yellow.opacity(0.2) : Color.blue.opacity(0.2))
-                .frame(width: 18, height: 18)
-                .overlay(
-                    Image(systemName: note.isMarkdown ? "doc.text" : "note.text")
-                        .font(.system(size: 9))
-                        .foregroundColor(note.isMarkdown ? .yellow : .blue)
-                )
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(note.title)
-                    .font(.system(size: 9, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundColor(.primary)
-
-                Text(note.content.prefix(25).replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(size: 8))
-                    .lineLimit(1)
-                    .foregroundColor(.secondary)
+        Button {
+            guard notesManager.selectNote(id: note.id) else { return }
+            if !isDetail { onShowAll?() }
+            focusedField = .content
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: note.isMarkdown ? "doc.text" : "note.text")
+                    .font(.system(size: isDetail ? 14 : 11))
+                    .foregroundStyle(note.isMarkdown ? noteAccent : .blue)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(note.title.isEmpty ? L10n.notesUntitled : note.title)
+                        .font(.system(size: isDetail ? 13 : 11, weight: .medium))
+                        .foregroundStyle(.primary)
+                    Text(note.content.isEmpty ? L10n.notesNoContent : note.content.prefix(120).replacingOccurrences(of: "\n", with: " "))
+                        .font(.system(size: isDetail ? 12 : 10))
+                        .foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-
-            Spacer()
-
-            Button(action: {
-                notesManager.selectNote(note)
-                editingContent = note.content
-            }) {
-                Image(systemName: "pencil.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
+            .padding(isDetail ? 10 : 6)
+            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(Color.secondary.opacity(0.05))
-        .cornerRadius(6)
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(L10n.notesDelete, role: .destructive) { notesManager.deleteNote(note) }
+                .disabled(notesManager.isStorageReadOnly)
+        }
     }
-
-    // MARK: - 笔记编辑器
 
     private func noteEditor(note: NotesManager.Note) -> some View {
-        VStack(spacing: 4) {
-            // 工具栏
-            HStack {
-                Button(action: { notesManager.closeEditor() }) {
-                    HStack(spacing: 2) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 8))
-                        Text(L10n.back)
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: isDetail ? 10 : 6) {
+            HStack(spacing: 4) {
+                Button(action: closeEditor) {
+                    Label(L10n.back, systemImage: "chevron.left")
                 }
                 .buttonStyle(.plain)
-
-                Spacer()
-
-                Text(note.isMarkdown ? L10n.markdown : L10n.plainText)
-                    .font(.system(size: 8))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(3)
-            }
-
-            // 内容编辑区
-            TextEditor(text: $editingContent)
-                .font(.system(size: 10, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .background(Color.secondary.opacity(0.05))
-                .cornerRadius(4)
-                .frame(height: 80)
-                .onChange(of: editingContent) { _, _ in
-                    var updatedNote = note
-                    updatedNote.content = editingContent
-                    updatedNote.updatedAt = Date()
-                    notesManager.saveNoteDebounced(updatedNote)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+                Spacer(minLength: 0)
+                Menu {
+                    Button(L10n.notesExportMarkdown) { export(note, format: .markdown) }
+                    Button(L10n.notesExportText) { export(note, format: .plainText) }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
                 }
-
-            // 保存按钮
-            Button(action: {
-                var updatedNote = note
-                updatedNote.content = editingContent
-                updatedNote.updatedAt = Date()
-                notesManager.saveNote(updatedNote)
-                notesManager.closeEditor()
-            }) {
-                Text(L10n.save)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .background(Color.yellow)
-                    .cornerRadius(4)
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(L10n.notesExport)
+                .accessibilityLabel(L10n.notesExport)
+                Button(role: .destructive) {
+                    notesManager.deleteNote(note)
+                    focusedField = nil
+                } label: {
+                    Image(systemName: "trash")
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(notesManager.isStorageReadOnly)
+                .help(L10n.notesDelete)
+                .accessibilityLabel(L10n.notesDelete)
             }
-            .buttonStyle(.plain)
+            .font(.system(size: isDetail ? 12 : 10))
+
+            TextField(L10n.notesTitle, text: Binding(
+                get: { notesManager.currentNote?.title ?? "" },
+                set: {
+                    guard notesManager.currentNote?.id == note.id else { return }
+                    notesManager.updateCurrentNoteTitle($0)
+                }
+            ))
+            .font(.system(size: isDetail ? 15 : 12, weight: .semibold))
+            .textFieldStyle(.plain)
+            .focused($focusedField, equals: .title)
+            .disabled(notesManager.isStorageReadOnly)
+            .accessibilityLabel(L10n.notesTitle)
+
+            TextEditor(text: Binding(
+                get: { notesManager.currentNote?.content ?? "" },
+                set: {
+                    guard notesManager.currentNote?.id == note.id else { return }
+                    notesManager.updateCurrentNoteContent($0)
+                }
+            ))
+            .font(.system(size: isDetail ? 13 : 11, design: note.isMarkdown ? .monospaced : .default))
+            .scrollContentBackground(.hidden)
+            .padding(4)
+            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            .frame(height: isDetail ? 240 : 100)
+            .focused($focusedField, equals: .content)
+            .disabled(notesManager.isStorageReadOnly)
+            .accessibilityLabel(L10n.notesContent)
+
+            HStack {
+                Text(note.isMarkdown ? L10n.markdown : L10n.plainText)
+                    .font(.system(size: isDetail ? 12 : 10))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Button(L10n.notesDone, action: closeEditor)
+                    .font(.system(size: isDetail ? 12 : 11, weight: .medium))
+                    .buttonStyle(.bordered)
+                    .tint(noteAccent)
+            }
+        }
+        .id(note.id)
+    }
+
+    private func createNote() {
+        guard notesManager.createNote(title: L10n.notesUntitled) != nil else { return }
+        searchQuery = ""
+        if !isDetail { onShowAll?() }
+        focusedField = .title
+    }
+
+    private func closeEditor() {
+        if notesManager.isStorageReadOnly || notesManager.flushPendingChanges() {
+            notesManager.closeEditor()
+            focusedField = nil
+        } else {
+            showsStorageIssue = true
         }
     }
-}
 
-#Preview {
-    NotesWidgetView(notesManager: NotesManager())
-        .background(Color.black)
+    private func export(_ note: NotesManager.Note, format: NotesManager.ExportFormat) {
+        let panel = NSSavePanel()
+        panel.title = L10n.notesExport
+        panel.allowedContentTypes = [format == .markdown ? (UTType(filenameExtension: "md") ?? .plainText) : .plainText]
+        panel.nameFieldStringValue = notesManager.exportFileName(for: notesManager.currentNote ?? note, format: format)
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        do {
+            try notesManager.exportNote(id: note.id, to: destination, format: format)
+        } catch {
+            exportError = error.localizedDescription
+        }
+    }
 }

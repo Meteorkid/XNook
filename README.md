@@ -25,14 +25,18 @@
 
 ## What It Does
 
-X Nook sits at the top of your screen as a compact pill. Hover to expand and access your tools.
+X Nook sits at the top of your screen as a compact pill. Click or scroll down with two fingers to expand; hover expansion is optional in Settings. Use the overview for quick access and the tabs for full tool details.
 
 **Core features:**
 
 - **Media Player** — Control music playback with album art display
-- **Calendar Widget** — View upcoming events at a glance
-- **Notes Widget** — Quick note-taking with Markdown support
+- **Calendar Widget** — Prioritize ongoing and upcoming events, view the full selected day, and refresh when the system calendar changes
+- **Notes Widget** — Browse all notes, search titles and content, rename, undo deletion, and export Markdown or plain text
 - **File Tray** — Drag and drop files for quick access
+- **NookFlow** — Start tasks manually or from events, link notes and files, and reopen resources from task history
+- **Adaptive Panel** — Responsive overview and full-width tool details with scrollable content
+- **Keyboard Navigation** — With the panel open, ⌘0 shows the overview, ⌘1–4 select enabled tools, ⌘N creates a note, and Escape goes back or collapses
+- **Reduced Motion** — Respect app and system preferences for decorative animations and scrolling text
 - **App Switcher** — Double-finger swipe to switch between X Nook and X Island
 - **Multi-display** — Automatically follows your mouse between screens
 - **Notch-aware** — Designed for MacBook notch displays
@@ -109,7 +113,7 @@ XNook/
 
 ## License
 
-MIT License
+Source-available, non-commercial license. See [LICENSE](LICENSE) for the terms.
 
 ## Contributing
 

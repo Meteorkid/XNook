@@ -1,131 +1,188 @@
 import SwiftUI
 import EventKit
 
-/// 日历 Widget 视图
+/// 概览突出下一项安排，详情保留所选日期的全部日程。
 struct CalendarWidgetView: View {
     var calendarManager: CalendarManager
     @Binding var recenterTrigger: Int
-    /// 点击“开始任务”时回调，传回所选日历事件；为 nil 时不渲染按钮
     var onStartFocus: ((EKEvent) -> Void)?
-    @State private var selectedDate = Date()
+    var isDetail: Bool = false
+    var onShowAll: (() -> Void)? = nil
+    @AppStorage("reduceMotion") private var reduceMotion = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var centeredDate = Date()
+    @State private var calendarOpenFailed = false
+
+    private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
+    private var selectedDate: Binding<Date> {
+        Binding(get: { calendarManager.displayedDate }, set: { calendarManager.loadEvents(for: $0) })
+    }
 
     var body: some View {
-        VStack(spacing: 8) {
-            Spacer()
-
-            // 月份标题
+        VStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(monthString(for: centeredDate))
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                    .contentTransition(.numericText())
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
                 Text(L10n.monthSuffix)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
-            .animation(.easeInOut(duration: 0.15), value: centeredDate)
 
-            // 可滚动日期行
             CalendarScroller(
-                selectedDate: $selectedDate,
+                selectedDate: selectedDate,
                 centeredDate: $centeredDate,
                 recenterTrigger: $recenterTrigger,
                 today: today,
-                dateRange: dateRange
+                dateRange: dateRange,
+                reduceMotion: shouldReduceMotion
             )
             .frame(height: 48)
 
-            // 事件状态
             if !calendarManager.hasAccess {
-                HStack(spacing: 4) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 8))
-                    Text(L10n.calendarAccessRequired)
-                        .font(.system(size: 9))
-                }
-                .foregroundColor(.secondary)
-            } else if calendarManager.upcomingEvents.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "calendar.badge.checkmark")
-                        .font(.system(size: 8))
-                    Text(L10n.noUpcomingEvents)
-                        .font(.system(size: 9))
-                }
-                .foregroundColor(.secondary)
+                accessPrompt
             } else {
-                VStack(spacing: 3) {
-                    ForEach(calendarManager.upcomingEvents.prefix(2), id: \.eventIdentifier) { event in
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(.blue)
-                                .frame(width: 4, height: 4)
-                            Text(event.title ?? L10n.untitled)
-                                .font(.system(size: 9, weight: .medium))
-                                .lineLimit(1)
-                            Spacer()
-                            Text(timeString(from: event.startDate))
-                                .font(.system(size: 8, design: .monospaced))
-                                .foregroundColor(.secondary)
-
-                            // “开始任务”按钮 — NookFlow 入口
-                            if let onStartFocus {
-                                Button(action: { onStartFocus(event) }) {
-                                    Image(systemName: "play.circle.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.accentColor)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                TimelineView(.everyMinute) { context in
+                    eventContent(now: context.date)
                 }
             }
 
-            Spacer()
+            if isDetail {
+                Button(L10n.calendarOpenApp, systemImage: "calendar") { openCalendar() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.vertical, 6)
+            }
+            if calendarOpenFailed {
+                Text(L10n.calendarOpenFailed).font(.system(size: 11)).foregroundStyle(.orange)
+            }
         }
-        .onChange(of: selectedDate) { _, date in
-            guard calendarManager.hasAccess else { return }
-            calendarManager.loadEvents(for: date)
-        }
-        .onChange(of: calendarManager.hasAccess) { _, hasAccess in
-            guard hasAccess else { return }
-            calendarManager.loadEvents(for: selectedDate)
+        .frame(maxWidth: .infinity)
+        .onAppear {
+            calendarManager.ensureAccess()
+            centeredDate = calendarManager.displayedDate
         }
     }
 
-    private var today: Date {
-        Calendar.current.startOfDay(for: Date())
+    private var accessPrompt: some View {
+        VStack(spacing: 8) {
+            Label(calendarManager.authorizationStatus == .restricted ? L10n.calendarAccessRestricted : L10n.calendarAccessRequired,
+                  systemImage: "lock.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly {
+                Button(L10n.calendarEnableAccess) {
+                    Task { await calendarManager.requestAccess() }
+                }
+                .disabled(calendarManager.isRequestingAccess)
+            } else {
+                Button(L10n.calendarOpenSettings) { SystemPrivacySettings.openCalendars() }
+            }
+            if let error = calendarManager.accessError {
+                Text(error).font(.system(size: 11)).foregroundStyle(.orange)
+            }
+        }
+        .buttonStyle(.bordered)
+        .font(.system(size: 12))
     }
 
+    @ViewBuilder
+    private func eventContent(now: Date) -> some View {
+        let overview = CalendarManager.overviewEvents(calendarManager.upcomingEvents, date: calendarManager.displayedDate, now: now)
+        let events = isDetail ? calendarManager.upcomingEvents : Array(overview.prefix(2))
+        VStack(alignment: .leading, spacing: 8) {
+            if events.isEmpty {
+                Label(emptyMessage, systemImage: "calendar.badge.checkmark")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                    eventRow(event, now: now)
+                }
+            }
+            if !isDetail {
+                let hiddenCount = calendarManager.upcomingEvents.count - events.count
+                Button {
+                    if let onShowAll { onShowAll() } else { openCalendar() }
+                } label: {
+                    Text(hiddenCount > 0 ? L10n.calendarMoreEvents(hiddenCount) : L10n.calendarAllEvents)
+                        .font(.system(size: 11, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var emptyMessage: String {
+        if calendarManager.selectedCalendars.isEmpty { return L10n.calendarNoCalendarsSelected }
+        if !calendarManager.upcomingEvents.isEmpty { return L10n.calendarAllDone }
+        return L10n.calendarNoEventsForDay
+    }
+
+    private func eventRow(_ event: EKEvent, now: Date) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(eventColor(event))
+                .frame(width: 3, height: isDetail ? 34 : 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(event.title ?? L10n.untitled)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(isDetail ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(event.isAllDay ? L10n.calendarAllDay : timeString(from: event.startDate) + " – " + timeString(from: event.endDate))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if event.startDate <= now && event.endDate > now {
+                    Text(L10n.calendarInProgress).font(.system(size: 10)).foregroundStyle(Color.accentColor)
+                } else if isDetail && event.endDate <= now {
+                    Text(L10n.calendarEnded).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            if let onStartFocus {
+                Button { onStartFocus(event) } label: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 16))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .help(L10n.calendarStartTask)
+                .accessibilityLabel(L10n.calendarStartTask + ": " + (event.title ?? L10n.untitled))
+            }
+        }
+    }
+
+    private func eventColor(_ event: EKEvent) -> Color {
+        guard let color = event.calendar?.cgColor else { return .accentColor }
+        return Color(cgColor: color)
+    }
+
+    private func openCalendar() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") else {
+            calendarOpenFailed = true
+            return
+        }
+        calendarOpenFailed = !NSWorkspace.shared.open(url)
+    }
+
+    private var today: Date { Calendar.current.startOfDay(for: calendarManager.currentDate) }
     private var dateRange: [Date] {
-        let calendar = Calendar.current
-        return (-14...14).compactMap { offset in
-            calendar.date(byAdding: .day, value: offset, to: today)
-        }
+        CalendarManager.visibleDates(today: today, selectedDate: calendarManager.displayedDate)
     }
-
-    private static let monthFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "M"
-        f.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
-        return f
-    }()
-
+    private func monthString(for date: Date) -> String { String(Calendar.current.component(.month, from: date)) }
     private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        f.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
     }()
-
-    private func monthString(for date: Date) -> String {
-        Self.monthFormatter.string(from: date)
-    }
-
-    private func timeString(from date: Date) -> String {
-        Self.timeFormatter.string(from: date)
-    }
+    private func timeString(from date: Date) -> String { Self.timeFormatter.string(from: date) }
 }
 
 // MARK: - AppKit 滚动日期条
@@ -136,10 +193,9 @@ private struct CalendarScroller: NSViewRepresentable {
     @Binding var recenterTrigger: Int
     let today: Date
     let dateRange: [Date]
+    let reduceMotion: Bool
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -147,201 +203,135 @@ private struct CalendarScroller: NSViewRepresentable {
         scrollView.hasVerticalScroller = false
         scrollView.drawsBackground = false
         scrollView.autohidesScrollers = true
-
-        let stackView = DateStackView()
-        stackView.orientation = .horizontal
-        stackView.spacing = 6
-        stackView.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-
-        let calendar = Calendar.current
-        for (index, date) in dateRange.enumerated() {
-            let isToday = calendar.isDate(date, inSameDayAs: today)
-            let cell = DateCell(date: date, isToday: isToday, index: index)
-            cell.target = context.coordinator
-            cell.action = #selector(Coordinator.cellClicked(_:))
-            stackView.addArrangedSubview(cell)
-        }
-
-        scrollView.documentView = stackView
-
-        // 约束内容高度
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        // 设置初始滚动位置到今天
-        DispatchQueue.main.async {
-            context.coordinator.scrollToToday(scrollView, animated: false)
-        }
-
-        // 监听滚动
+        context.coordinator.rebuildDates(scrollView)
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
-            context.coordinator,
-            selector: #selector(Coordinator.boundsChanged(_:)),
-            name: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView
+            context.coordinator, selector: #selector(Coordinator.boundsChanged(_:)),
+            name: NSView.boundsDidChangeNotification, object: scrollView.contentView
         )
-
+        DispatchQueue.main.async { [weak coordinator = context.coordinator, weak scrollView] in
+            guard let coordinator, let scrollView else { return }
+            coordinator.scrollToDate(scrollView, date: coordinator.parent.selectedDate, animated: false)
+        }
         return scrollView
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.invalidate()
         NotificationCenter.default.removeObserver(coordinator)
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
+        let datesChanged = context.coordinator.parent.dateRange != dateRange
+        let motionChanged = context.coordinator.parent.reduceMotion != reduceMotion
         context.coordinator.parent = self
-        // recenterTrigger 变化时重新居中到今天（面板重新展开）
-        if recenterTrigger != context.coordinator.lastTrigger {
-            context.coordinator.lastTrigger = recenterTrigger
-            DispatchQueue.main.async {
-                context.coordinator.scrollToToday(nsView, animated: false)
+        if datesChanged { context.coordinator.rebuildDates(nsView) }
+        let shouldRecenter = recenterTrigger != context.coordinator.lastTrigger
+        context.coordinator.lastTrigger = recenterTrigger
+        if shouldRecenter || datesChanged || motionChanged {
+            DispatchQueue.main.async { [weak coordinator = context.coordinator, weak nsView] in
+                guard let coordinator, let nsView else { return }
+                let date = shouldRecenter ? coordinator.parent.today : coordinator.parent.selectedDate
+                coordinator.scrollToDate(nsView, date: date, animated: false)
             }
         }
     }
 
-    // MARK: - Coordinator
-
     class Coordinator: NSObject {
         var parent: CalendarScroller
-        private var lastIndex: Int = -1
-        var lastTrigger: Int = 0
-        private var isProgrammaticScroll = false
+        var lastTrigger: Int
+        private var lastIndex = -1
         private var programmaticScrollID = 0
-        /// 上次更新的中心索引，用于清理远距离跳转时的旧高亮
-        private var lastCenterIndex: Int = -1
+        private var isProgrammaticScroll = true
+        private var isInvalidated = false
 
-        init(_ parent: CalendarScroller) { self.parent = parent }
+        init(_ parent: CalendarScroller) {
+            self.parent = parent
+            lastTrigger = parent.recenterTrigger
+        }
+
+        func invalidate() {
+            isInvalidated = true
+            programmaticScrollID += 1
+        }
+
+        func rebuildDates(_ scrollView: NSScrollView) {
+            isProgrammaticScroll = true
+            programmaticScrollID += 1
+            let stack = DateStackView()
+            stack.orientation = .horizontal
+            stack.spacing = 6
+            stack.edgeInsets = NSEdgeInsets(top: 4, left: 12, bottom: 4, right: 12)
+            for (index, date) in parent.dateRange.enumerated() {
+                let cell = DateCell(date: date, isToday: Calendar.current.isDate(date, inSameDayAs: parent.today), index: index)
+                cell.target = self
+                cell.action = #selector(cellClicked(_:))
+                stack.addArrangedSubview(cell)
+            }
+            stack.frame = NSRect(x: 0, y: 0, width: CGFloat(parent.dateRange.count) * 36 + 18, height: 48)
+            scrollView.documentView = stack
+            stack.layoutSubtreeIfNeeded()
+        }
 
         @objc func cellClicked(_ sender: DateCell) {
-            let index = sender.index
-            guard index < parent.dateRange.count else { return }
-            let date = parent.dateRange[index]
+            guard parent.dateRange.indices.contains(sender.index), let scrollView = sender.enclosingScrollView else { return }
+            scrollToDate(scrollView, date: parent.dateRange[sender.index], animated: !parent.reduceMotion)
+        }
 
-            parent.selectedDate = date
-            parent.centeredDate = date
-
-            if let scrollView = sender.enclosingScrollView {
-                isProgrammaticScroll = true
-                lastIndex = index
-                updateAllCells(scrollView, centerIndex: index, animated: true)
-                scrollToCell(scrollView, index: index)
+        func scrollToDate(_ scrollView: NSScrollView, date: Date, animated: Bool) {
+            // 即使布局重建后目标不再存在，也不能把日期条永久留在“程序滚动中”。
+            isProgrammaticScroll = false
+            programmaticScrollID += 1
+            guard !isInvalidated,
+                  let index = parent.dateRange.firstIndex(where: { Calendar.current.isDate($0, inSameDayAs: date) }),
+                  let stack = scrollView.documentView as? DateStackView,
+                  stack.arrangedSubviews.indices.contains(index) else { return }
+            stack.layoutSubtreeIfNeeded()
+            isProgrammaticScroll = true
+            let scrollID = programmaticScrollID
+            lastIndex = index
+            select(index, in: scrollView, animated: animated)
+            let offset = stack.arrangedSubviews[index].frame.midX - scrollView.contentSize.width / 2
+            let maxOffset = max(0, stack.bounds.width - scrollView.contentSize.width)
+            let point = NSPoint(x: min(max(0, offset), maxOffset), y: 0)
+            if animated && !parent.reduceMotion {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.25
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    scrollView.contentView.animator().setBoundsOrigin(point)
+                } completionHandler: { [weak self, weak scrollView] in
+                    guard let self, let scrollView, !self.isInvalidated,
+                          scrollID == self.programmaticScrollID else { return }
+                    self.isProgrammaticScroll = false
+                    scrollView.reflectScrolledClipView(scrollView.contentView)
+                }
+            } else {
+                scrollView.contentView.scroll(to: point)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+                isProgrammaticScroll = false
             }
         }
 
         @objc func boundsChanged(_ notification: Notification) {
-            guard let clipView = notification.object as? NSClipView,
-                  let scrollView = clipView.enclosingScrollView else { return }
-            detectCenteredDate(scrollView, animated: false)
+            guard !isInvalidated, !isProgrammaticScroll,
+                  let clipView = notification.object as? NSClipView,
+                  let scrollView = clipView.enclosingScrollView,
+                  let stack = scrollView.documentView as? DateStackView else { return }
+            let center = clipView.bounds.midX
+            guard let index = stack.arrangedSubviews.enumerated().min(by: {
+                abs($0.element.frame.midX - center) < abs($1.element.frame.midX - center)
+            })?.offset, index != lastIndex else { return }
+            lastIndex = index
+            select(index, in: scrollView, animated: false)
         }
 
-        func scrollToToday(_ scrollView: NSScrollView, animated: Bool) {
-            guard let stackView = scrollView.documentView as? DateStackView else { return }
-            let todayIndex = parent.dateRange.firstIndex(of: parent.today) ?? 14
-            guard todayIndex < stackView.arrangedSubviews.count else { return }
-            programmaticScrollID += 1
-            isProgrammaticScroll = false
-
-            let cell = stackView.arrangedSubviews[todayIndex]
-            let offset = cell.frame.midX - scrollView.contentSize.width / 2
-            let point = NSPoint(x: max(0, offset), y: 0)
-
-            CATransaction.begin()
-            CATransaction.setDisableActions(!animated)
-            if animated {
-                CATransaction.setAnimationDuration(0.3)
-                CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
-            }
-            scrollView.contentView.scroll(to: point)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-            CATransaction.commit()
-
-            lastIndex = todayIndex
-            parent.selectedDate = parent.today
-            parent.centeredDate = parent.today
-            updateAllCells(scrollView, centerIndex: todayIndex, animated: animated)
-        }
-
-        func scrollToCell(_ scrollView: NSScrollView, index: Int) {
-            guard let stackView = scrollView.documentView as? DateStackView,
-                  index < stackView.arrangedSubviews.count else { return }
-            programmaticScrollID += 1
-            let scrollID = programmaticScrollID
-
-            let cell = stackView.arrangedSubviews[index]
-            let offset = cell.frame.midX - scrollView.contentSize.width / 2
-            let point = NSPoint(x: max(0, offset), y: 0)
-
-            CATransaction.begin()
-            CATransaction.setAnimationDuration(0.3)
-            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
-            scrollView.contentView.animator().scroll(to: point)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-            CATransaction.commit()
-
-            // 动画结束后恢复用户滚动检测，并重新确认点击的日期。
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                guard let self,
-                      scrollID == self.programmaticScrollID,
-                      index < self.parent.dateRange.count else { return }
-                self.isProgrammaticScroll = false
-                self.lastIndex = index
-                let date = self.parent.dateRange[index]
-                self.parent.selectedDate = date
-                self.parent.centeredDate = date
-                self.updateAllCells(scrollView, centerIndex: index, animated: true)
-            }
-        }
-
-        func detectCenteredDate(_ scrollView: NSScrollView, animated: Bool) {
-            guard !isProgrammaticScroll else { return }
-            guard let stackView = scrollView.documentView as? DateStackView else { return }
-
-            let visibleCenterX = scrollView.contentView.bounds.midX
-            var bestIndex = 0
-            var bestDist: CGFloat = .greatestFiniteMagnitude
-
-            for (index, subview) in stackView.arrangedSubviews.enumerated() {
-                let cellCenterX = subview.frame.midX
-                let dist = abs(cellCenterX - visibleCenterX)
-                if dist < bestDist {
-                    bestDist = dist
-                    bestIndex = index
-                }
-            }
-
-            // 中心没变则跳过（避免滚动时每帧都更新）
-            guard bestIndex != lastIndex else { return }
-            lastIndex = bestIndex
-
-            updateAllCells(scrollView, centerIndex: bestIndex, animated: animated)
-
-            if bestIndex < parent.dateRange.count {
-                let date = parent.dateRange[bestIndex]
-                parent.selectedDate = date
-                parent.centeredDate = date
-            }
-        }
-
-        /// 更新受影响的 cell（中心 ±3 范围内），并清理旧中心的残留高亮
-        private func updateAllCells(_ scrollView: NSScrollView, centerIndex: Int, animated: Bool) {
-            guard let stackView = scrollView.documentView as? DateStackView else { return }
-
-            let oldCenter = lastCenterIndex
-            lastCenterIndex = centerIndex
-
-            for subview in stackView.arrangedSubviews {
-                if let cell = subview as? DateCell {
-                    let dist = abs(cell.index - centerIndex)
-                    let oldDist = oldCenter >= 0 ? abs(cell.index - oldCenter) : Int.max
-
-                    if dist <= 3 {
-                        // 新中心 ±3 范围内：更新放大/高亮
-                        cell.updateMagnify(centerIndex: centerIndex, animated: animated)
-                    } else if oldDist <= 3 {
-                        // 旧中心 ±3 范围内但现在超出新中心范围：重置为默认状态
-                        cell.updateMagnify(centerIndex: -999, animated: false)
-                    }
-                }
+        private func select(_ index: Int, in scrollView: NSScrollView, animated: Bool) {
+            guard parent.dateRange.indices.contains(index), let stack = scrollView.documentView as? DateStackView else { return }
+            let date = parent.dateRange[index]
+            if !Calendar.current.isDate(parent.selectedDate, inSameDayAs: date) { parent.selectedDate = date }
+            if parent.centeredDate != date { parent.centeredDate = date }
+            for case let cell as DateCell in stack.arrangedSubviews {
+                cell.updateMagnify(centerIndex: index, animated: animated && !parent.reduceMotion, reduceMotion: parent.reduceMotion)
             }
         }
     }
@@ -401,6 +391,8 @@ private class DateCell: NSButton {
         formatter.dateFormat = "E"
         weekdayLabel.stringValue = formatter.string(from: date)
         dayLabel.stringValue = "\(Calendar.current.component(.day, from: date))"
+        formatter.dateStyle = .full
+        setAccessibilityLabel(formatter.string(from: date))
 
         // 约束
         NSLayoutConstraint.activate([
@@ -432,7 +424,7 @@ private class DateCell: NSButton {
     }
 
     // 放大镜效果：根据与中心的距离调整大小
-    func updateMagnify(centerIndex: Int, animated: Bool = false) {
+    func updateMagnify(centerIndex: Int, animated: Bool = false, reduceMotion: Bool = false) {
         let dist = abs(index - centerIndex)
         let scale: CGFloat
         let yOffset: CGFloat
@@ -446,8 +438,10 @@ private class DateCell: NSButton {
 
         // 缩放 + 位移全部在 layer transform 中完成，不修改 frame
         var t = CATransform3DIdentity
-        t = CATransform3DScale(t, scale, scale, 1)
-        t = CATransform3DTranslate(t, 0, yOffset, 0)
+        if !reduceMotion {
+            t = CATransform3DScale(t, scale, scale, 1)
+            t = CATransform3DTranslate(t, 0, yOffset, 0)
+        }
 
         if animated {
             CATransaction.begin()
@@ -477,7 +471,9 @@ private class DateCell: NSButton {
     }
 }
 
+#if !XNOOK_DISABLE_PREVIEWS
 #Preview {
     CalendarWidgetView(calendarManager: CalendarManager(), recenterTrigger: .constant(0), onStartFocus: nil)
         .background(Color.black)
 }
+#endif

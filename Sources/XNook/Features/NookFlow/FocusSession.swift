@@ -20,6 +20,10 @@ struct FocusSession: Codable, Identifiable, Equatable {
     var linkedNote: LinkedNote?
     /// 关联文件快照数组（关联时立即写入）
     var linkedFiles: [LinkedFile]
+    /// 保留已有开发版本记录的来源身份，旧记录可缺少此字段。
+    var originPendingTaskID: UUID? = nil
+    /// 手动关联的网页快照；可选字段使旧记录缺少链接时仍能读取。
+    var linkedURLs: [LinkedTaskURL]? = nil
 
     enum State: String, Codable {
         case active
@@ -28,6 +32,8 @@ struct FocusSession: Codable, Identifiable, Equatable {
 
     /// 是否已结束
     var isEnded: Bool { state == .ended }
+
+    var taskURLs: [LinkedTaskURL] { linkedURLs ?? [] }
 }
 
 /// 关联笔记快照 — 只保存展示所需字段，避免依赖 NotesManager 当前状态
@@ -41,6 +47,15 @@ struct LinkedFile: Codable, Equatable {
     let id: UUID
     let name: String
     let icon: String
+    /// 保留已有开发版本记录的文件访问凭据，旧记录可缺少此字段。
+    let bookmarkData: Data?
+
+    init(id: UUID, name: String, icon: String, bookmarkData: Data? = nil) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.bookmarkData = bookmarkData
+    }
 }
 
 /// 持久化容器 — 同时保存未结束会话与历史记录

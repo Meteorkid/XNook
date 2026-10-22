@@ -8,6 +8,8 @@ import SwiftUI
 /// - 两者皆空：EmptyView（不占布局，由父视图条件渲染避免调用）
 struct FocusSessionView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @State private var linkSessionID: UUID?
+    @State private var isEditingLink = false
 
     let manager: FocusSessionManager
     /// 用户设置的最近任务显示上限（1–5）
@@ -18,7 +20,9 @@ struct FocusSessionView: View {
     let onCreateLinkedNote: () -> Void
     let onLinkTrayFiles: () -> Void
     let onEndSession: () -> Void
+    var onLinksPresentationChanged: (Bool) -> Void = { _ in }
 
+    static let storageIssueHeight: CGFloat = 28
     static let defaultHistoryDisplayLimit = 3
     static let historyDisplayLimitRange = 1...5
 
@@ -45,14 +49,50 @@ struct FocusSessionView: View {
     }
 
     var body: some View {
-        if let session = manager.activeSession {
-            activeCard(for: session)
-        } else if !manager.history.isEmpty {
-            historyList
-        } else {
-            // 理论上父视图已条件渲染，此处保留安全兜底
-            EmptyView()
+        VStack(spacing: 0) {
+            if let error = manager.storageError {
+                HStack(spacing: 6) {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .lineLimit(1).help(error)
+                    Spacer()
+                    Button(L10n.flowRetry) { manager.retryLoadingStorage() }
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 12)
+                .frame(height: Self.storageIssueHeight)
+            }
+            if let session = manager.activeSession {
+                activeCard(for: session)
+            } else if !manager.history.isEmpty {
+                historyList
+            }
         }
+        .popover(isPresented: Self.guardedPresentationBinding(
+            Binding(get: { linkSessionID != nil }, set: { presented in
+                if !presented {
+                    linkSessionID = nil
+                    onLinksPresentationChanged(false)
+                }
+            }), isEditing: { isEditingLink }
+        )) {
+            if let linkSessionID {
+                TaskLinksView(manager: manager, sessionID: linkSessionID, isEditing: $isEditingLink)
+            }
+        }
+        .onDisappear { onLinksPresentationChanged(false) }
+    }
+
+    static func guardedPresentationBinding(_ presented: Binding<Bool>, isEditing: @escaping () -> Bool) -> Binding<Bool> {
+        Binding(get: { presented.wrappedValue }, set: { value in
+            if value || !isEditing() { presented.wrappedValue = value }
+        })
+    }
+
+    private func showLinks(for sessionID: UUID) {
+        guard !isEditingLink else { return }
+        linkSessionID = sessionID
+        onLinksPresentationChanged(true)
     }
 
     // MARK: - 活跃任务卡片
@@ -64,9 +104,14 @@ struct FocusSessionView: View {
                 Image(systemName: "circle.fill")
                     .font(.system(size: 6))
                     .foregroundStyle(.green)
-                Text(session.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
+                Button { showLinks(for: session.id) } label: {
+                    Text(session.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help(L10n.flowWebLinks)
+                .accessibilityLabel(L10n.flowWebLinks + " " + session.title)
                 Spacer()
                 Text("进行中")
                     .font(.system(size: 9))
@@ -107,6 +152,7 @@ struct FocusSessionView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .buttonStyle(.plain)
+                .disabled(manager.storageError != nil)
             }
         }
         .padding(.horizontal, 12)
@@ -135,7 +181,7 @@ struct FocusSessionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
-        .disabled(isLinked)
+        .disabled(isLinked || manager.storageError != nil)
     }
 
     /// 关联文件架按钮：文件架为空时显示"文件架为空"并禁用
@@ -159,7 +205,7 @@ struct FocusSessionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
-        .disabled(isTrayEmpty)
+        .disabled(isTrayEmpty || manager.storageError != nil)
     }
 
     // MARK: - 历史记录列表
@@ -188,38 +234,42 @@ struct FocusSessionView: View {
     }
 
     private func historyRow(_ record: FocusSession) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(.gray.opacity(0.4))
-                .frame(width: 4, height: 4)
+        Button { showLinks(for: record.id) } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(.gray.opacity(0.4))
+                    .frame(width: 4, height: 4)
 
-            Text(record.title)
-                .font(.system(size: 9, weight: .medium))
-                .lineLimit(1)
+                Text(record.title)
+                    .font(.system(size: 9, weight: .medium))
+                    .lineLimit(1)
 
-            Spacer()
+                Spacer()
 
-            // 关联数量摘要
-            HStack(spacing: 3) {
-                if record.linkedNote != nil {
-                    Image(systemName: "note.text")
-                        .font(.system(size: 8))
+                // 关联数量摘要
+                HStack(spacing: 3) {
+                    if record.linkedNote != nil {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 8))
+                    }
+                    if !record.linkedFiles.isEmpty {
+                        Text("\(record.linkedFiles.count)")
+                            .font(.system(size: 8, design: .monospaced))
+                    }
                 }
-                if !record.linkedFiles.isEmpty {
-                    Text("\(record.linkedFiles.count)")
+                .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
+
+                // 结束时间
+                if let endedAt = record.endedAt {
+                    Text(endTimeString(from: endedAt))
                         .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
                 }
             }
-            .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
-
-            // 结束时间
-            if let endedAt = record.endedAt {
-                Text(endTimeString(from: endedAt))
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundStyle(IslandStyle.tertiaryText(for: colorScheme))
-            }
+            .frame(height: Self.historyRowHeight - 4)
         }
-        .frame(height: Self.historyRowHeight - 4)
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.flowWebLinks + " " + record.title)
     }
 
     // MARK: - 时间格式化

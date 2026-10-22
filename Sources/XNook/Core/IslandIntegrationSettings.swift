@@ -71,7 +71,8 @@ enum IslandIntegrationSettings {
     }
 
     static let suiteName = "dev.xisland.integration"
-    static let sharedDefaults = UserDefaults(suiteName: suiteName) ?? .standard
+    // 回归测试注入独立 suite，不修改正在运行的两款应用的联动偏好。
+    static var sharedDefaults = UserDefaults(suiteName: suiteName) ?? .standard
 
     static func registerDefaults() {
         sharedDefaults.register(defaults: [

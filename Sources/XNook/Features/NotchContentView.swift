@@ -15,6 +15,7 @@ struct NotchContentView: View {
     @State private var notesManager = NotesManager()
     @State private var trayManager = TrayManager()
     @State private var focusSessionManager = FocusSessionManager()
+    @State private var isTaskLinksPresented = false
 
     @State private var state: IslandState = .collapsed
     @State private var showContent = false
@@ -141,7 +142,8 @@ struct NotchContentView: View {
 
     /// NookFlow 区域是否应显示（有活跃会话，或用户开启了最近任务且存在历史记录）
     private var isFocusSessionVisible: Bool {
-        focusSessionManager.activeSession != nil
+        isTaskLinksPresented || focusSessionManager.storageError != nil
+            || focusSessionManager.activeSession != nil
             || (showNookFlowHistory && !focusSessionManager.history.isEmpty)
     }
 
@@ -156,9 +158,10 @@ struct NotchContentView: View {
     /// 活跃会话：卡片高度；仅历史记录：按可见任务行数计算列表高度；否则 0
     private var focusSessionCardHeight: CGFloat {
         guard isFocusSessionVisible else { return 0 }
-        return focusSessionManager.activeSession != nil
+        let contentHeight = focusSessionManager.activeSession != nil
             ? Self.activeSessionCardHeight
-            : FocusSessionView.historyListHeight(for: visibleHistoryRecordCount)
+            : (focusSessionManager.history.isEmpty ? 0 : FocusSessionView.historyListHeight(for: visibleHistoryRecordCount))
+        return contentHeight + (focusSessionManager.storageError == nil ? 0 : FocusSessionView.storageIssueHeight)
     }
 
     /// 活跃任务卡片估计高度
@@ -431,7 +434,7 @@ struct NotchContentView: View {
             expand(to: .expanded)
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookCollapse)) { _ in
-            collapse()
+            collapse(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             // UserDefaults 变更时更新窗口大小
@@ -513,7 +516,12 @@ struct NotchContentView: View {
         }
     }
 
-    private func collapse() {
+    static func allowsCollapse(isTaskLinksPresented: Bool, forced: Bool) -> Bool {
+        forced || !isTaskLinksPresented
+    }
+
+    private func collapse(force: Bool = false) {
+        guard Self.allowsCollapse(isTaskLinksPresented: isTaskLinksPresented, forced: force) else { return }
         collapseGeneration += 1
         let generation = collapseGeneration
         lastCollapseAt = Date()
@@ -807,7 +815,7 @@ struct NotchContentView: View {
             expandedByHover = true
             expandedAt = Date()
             expand(to: .expanded)
-        } else if !inside && isExpanded && expandedByHover {
+        } else if !inside && isExpanded && expandedByHover && !isTaskLinksPresented {
             // 鼠标移出展开面板时收起
             let elapsed = Date().timeIntervalSince(expandedAt)
             if elapsed > hoverExitCollapseDelay {
@@ -835,6 +843,7 @@ struct NotchContentView: View {
 
     private func scheduleExpandedAutoHide() {
         cancelExpandedAutoHide()
+        guard !isTaskLinksPresented else { return }
         let delay = UserDefaults.standard.double(forKey: "expandedInactivityAutoHideDelay")
         guard delay > 0 else { return }
 
@@ -928,7 +937,12 @@ struct NotchContentView: View {
                     trayFileCount: trayManager.files.count,
                     onCreateLinkedNote: createLinkedNote,
                     onLinkTrayFiles: linkTrayFiles,
-                    onEndSession: endFocusSession
+                    onEndSession: endFocusSession,
+                    onLinksPresentationChanged: { presented in
+                        isTaskLinksPresented = presented
+                        if presented { cancelExpandedAutoHide() }
+                        else if isExpanded { scheduleExpandedAutoHide() }
+                    }
                 )
                 // NookFlow 区域与下方 widget 网格之间的分隔线
                 Rectangle()
@@ -971,11 +985,11 @@ struct NotchContentView: View {
     /// 写入 activeSession 后由 @Observable 驱动 expandedHeight 重算，
     /// onChange(of: expandedHeight) 同步窗口尺寸；若面板未展开则展开一次
     private func startFocusSession(from event: EKEvent) {
-        focusSessionManager.start(
+        guard focusSessionManager.start(
             title: event.title ?? "",
             eventIdentifier: event.eventIdentifier,
             scheduledEndAt: event.endDate
-        )
+        ) != nil else { return }
         if !isExpanded {
             expand(to: .expanded)
         }

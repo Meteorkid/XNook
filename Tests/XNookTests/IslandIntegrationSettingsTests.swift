@@ -3,34 +3,20 @@ import XCTest
 @testable import XNook
 
 final class IslandIntegrationSettingsTests: XCTestCase {
-    private let keys = [
-        IslandIntegrationSettings.Key.swipeSwitchEnabled,
-        IslandIntegrationSettings.Key.swipeSensitivity,
-        IslandIntegrationSettings.Key.startupDisplayMode,
-        IslandIntegrationSettings.Key.lastShownIsland,
-        IslandIntegrationSettings.Key.protocolVersion(for: .xnook),
-        IslandIntegrationSettings.Key.protocolVersion(for: .xisland),
-    ]
-    private var savedValues: [String: Any?] = [:]
+    private var originalDefaults: UserDefaults!
+    private var suiteName: String!
 
     override func setUp() {
         super.setUp()
-        let defaults = IslandIntegrationSettings.sharedDefaults
-        savedValues = Dictionary(
-            uniqueKeysWithValues: keys.map { ($0, defaults.object(forKey: $0)) }
-        )
+        originalDefaults = IslandIntegrationSettings.sharedDefaults
+        suiteName = "XNookTests.ReleaseIntegration.\(UUID().uuidString)"
+        IslandIntegrationSettings.sharedDefaults = UserDefaults(suiteName: suiteName)!
+        IslandIntegrationSettings.registerDefaults()
     }
 
     override func tearDown() {
-        let defaults = IslandIntegrationSettings.sharedDefaults
-        for key in keys {
-            if let value = savedValues[key] {
-                defaults.set(value, forKey: key)
-            } else {
-                defaults.removeObject(forKey: key)
-            }
-        }
-        savedValues.removeAll()
+        IslandIntegrationSettings.sharedDefaults.removePersistentDomain(forName: suiteName)
+        IslandIntegrationSettings.sharedDefaults = originalDefaults
         super.tearDown()
     }
 

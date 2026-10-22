@@ -31,7 +31,7 @@ enum L10n {
 
     // MARK: - Helper
 
-    private static func localized(zh: String, en: String) -> String {
+    static func localized(zh: String, en: String) -> String {
         effectiveLanguage == "zh" ? zh : en
     }
 

@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var shared: AppDelegate?
 
     var notchWindow: NotchWindow?
+    weak var notesManagerForTermination: NotesManager?
     let themeManager = ThemeManager()
     let updateManager = UpdateManager()
     private var statusItem: NSStatusItem?
@@ -30,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var islandHideObserver: NSObjectProtocol?
     private var pendingIslandShowURL: URL?
     private var hasExplicitIslandVisibilityRequest = false
+    private var ownsSharedData = false
     /// 统一的 isSwitchingApps 清除 WorkItem，确保只有一个活跃的清除计时器
     private var clearSwitchingAppsWorkItem: DispatchWorkItem?
 
@@ -52,10 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         Self.shared = self
-        SingleInstanceLock.acquire()
+        ownsSharedData = SingleInstanceLock.acquire()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard ownsSharedData else { return }
         NSApp.setActivationPolicy(.accessory)
 
         SettingsDefaults.register()
@@ -103,6 +106,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard notesManagerForTermination?.prepareForTermination() != false else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.notesStorageWarning
+            alert.informativeText = L10n.notesSaveFailed
+            alert.addButton(withTitle: L10n.back)
+            alert.addButton(withTitle: L10n.notesQuitWithoutSaving)
+            sender.activate(ignoringOtherApps: true)
+            return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+        }
+        return .terminateNow
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -285,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: L10n.showXNook, action: #selector(showNotch), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: L10n.showXNook, action: #selector(showNotch), keyEquivalent: "0"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L10n.preferences, action: #selector(openPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: L10n.checkForUpdates, action: #selector(checkForUpdates), keyEquivalent: ""))

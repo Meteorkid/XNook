@@ -64,6 +64,7 @@ final class NotchWindow: NSPanel {
     private var dragTracking = false
     private var dragStartWindowX: CGFloat = 0
     private var dragStartMouseX: CGFloat = 0
+    private let pointerLocation: () -> NSPoint
     private let defaults: UserDefaults
     private let markVisible: @MainActor () -> Void
     private let onExplicitShow: @MainActor () -> Void
@@ -96,6 +97,7 @@ final class NotchWindow: NSPanel {
     // MARK: - Init
 
     init(
+        pointerLocation: @escaping () -> NSPoint = { NSEvent.mouseLocation },
         defaults: UserDefaults = .standard,
         markVisible: @escaping @MainActor () -> Void = {
             if let currentIsland = AppSwitcher.shared.currentIsland {
@@ -105,6 +107,7 @@ final class NotchWindow: NSPanel {
         onExplicitShow: @escaping @MainActor () -> Void = { AppSwitcher.shared.cancelSwitch() },
         fullscreenProbe: (@Sendable () async -> Bool)? = nil
     ) {
+        self.pointerLocation = pointerLocation
         self.defaults = defaults
         self.markVisible = markVisible
         self.onExplicitShow = onExplicitShow
@@ -543,16 +546,23 @@ final class NotchWindow: NSPanel {
     // MARK: - Drag
 
     override func sendEvent(_ event: NSEvent) {
+        // 展开后的拖选和拖放属于内容控件，不能被药丸拖窗手势抢走。
+        guard islandState == .collapsed else {
+            dragTracking = false
+            isDragging = false
+            super.sendEvent(event)
+            return
+        }
         switch event.type {
         case .leftMouseDown:
-            dragStartMouseX = NSEvent.mouseLocation.x
+            dragStartMouseX = pointerLocation().x
             dragStartWindowX = frame.origin.x
             dragTracking = true
             isDragging = false
             super.sendEvent(event)
 
         case .leftMouseDragged where dragTracking:
-            let currentX = NSEvent.mouseLocation.x
+            let currentX = pointerLocation().x
             let dx = currentX - dragStartMouseX
             if !isDragging && abs(dx) > 4 {
                 isDragging = true

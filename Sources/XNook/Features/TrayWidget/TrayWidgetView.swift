@@ -4,17 +4,35 @@ import UniformTypeIdentifiers
 /// 文件托盘 Widget 视图
 struct TrayWidgetView: View {
     @Bindable var trayManager: TrayManager
+    var isDetail = false
+    var onShowAll: (() -> Void)?
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @AppStorage("reduceMotion") private var reduceMotion = false
     @State private var showAllFiles = false
+    private var motion: Animation? { reduceMotion || systemReduceMotion ? nil : .easeInOut(duration: 0.2) }
 
     /// 当前显示的文件列表
     private var displayFiles: ArraySlice<TrayManager.TrayFile> {
-        let maxVisible = showAllFiles ? trayManager.files.count : min(trayManager.files.count, 4)
+        let maxVisible = (isDetail || showAllFiles) ? trayManager.files.count : min(trayManager.files.count, 4)
         return trayManager.files.prefix(maxVisible)
     }
 
     /// 是否有更多文件未显示
     private var hasMoreFiles: Bool {
-        trayManager.files.count > 4 && !showAllFiles
+        trayManager.files.count > 4 && !showAllFiles && !isDetail
+    }
+
+    private var statusMessage: String? {
+        switch trayManager.issue {
+        case .readFailed: return L10n.trayReadFailed
+        case .saveFailed: return L10n.traySaveFailed
+        case .bookmarkCreationFailed: return L10n.trayBookmarkFailed
+        case .fileUnavailable: return L10n.trayFileUnavailable
+        case nil:
+            return trayManager.unavailableFileCount > 0
+                ? L10n.unavailableTrayFiles(trayManager.unavailableFileCount)
+                : nil
+        }
     }
 
     var body: some View {
@@ -27,9 +45,26 @@ struct TrayWidgetView: View {
                 Text(L10n.widgetTray)
                     .font(.system(size: 10, weight: .semibold))
                 Spacer()
-                Text(L10n.fileCount(trayManager.files.count))
+                Text(L10n.fileCount(trayManager.files.count + trayManager.unavailableFileCount))
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
+            }
+
+            if let statusMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.circle")
+                    Text(statusMessage)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { trayManager.loadFiles() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                    .help(L10n.reloadTray)
+                    .accessibilityLabel(L10n.reloadTray)
+                }
+                .font(.system(size: 9))
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if trayManager.files.isEmpty {
@@ -50,44 +85,10 @@ struct TrayWidgetView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             } else {
-                // 文件列表（可滚动）
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 4) {
-                        ForEach(displayFiles) { file in
-                            fileRow(file: file)
-                        }
-
-                        // 显示更多 / 收起按钮
-                        if hasMoreFiles {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) { showAllFiles = true }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    Text(L10n.showAllFiles(trayManager.files.count - 4))
-                                        .font(.system(size: 8))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        if showAllFiles && trayManager.files.count > 4 {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) { showAllFiles = false }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    Text(L10n.collapseFiles)
-                                        .font(.system(size: 8))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                if isDetail {
+                    fileList
+                } else {
+                    ScrollView { fileList }
                 }
             }
         }
@@ -98,6 +99,46 @@ struct TrayWidgetView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(trayManager.isDropTargeted ? Color.green.opacity(0.6) : Color.clear, lineWidth: 2)
         )
+    }
+
+    private var fileList: some View {
+                    VStack(spacing: 4) {
+                        ForEach(displayFiles) { file in
+                            fileRow(file: file)
+                        }
+
+                        // 显示更多 / 收起按钮
+                        if hasMoreFiles {
+                            Button {
+                                if let onShowAll { onShowAll() }
+                                else { withAnimation(motion) { showAllFiles = true } }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    Text(L10n.showAllFiles(trayManager.files.count - 4))
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if showAllFiles && !isDetail && trayManager.files.count > 4 {
+                            Button {
+                                withAnimation(motion) { showAllFiles = false }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    Text(L10n.collapseFiles)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
     }
 
     // MARK: - 文件行
@@ -116,19 +157,19 @@ struct TrayWidgetView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(file.name)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .foregroundColor(.primary)
 
                 Text(TrayManager.formatFileSize(file.size))
-                    .font(.system(size: 8))
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
 
             Spacer()
 
             // 删除按钮
-            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { trayManager.removeFile(file) } }) {
+            Button(action: { withAnimation(motion) { trayManager.removeFile(file) } }) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
@@ -173,7 +214,7 @@ struct TrayWidgetView: View {
         Button(L10n.revealInFinder) { trayManager.revealInFinder(file) }
         Button(L10n.copyToClipboard) { trayManager.copyToClipboard(file) }
         Divider()
-        Button(L10n.removeFile) { withAnimation { trayManager.removeFile(file) } }
+        Button(L10n.removeFile) { withAnimation(motion) { trayManager.removeFile(file) } }
     }
 
     // MARK: - 处理拖放
@@ -191,7 +232,9 @@ struct TrayWidgetView: View {
     }
 }
 
+#if !XNOOK_DISABLE_PREVIEWS
 #Preview {
     TrayWidgetView(trayManager: TrayManager())
         .background(Color.black)
 }
+#endif

@@ -1,0 +1,13 @@
+{
+  "xnookVersion": "0.3.1",
+  "xislandVersion": "0.1.8",
+  "path": "/Users/meteor/github/XNook/.build/XNook-0.3.1-XIsland-0.1.8-Windows-test-kit.zip",
+  "bytes": 30319682,
+  "sha256": "224b195aadde031d659b49d7a49415e7ec9077997d4fc99f024ad07d131a0edf",
+  "entryCount": 22,
+  "crcPassed": true,
+  "allArtifactHashesAndSizesMatch": true,
+  "bothBuildInputsMatchCurrent": true,
+  "windowsRuntimeVerified": false,
+  "signed": false
+}

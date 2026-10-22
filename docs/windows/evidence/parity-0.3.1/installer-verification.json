@@ -1,0 +1,68 @@
+{
+  "xnookVersion": "0.3.1",
+  "xislandVersion": "0.1.8",
+  "windowsRuntimeVerified": false,
+  "signed": false,
+  "buildInputs": {
+    "XNook": {
+      "version": "0.3.1",
+      "digest": "8ac259fdbb1dd9f9f9e41913d3be59ce98f2d268d50d24993504f9384cc4b18e",
+      "fileCount": 96,
+      "matchesCurrent": true
+    },
+    "xisland": {
+      "version": "0.1.8",
+      "digest": "98bcb516d636bfbe1ebb30e62aacb5504fa6093d5eaed4185bfb74efaa5042fd",
+      "fileCount": 174,
+      "matchesCurrent": true
+    }
+  },
+  "applications": {
+    "xnook": {
+      "sha256": "b5df4fbae6b0de4de385432ebe518f8626910fccf6d2192e01e70d88a08ed291",
+      "machine": "AMD64",
+      "subsystem": "Windows GUI",
+      "releaseDifference": "Tauri UNK -> NSS"
+    },
+    "xisland": {
+      "sha256": "48bbc995ebf9d854b93cc9eceb287b7009d40cb56277aa39ae841615531e2ce2",
+      "machine": "AMD64",
+      "subsystem": "Windows GUI",
+      "releaseDifference": "Tauri UNK -> NSS"
+    }
+  },
+  "resources": {
+    "xnook/THIRD-PARTY-NOTICES.md": "98615811d392653288390c9855358664d8b9f0b2193a6882ad6f5f514d782ca3",
+    "xnook/licenses/ICAL.js-LICENSE.txt": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+    "xnook/licenses/drag-APACHE.txt": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "xnook/licenses/drag-MIT.txt": "9e17784d32fbb3ac50c6c543c307d0fbcb16969585cb4cee8839b50e774708f9",
+    "xnook/licenses/gif-APACHE.txt": "769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb",
+    "xnook/licenses/gif-MIT.txt": "77257f3d2181236b1aee78920238062ae64efe13c5d858b2db126e79c9e1b14f",
+    "xnook/licenses/winvd-MIT.txt": "7edcf1311b8041942c4b7c9e9d918e3f19e19536e4f7a3fb4618b9f22211951e",
+    "xnook/licenses/unicode-normalization-LICENSE-UNICODE.txt": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+    "xnook/licenses/unicode-normalization-LICENSE-APACHE.txt": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "xnook/licenses/unicode-normalization-LICENSE-MIT.txt": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+    "xnook/licenses/regex-LICENSE-APACHE.txt": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "xnook/licenses/regex-LICENSE-MIT.txt": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "xisland/resources/xisland-hook.cjs": "b9169605c4e26feac1a91b43554f08dd9a0497b86e73c619cb0823a88e286dfb",
+    "xisland/resources/node.exe": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+    "xisland/resources/node-runtime.json": "0ad125c17c4946d30b3ac19d4819a3b0fa718e1a7670a58f0b8719b34d38f4fe",
+    "xisland/resources/LICENSE-XIsland.txt": "d2cc6f0f8571ecf7d5407f2dc0b0a9b95c0221c95b2c547eb69b965f27a3d83b",
+    "xisland/resources/README.txt": "af8a64af46abf1ed70ea8537980e76292381cb9e1a363673cd8aebe8e1362983",
+    "xisland/resources/LICENSE-node.txt": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+    "xisland/resources/xisland-bridge.exe": "1b52ce18aa821c9b0685058c58917db0a55e7329612d87c5524a6aa62fe57eff"
+  },
+  "installers": [
+    {
+      "name": "XNook_0.3.1_x64-setup.exe",
+      "sha256": "c27c7a3e7e3cf15e36559931af670d958ec7e433768b16f897fb6447a26b014e",
+      "bytes": 3885163
+    },
+    {
+      "name": "XIsland-Windows-0.1.8-preview-x64-setup.exe",
+      "sha256": "4c202976cfa1cbdd33970d5e7a64e862c96531e5298044f4fe3af1d8abf91f59",
+      "bytes": 26415183
+    }
+  ],
+  "sharedProtocolSourcesIdentical": true
+}

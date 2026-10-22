@@ -1,0 +1,42 @@
+
+> xnook-windows@0.2.0 test:e2e
+> playwright test
+
+
+Running 31 tests using 1 worker
+
+(node:8498) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 e2e/media-selection.spec.ts:80:1 › 手动固定QQ，显示与控制都针对QQ，重启后恢复选择 (550ms)
+  ✓   2 e2e/media-selection.spec.ts:97:1 › 固定播放器离线不控制其他来源，重新出现后恢复，用户可回到自动 (2.4s)
+  ✓   3 e2e/media-selection.spec.ts:113:1 › 切换期间迟到的旧快照不能恢复旧播放器和旧歌词 (2.1s)
+  ✓   4 e2e/media-selection.spec.ts:126:1 › 没有选择字段的旧设置仍能打开，并在首次写入后保留新字段 (243ms)
+  ✓   5 e2e/media-selection.spec.ts:138:1 › 网易歌词迟到时不能覆盖已手选QQ的歌词 (241ms)
+  ✓   6 e2e/media-selection.spec.ts:150:1 › 操作播放器下拉框时来源刷新不重建选项，失焦后刷新列表 (2.1s)
+  ✓   7 e2e/media-selection.spec.ts:164:1 › 同名来源的新会话尚未回包时旧按钮不能控制新会话 (2.2s)
+  ✓   8 e2e/native-contract.spec.ts:69:1 › 媒体控制、歌词显示与切换失败经过真实前端命令链 (306ms)
+  ✓   9 e2e/native-contract.spec.ts:84:1 › 文件架关联任务后移除引用，历史仍以独立路径打开文件 (528ms)
+  ✓  10 e2e/native-contract.spec.ts:104:1 › 退出请求先保存，写入失败时保持窗口和草稿，恢复后才确认退出 (294ms)
+  ✓  11 e2e/native-contract.spec.ts:120:1 › 退出等待慢速磁盘时禁止漏存后续编辑 (274ms)
+  ✓  12 e2e/native-contract.spec.ts:141:1 › 日历异步保存完成不清空用户在另一个工具中输入的任务名 (294ms)
+  ✓  13 e2e/parity.spec.ts:10:36 › 真实 180px 窗口内果冻和磁吸不裁切 (189ms)
+  ✓  14 e2e/parity.spec.ts:10:36 › 真实 300px 窗口内果冻和磁吸不裁切 (193ms)
+  ✓  15 e2e/parity.spec.ts:10:36 › 真实 600px 窗口内果冻和磁吸不裁切 (192ms)
+  ✓  16 e2e/parity.spec.ts:35:1 › 深浅主题、尺寸和英文界面可持久化，用户笔记不被翻译 (518ms)
+  ✓  17 e2e/parity.spec.ts:56:1 › 工具开关、登录项、虚拟桌面失败回滚和共享联动偏好走真实界面合同 (395ms)
+  ✓  18 e2e/parity.spec.ts:73:1 › 收起歌词、点击封面打开播放器、文件复制和拖出绑定正确原生参数 (461ms)
+  ✓  19 e2e/parity.spec.ts:90:1 › 损坏存储先明确确认并备份，再恢复可编辑空数据 (359ms)
+  ✓  20 e2e/parity.spec.ts:103:1 › GIF导入和删除只操作应用副本，减少动态效果停止动画 (478ms)
+  ✓  21 e2e/parity.spec.ts:116:1 › 原生日历tick自动刷新ICS，声音失败不消费提醒，成功后去重 (272ms)
+  ✓  22 e2e/parity.spec.ts:132:1 › 勿扰期间不发提醒，检查更新仅打开发布页而不安装 (390ms)
+  ✓  23 e2e/parity.spec.ts:147:1 › 悬停展开不抢焦点，移出收起；编辑中的笔记受到保护 (1.5s)
+  ✓  24 e2e/parity.spec.ts:164:1 › 纵向手势能展开收起，但不会抢走内容区域的滚动 (983ms)
+  ✓  25 e2e/parity.spec.ts:178:1 › 自动更新成功后24小时再检查，关闭开关后不继续发请求 (292ms)
+  ✓  26 e2e/workflows.spec.ts:15:1 › 空状态与全部工具可用，浏览器预览不伪装原生能力 (457ms)
+  ✓  27 e2e/workflows.spec.ts:30:1 › 中文笔记保存、重启恢复、搜索、导出与撤销删除 (1.3s)
+  ✓  28 e2e/workflows.spec.ts:54:1 › 真实 ICS 文件导入后可从日程启动任务并保存到历史 (403ms)
+  ✓  29 e2e/workflows.spec.ts:72:1 › 损坏存储保持原样，界面明确禁用编辑 (305ms)
+  ✓  30 e2e/workflows.spec.ts:83:1 › 导入无效 ICS 不破坏已有日历 (278ms)
+  ✓  31 e2e/workflows.spec.ts:96:1 › 窄窗口可导航和编辑，保存时不打断输入法组合输入 (1.1s)
+
+  31 passed (23.1s)

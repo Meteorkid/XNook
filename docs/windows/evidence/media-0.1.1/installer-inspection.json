@@ -1,0 +1,14 @@
+{
+  "version": "0.1.1",
+  "installer": "/Users/meteor/github/XNook/.build/windows-delivery-2026-10-17/XNook_0.1.1_x64-setup.exe",
+  "bytes": 3253459,
+  "sha256": "869b15c359a3e1e11bd20a830529e5738deeee3eb87e27274ea7207627dd2f02",
+  "sourceDigest": "10906b5c17ee7722765acfaba4ff978267d6bebf018f9d3a67065a392c8e96db",
+  "sourceInputsMatch": true,
+  "peArchitecture": "AMD64",
+  "subsystem": "Windows GUI",
+  "packagedExeMatchesBuildExceptBundleMarker": true,
+  "packagedExeSha256": "432220ab8ab3734520384cf8207f7f8f4c7ce0822538a1f86e929230769d9f31",
+  "windowsRuntimeVerified": false,
+  "signed": false
+}

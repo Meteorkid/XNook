@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-17",
+  "host": "macOS arm64",
+  "windowsRuntimeVerified": false,
+  "tests": {
+    "xnookTypeScript": {
+      "passed": 32
+    },
+    "xnookRust": {
+      "passed": 34
+    },
+    "islandLinkSubprocess": {
+      "passed": 12,
+      "windowCallbacks": "controlled callbacks; not real Windows windows"
+    },
+    "browser": {
+      "passed": 11,
+      "realBrowserWorkflows": 6,
+      "mockedNativeIPCWorkflows": 5
+    },
+    "xislandTypeScript": {
+      "passed": 160
+    },
+    "xislandRust": {
+      "unitPassed": 22,
+      "integrationPassed": 1,
+      "windowsOnlyIgnored": 1
+    }
+  },
+  "builds": {
+    "xnook": "Windows x64 MSVC NSIS 0.1.0",
+    "xisland": "Windows x64 MSVC NSIS 0.1.4",
+    "signed": false
+  },
+  "archive": {
+    "path": "/Users/meteor/github/XNook/.build/XNook-XIsland-Windows-2026-10-17-preview-test-kit.zip",
+    "bytes": 29558478,
+    "sha256": "94259c288a38a2a45159a23c0d69202c911bf74bfdecce30470a834bb3bf5b5a",
+    "independentZipReadAndArtifactHashesPassed": true,
+    "entryCount": 12
+  },
+  "limitations": [
+    "No real Windows execution or installation verified",
+    "Real media players, file drag/drop, touchpad, IME, DPI and fullscreen pending",
+    "File drag-out not implemented",
+    "ICS VTODO and system reminders not implemented"
+  ],
+  "macOSSourceScope": "This team changed only Windows-related files. Five pre-existing Mac source/test files changed concurrently outside this task; they were not reverted."
+}

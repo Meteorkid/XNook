@@ -1,0 +1,89 @@
+   Compiling island-link v0.2.0 (/Users/meteor/github/XNook/windows/crates/island-link)
+   Compiling xnook-windows v0.2.0 (/Users/meteor/github/XNook/windows/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.62s
+     Running unittests src/lib.rs (windows/src-tauri/target/debug/deps/xnook_windows-67672e38efbcb8b1)
+
+running 74 tests
+test exit_policy::tests::force_exit_requires_an_open_dialog_and_positive_user_choice ... ok
+test exit_policy::tests::repeated_requests_open_exactly_one_native_confirmation ... ok
+test exit_policy::tests::first_request_requires_saved_confirmation ... ok
+test exit_policy::tests::cancelled_native_confirmation_keeps_running_and_allows_fresh_save ... ok
+test files::tests::rejects_urls_relative_paths_and_embedded_nul ... ok
+test lyrics::tests::chunk_limit_prevents_unbounded_allocation_without_content_length ... ok
+test files::tests::too_many_dropped_files_are_rejected ... ok
+test lyrics::tests::malformed_queries_fail_before_network ... ok
+test lyrics::tests::empty_is_distinct_from_invalid_response ... ok
+test gifs::tests::damaged_and_decompression_heavy_images_are_rejected ... ok
+test lyrics::tests::partial_error_with_other_empty_results_remains_error ... ok
+test lyrics::tests::exact_search_then_query_preserves_strict_candidates ... ok
+test lyrics::tests::invalid_synced_result_continues_to_search_for_usable_plain_lyrics ... ok
+test lyrics::tests::match_normalization_and_timestamp_grammar_follow_frontend ... ok
+test lyrics::tests::fallback_can_upgrade_same_id_and_reject_irrelevant_full_page ... ok
+test media::tests::invalid_controls_rejected ... ok
+test media::tests::timeline_interpolates_playing_but_freezes_paused_and_clamps_seeks ... ok
+test media::tests::transient_error_during_source_change_never_returns_old_song_or_controls ... ok
+test media::tests::transient_error_preserves_sources_and_track_without_refreshing_sample_time ... ok
+test media::tests::stalled_media_operation_has_bounded_deadline ... ok
+test media::tests::unsupported_platform_never_fabricates_playback ... ok
+test media_selection::tests::automatic_prioritizes_playing_target_then_system_current_and_stability ... ok
+test media_selection::tests::duplicate_sources_are_grouped_but_session_selection_is_within_requested_group ... ok
+test media_selection::tests::manual_offline_never_falls_back_and_raw_ids_are_not_merged ... ok
+test lyrics::tests::cancelled_lookup_releases_permit_and_does_not_write_negative_cache ... ok
+test media_selection::tests::recognized_player_is_prioritized_without_rewriting_its_raw_id ... ok
+test files::tests::export_preserves_body_and_cleans_suggested_name ... ok
+test media_selection::tests::same_session_polling_keeps_token_but_replacement_rejects_old_click ... ok
+test lyrics::tests::network_failure_is_not_cached_as_empty_and_restart_hits_success ... ok
+test media_selection::tests::session_tokens_are_required_and_bounded_before_native_control ... ok
+test media_selection::tests::source_change_and_disconnect_invalidate_previous_session_tokens ... ok
+test media_selection::tests::unrelated_ids_containing_brand_words_never_get_priority ... ok
+test lyrics::tests::negative_cache_does_not_hide_match_after_fractional_duration_changes ... ok
+test media_selection::tests::verified_executable_ids_and_absolute_paths_are_exactly_recognized ... ok
+test platform::tests::arbitrary_update_urls_and_sound_names_are_rejected ... ok
+test media_selection::tests::source_ids_reject_empty_nul_and_overlong_utf16 ... ok
+test platform::tests::clipboard_dropfiles_is_utf16_with_double_nul ... ok
+test platform::tests::player_activation_matches_identity_not_titles_or_substrings ... ok
+test preferences::tests::old_settings_and_valid_new_values_are_accepted ... ok
+test preferences::tests::new_settings_reject_wrong_types_ranges_and_duplicate_widgets ... ok
+test storage::tests::media_preference_accepts_old_settings_null_and_raw_id ... ok
+test gifs::tests::copied_gif_lifecycle_never_deletes_original ... ok
+test lyrics::tests::true_empty_survives_restart_without_hiding_network_failures ... ok
+test updates::tests::arbitrary_urls_architectures_and_mac_tag_version_are_not_accepted ... ok
+test storage::tests::corrupted_original_is_never_replaced_even_without_read_call ... ok
+test storage::tests::read_limits_are_enforced_before_allocation ... ok
+test storage::tests::invalid_and_oversized_input_preserve_previous_content ... ok
+test updates::tests::mac_only_is_not_a_windows_update_and_asset_controls_version ... ok
+test updates::tests::selection_uses_highest_valid_windows_asset_and_ignores_draft_or_cross_tag_download ... ok
+test storage::tests::incompatible_version_and_semantically_broken_original_remain_untouched ... ok
+test lyrics::tests::distinct_ttls_version_and_key_collision_are_checked ... ok
+test windowing::tests::custom_horizontal_center_survives_expansion_and_collapse ... ok
+test updates::tests::genuine_empty_is_cached_but_expired_cache_refetches ... ok
+test updates::tests::cache_survives_restart_and_force_failure_does_not_replace_success ... ok
+test updates::tests::corrupt_cache_is_ignored_without_touching_user_store_or_becoming_no_update ... ok
+test windowing::tests::deferred_interaction_pins_primary_when_display_topology_returns ... ok
+test storage::tests::replace_failure_preserves_destination_and_removes_temporary ... ok
+test storage::tests::missing_store_is_empty_and_successful_replacement_is_exact ... ok
+test lyrics::tests::invalid_old_positive_cache_refetches_and_corrupt_cache_does_not_modify_user_store ... ok
+test windowing::tests::dip_size_uses_target_dpi_without_scaling_negative_origin ... ok
+test windowing::tests::disabled_follow_preserves_monitor_and_missing_cursor_uses_primary ... ok
+test storage::tests::recovery_copies_corrupted_original_before_empty_store_and_rejects_nonempty ... ok
+test windowing::tests::disconnected_drag_target_cancels_drag_and_falls_back_to_primary ... ok
+test windowing::tests::disconnected_pinned_screen_falls_back_and_stays_pinned ... ok
+test windowing::tests::drag_is_horizontal_dpi_aware_clamped_and_does_not_follow_other_screen ... ok
+test windowing::tests::empty_topology_and_invalid_resize_do_not_fabricate_a_monitor ... ok
+test windowing::tests::fullscreen_is_monitor_specific_not_maximized_and_does_not_hide_interactions ... ok
+test windowing::tests::interaction_fallback_prefers_primary_over_mouse_monitor ... ok
+test windowing::tests::interaction_pins_foreground_monitor_until_collapse_finishes ... ok
+test windowing::tests::oversized_windows_fit_screen_and_invalid_values_fail ... ok
+test windowing::tests::point_boundaries_and_largest_foreground_overlap_are_correct ... ok
+test windowing::tests::screen_resize_and_dpi_change_keep_window_inside_monitor ... ok
+test storage::tests::invalid_media_preference_preserves_original_and_rejects_new_data ... ok
+test lyrics::tests::bounded_cache_evicts_oldest_entries ... ok
+
+test result: ok. 74 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.96s
+
+   Doc-tests xnook_windows
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-17",
+  "version": "0.1.1",
+  "host": "macOS arm64",
+  "tests": {
+    "typescriptPassed": 49,
+    "rustPassed": 48,
+    "browserPassed": 18,
+    "browserNativeMockCases": 12,
+    "browserPreviewWorkflows": 6
+  },
+  "windowsMSVCBuildPassed": true,
+  "independentInstallerInspectionPassed": true,
+  "windowsRuntimeVerified": false,
+  "netEaseLatestRuntimeVerified": false,
+  "qqMusicLatestRuntimeVerified": false,
+  "archive": {
+    "path": "/Users/meteor/github/XNook/.build/XNook-0.1.1-XIsland-0.1.4-Windows-test-kit.zip",
+    "bytes": 29566275,
+    "sha256": "c10d5334771a4097bd5a431770fee5c1596a1db21e4d033f93799a0fec232c23",
+    "independentlyReadAndVerified": true
+  },
+  "companion": "XIsland 0.1.4 unchanged",
+  "macSourceChangesDuringTask": [
+    "Sources/XNook/Core/ThemeManager.swift",
+    "Tests/XNookTests/ThemeManagerTests.swift"
+  ],
+  "scope": "This team did not edit macOS sources; concurrent changes preserved."
+}

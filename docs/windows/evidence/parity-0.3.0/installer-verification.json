@@ -1,0 +1,65 @@
+{
+  "version": "0.3.0",
+  "installer": "/Users/meteor/github/XNook/.build/windows-delivery-2026-10-17/XNook_0.3.0_x64-setup.exe",
+  "installerSha256": "eaba3fd28dd31f4476b3baf0550b4148f01402b3437c57c8f776b7e8df7dd257",
+  "installerBytes": 3880427,
+  "buildInputDigest": "797ae3df926d32533b42903a462f567a8abcce46b90b17a30dc93be9949f4180",
+  "buildInputCount": 95,
+  "buildInputsMatchCurrent": true,
+  "machine": "AMD64",
+  "subsystem": "Windows GUI",
+  "appSha256": "d3435cddbb2ea0a56bd149e774a9256f0e64d62c953b199e9a372a208139da57",
+  "releaseDifference": "Tauri UNK -> NSS marker",
+  "resources": [
+    {
+      "path": "THIRD-PARTY-NOTICES.md",
+      "sha256": "98615811d392653288390c9855358664d8b9f0b2193a6882ad6f5f514d782ca3"
+    },
+    {
+      "path": "licenses/ICAL.js-LICENSE.txt",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    },
+    {
+      "path": "licenses/drag-APACHE.txt",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+    },
+    {
+      "path": "licenses/drag-MIT.txt",
+      "sha256": "9e17784d32fbb3ac50c6c543c307d0fbcb16969585cb4cee8839b50e774708f9"
+    },
+    {
+      "path": "licenses/gif-APACHE.txt",
+      "sha256": "769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb"
+    },
+    {
+      "path": "licenses/gif-MIT.txt",
+      "sha256": "77257f3d2181236b1aee78920238062ae64efe13c5d858b2db126e79c9e1b14f"
+    },
+    {
+      "path": "licenses/winvd-MIT.txt",
+      "sha256": "7edcf1311b8041942c4b7c9e9d918e3f19e19536e4f7a3fb4618b9f22211951e"
+    },
+    {
+      "path": "licenses/unicode-normalization-LICENSE-UNICODE.txt",
+      "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1"
+    },
+    {
+      "path": "licenses/unicode-normalization-LICENSE-APACHE.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+    },
+    {
+      "path": "licenses/unicode-normalization-LICENSE-MIT.txt",
+      "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0"
+    },
+    {
+      "path": "licenses/regex-LICENSE-APACHE.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+    },
+    {
+      "path": "licenses/regex-LICENSE-MIT.txt",
+      "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+    }
+  ],
+  "windowsRuntimeVerified": false,
+  "signed": false
+}

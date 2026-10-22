@@ -1,0 +1,178 @@
+{
+  "date": "2026-10-17",
+  "inspection": "Independent 7-Zip extraction, PE parsing and current-source hash comparison",
+  "artifacts": [
+    {
+      "app": "xnook",
+      "version": "0.1.0",
+      "installer": "/Users/meteor/github/XNook/.build/windows-delivery-2026-10-17/XNook_0.1.0_x64-setup.exe",
+      "installerSha256": "323b9989e58ff2debcf40da2c06b4dc0e49ba143a1e7ee7e4f39615ce50e286d",
+      "bytes": 3246210,
+      "sourceInputsMatch": true,
+      "sourceDigest": "410d40a5f2712ead886e06ed85067f945fdce123ec8d21b58e42514c4067d034",
+      "peMachine": "AMD64",
+      "subsystem": "Windows GUI",
+      "mainBinaryMatchesBuildExceptBundleMarker": true,
+      "packagedMainSha256": "db36cf8ef802403f1564c973634276e5ab12505f16dab84cf1dd75738c835da7",
+      "windowsRuntimeVerified": false,
+      "payload": [
+        {
+          "path": "$PLUGINSDIR/LangDLL.dll",
+          "bytes": 5632,
+          "sha256": "3c8b2629048c118e4fcf80188cbcdaad3a668270e49fd95d2809feccc98fe220"
+        },
+        {
+          "path": "$PLUGINSDIR/NSISdl.dll",
+          "bytes": 15360,
+          "sha256": "d3e61c4df837625ac0503cea5b6765a04d37fc35399899a5503b53a3108bfbf6"
+        },
+        {
+          "path": "$PLUGINSDIR/StartMenu.dll",
+          "bytes": 7680,
+          "sha256": "39870682e7d1c026cd2b33ca25591db28250dde17de7eb1feec404222d534ffc"
+        },
+        {
+          "path": "$PLUGINSDIR/System.dll",
+          "bytes": 12288,
+          "sha256": "afe032f942e2ed0bf7494ec08ba813f5739fb522c640bde81d30ecaf9f894432"
+        },
+        {
+          "path": "$PLUGINSDIR/modern-wizard.bmp",
+          "bytes": 26494,
+          "sha256": "3ad2dc318056d0a2024af1804ea741146cfc18cc404649a44610cbf8b2056cf2"
+        },
+        {
+          "path": "$PLUGINSDIR/nsDialogs.dll",
+          "bytes": 9728,
+          "sha256": "9c76f4d53ceee2a471c936e0899688405e1009ce962d140e9acb49ed68d114cb"
+        },
+        {
+          "path": "$PLUGINSDIR/nsis_tauri_utils.dll",
+          "bytes": 34304,
+          "sha256": "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709"
+        },
+        {
+          "path": "THIRD-PARTY-NOTICES.md",
+          "bytes": 660,
+          "sha256": "f11e4d616e102117cd8c2a786147760b94f6587493add43d0197ba61187eff32"
+        },
+        {
+          "path": "licenses/ICAL.js-LICENSE.txt",
+          "bytes": 16725,
+          "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+        },
+        {
+          "path": "uninstall.exe",
+          "bytes": 81513,
+          "sha256": "4bf7c1d6ef85ee4c113c0df88e0700e85a36ea2bf48e9e3b223032c930db587e"
+        },
+        {
+          "path": "xnook.exe",
+          "bytes": 12990976,
+          "sha256": "db36cf8ef802403f1564c973634276e5ab12505f16dab84cf1dd75738c835da7"
+        }
+      ]
+    },
+    {
+      "app": "xisland",
+      "version": "0.1.4",
+      "installer": "/Users/meteor/github/XNook/.build/windows-delivery-2026-10-17/X Island_0.1.4_x64-setup.exe",
+      "installerSha256": "ca70227e3e32a5251e9da3f055d48274e439bb6f903f081c5d931bf55ce3c7a9",
+      "bytes": 26322409,
+      "sourceInputsMatch": true,
+      "sourceDigest": "8000802e6dd22e9820b631ad15995157ff300e6fcb91c432a8f41da2c2826f07",
+      "peMachine": "AMD64",
+      "subsystem": "Windows GUI",
+      "mainBinaryMatchesBuildExceptBundleMarker": true,
+      "packagedMainSha256": "bc73b898fd6f2fb31080d084bfab53ab3a1a2472b48d1df4c3aa69c797012003",
+      "windowsRuntimeVerified": false,
+      "payload": [
+        {
+          "path": "$PLUGINSDIR/LangDLL.dll",
+          "bytes": 5632,
+          "sha256": "3c8b2629048c118e4fcf80188cbcdaad3a668270e49fd95d2809feccc98fe220"
+        },
+        {
+          "path": "$PLUGINSDIR/NSISdl.dll",
+          "bytes": 15360,
+          "sha256": "d3e61c4df837625ac0503cea5b6765a04d37fc35399899a5503b53a3108bfbf6"
+        },
+        {
+          "path": "$PLUGINSDIR/StartMenu.dll",
+          "bytes": 7680,
+          "sha256": "39870682e7d1c026cd2b33ca25591db28250dde17de7eb1feec404222d534ffc"
+        },
+        {
+          "path": "$PLUGINSDIR/System.dll",
+          "bytes": 12288,
+          "sha256": "afe032f942e2ed0bf7494ec08ba813f5739fb522c640bde81d30ecaf9f894432"
+        },
+        {
+          "path": "$PLUGINSDIR/modern-wizard.bmp",
+          "bytes": 26494,
+          "sha256": "3ad2dc318056d0a2024af1804ea741146cfc18cc404649a44610cbf8b2056cf2"
+        },
+        {
+          "path": "$PLUGINSDIR/nsDialogs.dll",
+          "bytes": 9728,
+          "sha256": "9c76f4d53ceee2a471c936e0899688405e1009ce962d140e9acb49ed68d114cb"
+        },
+        {
+          "path": "$PLUGINSDIR/nsis_tauri_utils.dll",
+          "bytes": 34304,
+          "sha256": "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709"
+        },
+        {
+          "path": "resources/LICENSE-XIsland.txt",
+          "bytes": 2853,
+          "sha256": "d2cc6f0f8571ecf7d5407f2dc0b0a9b95c0221c95b2c547eb69b965f27a3d83b"
+        },
+        {
+          "path": "resources/LICENSE-node.txt",
+          "bytes": 157609,
+          "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"
+        },
+        {
+          "path": "resources/README.txt",
+          "bytes": 446,
+          "sha256": "af8a64af46abf1ed70ea8537980e76292381cb9e1a363673cd8aebe8e1362983"
+        },
+        {
+          "path": "resources/node-runtime.json",
+          "bytes": 335,
+          "sha256": "0ad125c17c4946d30b3ac19d4819a3b0fa718e1a7670a58f0b8719b34d38f4fe"
+        },
+        {
+          "path": "resources/node.exe",
+          "bytes": 93580104,
+          "sha256": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32"
+        },
+        {
+          "path": "resources/xisland-bridge.exe",
+          "bytes": 745472,
+          "sha256": "7a0e31f836e3c47e0e3dd2ae8a305f700658fed10edfa99e8d5fece7bc8e8f7b"
+        },
+        {
+          "path": "resources/xisland-hook.cjs",
+          "bytes": 98088,
+          "sha256": "7a75ca1b45f569126d84d90f64e55ac0ff55db769be71c98fb70bdb9b9c0f169"
+        },
+        {
+          "path": "uninstall.exe",
+          "bytes": 81768,
+          "sha256": "e78c80795ab299fc08f312e9efc0ea375026b3863882d9f22b790cbb60332da3"
+        },
+        {
+          "path": "xisland-bridge.exe",
+          "bytes": 869888,
+          "sha256": "f9c807886d2aabddea0b402e8091dba550fb51fd48c252c08d62dfe0856cc03b"
+        },
+        {
+          "path": "xisland.exe",
+          "bytes": 10419712,
+          "sha256": "bc73b898fd6f2fb31080d084bfab53ab3a1a2472b48d1df4c3aa69c797012003"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "version": "1.3.19",
+  "preparedAt": "2026-10-22T22:21:24.677139+08:00",
+  "sourceCommit": "217b353ff97f8a8132e92ccf1915aa92f7343f91",
+  "previousRelease": "v1.3.18",
+  "localImplementationReference": "6d1c8a68daf592407e0e1965b382d7e8d507986b",
+  "integrationStrategy": "Narrow port of task web links and safe editing onto v1.3.18; not a merge of the development branch",
+  "build": {
+    "configuration": "release",
+    "succeeded": true,
+    "command": "XNOOK_BUILD_DMG=1 bash build-app.sh"
+  },
+  "artifact": {
+    "version": "1.3.19",
+    "build": "1.3.19",
+    "bundleIdentifier": "com.meteorkid.xnook",
+    "minimumOS": "14.0",
+    "architecture": "arm64",
+    "dmgSHA256": "06896d7a3decb8bb4ae1b76701e7fa324e66ea44ffcfbae4b1af854b829a6de9",
+    "dmgSizeBytes": 3866557,
+    "executableSHA256": "5bca4900e865cf8e341a906ba9027670be7fedc8d1b3b2a9a701fb26440d9f7e",
+    "appSignatureVerified": true,
+    "dmgIntegrityVerified": true,
+    "dmgContainedAppSignatureVerified": true,
+    "appContentsMatchDMG": true,
+    "signing": "ad-hoc",
+    "notarized": false
+  },
+  "tests": {
+    "passed": 256,
+    "failed": 0,
+    "skipped": 0,
+    "fullSuiteExecuted": true,
+    "command": "XNOOK_RENDER_UI=1 swift test",
+    "taskLinkCases": 38,
+    "sessionCases": 19,
+    "nativeRenderingAndPresentationCases": 4,
+    "uiPNGs": 32,
+    "integrationDefaultsIsolated": true
+  },
+  "sourceInputs": {
+    "count": 74,
+    "manifestSHA256": "ac440ad2c8a8abf17f988f38cf118c1c2260fb99a4159abe2398ac7832c8572c",
+    "manifestMatchesBuiltSource": true,
+    "manifest": "source-hashes-1.3.19.json"
+  },
+  "unchangedHandoffCore": [
+    "Sources/XNook/App/AppDelegate.swift",
+    "Sources/XNook/Core/NotchWindow.swift",
+    "Sources/XNook/Core/AppSwitcher.swift"
+  ],
+  "releasePreparation": {
+    "performedInIsolatedWorktree": true,
+    "unrelatedUncommittedFeaturesIncluded": false,
+    "installedDuringPreparation": false
+  },
+  "notVerified": [
+    "Apple Developer ID signing and notarization",
+    "Fresh installation or upgrade of the final DMG",
+    "Native keyboard and VoiceOver with the installed release",
+    "Native popover recovery after explicit island handoff while editing",
+    "External monitor, Space and sleep/wake acceptance for the new UI",
+    "Intel and Windows runtime"
+  ],
+  "recommendedPeerVersion": "XIsland 2.0.4"
+}

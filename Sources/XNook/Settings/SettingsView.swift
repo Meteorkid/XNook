@@ -205,7 +205,7 @@ struct SettingsView: View {
                     dividerLine
                     settingRow(L10n.expandedInactivityHide, id: "expandedInactivity",
                               description: L10n.expandedInactivityHideDesc) {
-                        AppStorageSlider(key: "expandedInactivityAutoHideDelay", range: 0...600, format: "%.2fs")
+                        AppStorageSlider(key: "expandedInactivityAutoHideDelay", range: 0.1...600, format: "%.2fs")
                     }
                     dividerLine
                     settingRow(L10n.hoverExitCollapseDelay, id: "hoverExit",
@@ -833,8 +833,10 @@ struct SettingsView: View {
 
 // MARK: - 预览
 
+#if !XNOOK_DISABLE_PREVIEWS
 #Preview {
     SettingsView()
         .environment(ThemeManager())
         .environment(UpdateManager())
 }
+#endif

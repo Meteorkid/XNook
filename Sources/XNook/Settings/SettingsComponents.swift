@@ -248,6 +248,8 @@ struct LaunchAtLoginToggle: View {
 struct GifPickerButton: View {
     @State private var gifList: [String] = UserDefaults.standard.stringArray(forKey: "customGifList") ?? []
     @State private var selectedGif: String = UserDefaults.standard.string(forKey: "selectedGifName") ?? ""
+    @State private var failureMessage: String?
+    @State private var isLoading = false
 
     private var gifsDirectory: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
@@ -265,9 +267,7 @@ struct GifPickerButton: View {
                                 name: name,
                                 isSelected: name == selectedGif,
                                 onSelect: {
-                                    selectedGif = name
-                                    UserDefaults.standard.set(name, forKey: "selectedGifName")
-                                    NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+                                    Task { await selectGif(name: name) }
                                 },
                                 onDelete: {
                                     deleteGif(name: name)
@@ -288,46 +288,92 @@ struct GifPickerButton: View {
                 panel.canChooseDirectories = false
 
                 if panel.runModal() == .OK {
-                    for url in panel.urls {
-                        addGif(from: url)
+                    let urls = panel.urls
+                    Task { @MainActor in
+                        isLoading = true
+                        failureMessage = nil
+                        defer { isLoading = false }
+                        for url in urls {
+                            await addGif(from: url)
+                        }
                     }
                 }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+
+            if let failureMessage {
+                Text(failureMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .disabled(isLoading)
+        .onReceive(NotificationCenter.default.publisher(for: GifResource.loadFailureNotification)) { notification in
+            failureMessage = notification.userInfo?["message"] as? String
+        }
+        .task {
+            // 启动时已拒绝的旧文件也在打开设置后给出原因，不需再次点击。
+            do {
+                let selectedName = UserDefaults.standard.string(forKey: "selectedGifName")
+                let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                let bookmarkData = UserDefaults.standard.data(forKey: "customGifBookmark")
+                _ = try await Task.detached(priority: .utility) {
+                    try GifResource.selectedData(selectedName: selectedName, appSupport: appSupport, bookmarkData: bookmarkData)
+                }.value
+            } catch {
+                failureMessage = L10n.gifLoadFailed(selectedGif.isEmpty ? "GIF" : selectedGif, reason: error.localizedDescription)
+            }
         }
     }
 
-    private func addGif(from url: URL) {
-        guard let data = try? Data(contentsOf: url) else { return }
+    @MainActor
+    private func selectGif(name: String) async {
+        guard !isLoading, let dir = gifsDirectory else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let url = dir.appendingPathComponent(name)
+            _ = try await Task.detached(priority: .userInitiated) { try GifResource(contentsOf: url).data }.value
+            selectedGif = name
+            UserDefaults.standard.set(name, forKey: "selectedGifName")
+            failureMessage = nil
+            NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+        } catch {
+            failureMessage = L10n.gifLoadFailed(name, reason: error.localizedDescription)
+        }
+    }
+
+    @MainActor
+    private func addGif(from url: URL) async {
         guard let dir = gifsDirectory else { return }
 
         do {
+            let data = try await Task.detached(priority: .userInitiated) {
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                return try GifResource(contentsOf: url).data
+            }.value
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch { return }
-
-        // 生成唯一文件名（避免重名覆盖）
-        let baseName = url.lastPathComponent.replacingOccurrences(of: ".gif", with: "")
-        var fileName = "\(baseName).gif"
-        var counter = 1
-        while gifList.contains(fileName) {
-            fileName = "\(baseName)_\(counter).gif"
-            counter += 1
-        }
-
-        let gifURL = dir.appendingPathComponent(fileName)
-        do {
-            try data.write(to: gifURL)
-        } catch { return }
-
-        gifList.append(fileName)
-        UserDefaults.standard.set(gifList, forKey: "customGifList")
-
-        // 如果是第一个 GIF，自动选中
-        if selectedGif.isEmpty {
-            selectedGif = fileName
-            UserDefaults.standard.set(fileName, forKey: "selectedGifName")
-            NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+            // 验证后的同一份字节才允许复制及自动选中。
+            let baseName = url.deletingPathExtension().lastPathComponent
+            var fileName = "\(baseName).gif"
+            var counter = 1
+            while gifList.contains(fileName) || FileManager.default.fileExists(atPath: dir.appendingPathComponent(fileName).path) {
+                fileName = "\(baseName)_\(counter).gif"
+                counter += 1
+            }
+            try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+            gifList.append(fileName)
+            UserDefaults.standard.set(gifList, forKey: "customGifList")
+            if selectedGif.isEmpty {
+                selectedGif = fileName
+                UserDefaults.standard.set(fileName, forKey: "selectedGifName")
+                NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+            }
+        } catch {
+            failureMessage = L10n.gifLoadFailed(url.lastPathComponent, reason: error.localizedDescription)
         }
     }
 
@@ -340,9 +386,12 @@ struct GifPickerButton: View {
         UserDefaults.standard.set(gifList, forKey: "customGifList")
 
         if selectedGif == name {
-            selectedGif = gifList.first ?? ""
+            selectedGif = ""
             UserDefaults.standard.set(selectedGif, forKey: "selectedGifName")
             NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+            if let nextName = gifList.first {
+                Task { await selectGif(name: nextName) }
+            }
         }
     }
 }
@@ -356,6 +405,7 @@ struct GifThumbnailView: View {
     let onDelete: () -> Void
 
     @State private var thumbnail: NSImage?
+    @State private var loadError: String?
 
     private var gifsDirectory: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
@@ -380,7 +430,7 @@ struct GifThumbnailView: View {
                         .fill(Color.secondary.opacity(0.2))
                         .frame(width: 50, height: 50)
                         .overlay(
-                            Image(systemName: "film")
+                            Image(systemName: loadError == nil ? "film" : "exclamationmark.triangle")
                                 .foregroundColor(.secondary)
                         )
                 }
@@ -396,16 +446,27 @@ struct GifThumbnailView: View {
             }
         }
         .buttonStyle(.plain)
-        .onAppear { loadThumbnail() }
+        .help(loadError ?? name)
+        .accessibilityLabel(loadError == nil ? name : "\(name): \(L10n.gifUnavailable)")
+        .task(id: name) { await loadThumbnail() }
     }
 
-    private func loadThumbnail() {
+    @MainActor
+    private func loadThumbnail() async {
         guard let dir = gifsDirectory else { return }
         let gifURL = dir.appendingPathComponent(name)
-
-        guard let source = CGImageSourceCreateWithURL(gifURL as CFURL, nil) else { return }
-        guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
-        thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: 50, height: 50))
+        do {
+            let image = try await Task.detached(priority: .utility) {
+                try GifResource(contentsOf: gifURL).thumbnail()
+            }.value
+            guard !Task.isCancelled else { return }
+            thumbnail = NSImage(cgImage: image, size: NSSize(width: 50, height: 50))
+            loadError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            thumbnail = nil
+            loadError = error.localizedDescription
+        }
     }
 }
 

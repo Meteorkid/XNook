@@ -15,8 +15,10 @@ struct ThemePickerView: View {
     }
 }
 
+#if !XNOOK_DISABLE_PREVIEWS
 #Preview {
     ThemePickerView()
         .environment(ThemeManager())
         .padding()
 }
+#endif

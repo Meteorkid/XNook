@@ -10,19 +10,27 @@ enum IslandState: Equatable {
 /// Notch 主内容视图 - 与 X Island 保持一致的灵动岛风格
 struct NotchContentView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var mediaManager = MediaManager()
     @State private var calendarManager = CalendarManager()
     @State private var notesManager = NotesManager()
     @State private var trayManager = TrayManager()
     @State private var focusSessionManager = FocusSessionManager()
+    /// 网页链接面板展开期间不得自动收起，否则编辑中的内容会丢失。
     @State private var isTaskLinksPresented = false
 
     @State private var state: IslandState = .collapsed
     @State private var showContent = false
     @State private var cachedExpandedShapeHeight: CGFloat = 220
     @State private var selectedWidget: WidgetType?
+    @State private var enabledWidgets = WidgetType.enabledWidgets
+    @State private var measuredExpandedHeight: CGFloat?
+    @State private var availablePanelSize = CGSize(width: 1600, height: 900)
+    @State private var isPanelInteractionActive = false
     @State private var hoverTimer: Timer?
     @State private var hoverPollingFast = false
+    @State private var autoHideController = ExpandedAutoHideController()
+    @State private var isWindowVisible = false
     @State private var lastCollapseAt: Date = .distantPast
     @State private var collapseAnimating = false
     @State private var collapseGeneration = 0
@@ -76,12 +84,14 @@ struct NotchContentView: View {
     @AppStorage("hoverExitCollapseDelay") private var hoverExitCollapseDelay = SettingsDefaults.double(for: "hoverExitCollapseDelay")
     @AppStorage("hoverToExpandPanel") private var hoverToExpandPanel = SettingsDefaults.bool(for: "hoverToExpandPanel")
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
+    private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
     @AppStorage("showTickerLine") private var showTickerLine = SettingsDefaults.bool(for: "showTickerLine", fallback: true)
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
     @AppStorage("tickerSpeed") private var tickerSpeed = SettingsDefaults.double(for: "tickerSpeed")
     @AppStorage("showNookFlowHistory") private var showNookFlowHistory = SettingsDefaults.bool(for: "showNookFlowHistory", fallback: true)
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
     @State private var cachedGifData: Data?
+    @State private var gifLoadGeneration = 0
     @State private var islandObscuredByNotch = false
 
     private var onSizeChange: ((CGFloat, CGFloat) -> Void)?
@@ -102,6 +112,15 @@ struct NotchContentView: View {
             case .calendar: return L10n.widgetCalendar
             case .notes: return L10n.widgetNotes
             case .tray: return L10n.widgetTray
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .media: return "play.fill"
+            case .calendar: return "calendar"
+            case .notes: return "note.text"
+            case .tray: return "tray.full"
             }
         }
 
@@ -140,44 +159,23 @@ struct NotchContentView: View {
 
     private var isExpanded: Bool { state == .expanded }
 
-    /// NookFlow 区域是否应显示（有活跃会话，或用户开启了最近任务且存在历史记录）
-    private var isFocusSessionVisible: Bool {
-        isTaskLinksPresented || focusSessionManager.storageError != nil
-            || focusSessionManager.activeSession != nil
-            || (showNookFlowHistory && !focusSessionManager.history.isEmpty)
+    private var effectivePanelWidth: CGFloat {
+        min(max(160, panelWidth), availablePanelSize.width)
     }
-
-    private var visibleHistoryRecordCount: Int {
-        min(
-            focusSessionManager.history.count,
-            FocusSessionView.sanitizedHistoryDisplayLimit(nookFlowHistoryDisplayLimit)
-        )
-    }
-
-    /// NookFlow 区域集中计算的高度来源 — expandedHeight / targetSize / cachedExpandedShapeHeight 统一使用
-    /// 活跃会话：卡片高度；仅历史记录：按可见任务行数计算列表高度；否则 0
-    private var focusSessionCardHeight: CGFloat {
-        guard isFocusSessionVisible else { return 0 }
-        let contentHeight = focusSessionManager.activeSession != nil
-            ? Self.activeSessionCardHeight
-            : (focusSessionManager.history.isEmpty ? 0 : FocusSessionView.historyListHeight(for: visibleHistoryRecordCount))
-        return contentHeight + (focusSessionManager.storageError == nil ? 0 : FocusSessionView.storageIssueHeight)
-    }
-
-    /// 活跃任务卡片估计高度
-    private static let activeSessionCardHeight: CGFloat = 96
 
     private var expandedWidth: CGFloat {
-        IslandSizeCalculator.expandedWidth(for: state, panelWidth: panelWidth)
+        isExpanded ? effectivePanelWidth : 0
+    }
+
+    private var naturalExpandedHeight: CGFloat {
+        ExpandedPanelLayout.height(
+            measuredContentHeight: measuredExpandedHeight,
+            maximumHeight: min(panelBaseHeight > 0 ? panelBaseHeight : SettingsDefaults.double(for: "panelBaseHeight"), availablePanelSize.height)
+        )
     }
 
     private var expandedHeight: CGFloat {
-        IslandSizeCalculator.expandedHeight(
-            for: state,
-            visibleSessionCount: WidgetType.enabledWidgets.count,
-            focusSessionCardHeight: focusSessionCardHeight,
-            panelBaseHeight: panelBaseHeight
-        )
+        isExpanded ? naturalExpandedHeight : collapsedShapeHeight
     }
 
     private var contentWidth: CGFloat {
@@ -273,19 +271,21 @@ struct NotchContentView: View {
             .frame(width: shapeWidth, height: shapeHeight)
 
             // 展开内容
-            expandedContent
-                .frame(width: expandedWidth > 0 ? expandedWidth : panelWidth,
+            if isExpanded || expandPending || collapseAnimating {
+                expandedContent
+                .frame(width: effectivePanelWidth,
                        height: isExpanded ? expandedHeight : 0, alignment: .top)
                 .clipped()
                 .opacity(showContent ? 1 : 0)
                 .allowsHitTesting(showContent)
                 .zIndex(1)
+            }
 
             // 收起状态内容
             ZStack(alignment: .top) {
                 CollapsedPillView(
                     isExpanded: isExpanded,
-                    isPlaying: mediaManager.isPlaying,
+                    isPlaying: mediaManager.isPlaying && isWindowVisible && !isExpanded && !expandPending && !collapseAnimating && !shouldReduceMotion,
                     albumArt: mediaManager.currentArtwork,
                     albumArtData: mediaManager.currentArtworkData,
                     artworkVersion: mediaManager.artworkVersion,
@@ -322,7 +322,8 @@ struct NotchContentView: View {
                         text: tickerText,
                         font: .system(size: 10, weight: .medium),
                         availableWidth: shapeWidth - 28,
-                        speed: tickerSpeed
+                        speed: tickerSpeed,
+                        isAnimated: isWindowVisible && !shouldReduceMotion
                     )
                     .foregroundColor(IslandStyle.tertiaryText(for: colorScheme))
                     .frame(width: shapeWidth, height: tickerLineHeight)
@@ -332,7 +333,7 @@ struct NotchContentView: View {
                     // 测量才恢复，反而在换行瞬间抖一下；且 0.25s 过渡期内新旧两个
                     // TimelineView(.animation) 会同时逐帧渲染。
                     // 滚动位置的重置由 MarqueeText 自身的 onChange(of: text) 负责。
-                    .animation(Self.tickerTextTransition, value: tickerText)
+                    .animation(shouldReduceMotion ? nil : Self.tickerTextTransition, value: tickerText)
                 }
             }
             .frame(width: shapeWidth, height: collapsedTotalHeight)
@@ -358,12 +359,31 @@ struct NotchContentView: View {
             cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, newHeight)
             onSizeChange?(expandedWidth, newHeight)
         }
+        .onChange(of: effectivePanelWidth) { _, newWidth in
+            measuredExpandedHeight = nil
+            if isExpanded { onSizeChange?(newWidth, naturalExpandedHeight) }
+        }
+        .onChange(of: selectedWidget) { _, newWidget in
+            measuredExpandedHeight = nil
+            if newWidget != .notes, notesManager.isEditing {
+                if !notesManager.closeEditor() { selectedWidget = .notes }
+            }
+        }
+        .onChange(of: notesManager.isEditing) { _, editing in
+            if editing { selectedWidget = .notes }
+        }
+        .onChange(of: shouldReduceMotion) { _, enabled in
+            if enabled { resetHoverEffects() }
+        }
         .onChange(of: state) { _, newState in
             if newState == .collapsed {
                 cancelExpandedAutoHide()
             } else {
                 scheduleExpandedAutoHide()
             }
+        }
+        .onChange(of: expandedInactivityAutoHideDelay) { _, _ in
+            scheduleExpandedAutoHide()
         }
         .onChange(of: showTicker) { _, newValue in
             guard !isExpanded, !collapseAnimating else { return }
@@ -379,6 +399,8 @@ struct NotchContentView: View {
             }
         }
         .onAppear {
+            AppDelegate.shared?.notesManagerForTermination = notesManager
+            enabledWidgets = WidgetType.enabledWidgets
             // 缓存 NotchWindow 引用，后续直接使用
             notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
 
@@ -391,6 +413,8 @@ struct NotchContentView: View {
                         notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
                         if let window = notchWindow {
                             islandObscuredByNotch = window.isObscuredByPhysicalNotch()
+                            availablePanelSize = window.maximumExpandedContentSize()
+                            installKeyboardHandler(on: window)
                         }
                     }
                 }
@@ -399,6 +423,9 @@ struct NotchContentView: View {
             // 检查是否被物理 Notch 遮挡
             if let window = notchWindow {
                 islandObscuredByNotch = window.isObscuredByPhysicalNotch()
+                isWindowVisible = window.isVisible && window.occlusionState.contains(.visible)
+                availablePanelSize = window.maximumExpandedContentSize()
+                installKeyboardHandler(on: window)
             }
 
             // 初始化窗口大小为收起状态（含 Ticker 高度）
@@ -407,11 +434,7 @@ struct NotchContentView: View {
             onSizeChange?(targetWidth, targetHeight)
 
             if isExpanded {
-                cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
-                    visibleSessionCount: WidgetType.enabledWidgets.count,
-                    focusSessionCardHeight: focusSessionCardHeight,
-                    panelBaseHeight: panelBaseHeight
-                )
+                cachedExpandedShapeHeight = naturalExpandedHeight
             }
             startHoverPolling()
             loadGifData()
@@ -422,8 +445,18 @@ struct NotchContentView: View {
                 object: nil,
                 queue: .main
             ) { _ in
-                NSCursor.arrow.set()
+                MainActor.assumeIsolated {
+                    notesManager.flushPendingChanges()
+                    NSCursor.arrow.set()
+                }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { notification in
+            guard let window = notification.object as? NotchWindow,
+                  window === resolveNotchWindow() else { return }
+            isWindowVisible = window.isVisible && window.occlusionState.contains(.visible)
+            if !isWindowVisible { resetHoverEffects() }
+            scheduleExpandedAutoHide()
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookScrollDown)) { _ in
             // 双指下滑展开面板（由 scrollDownToExpandPanel 开关控制）
@@ -434,9 +467,16 @@ struct NotchContentView: View {
             expand(to: .expanded)
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookCollapse)) { _ in
+            // 切换到另一个岛时必须收起，即使在编辑网页链接。
             collapse(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let widgets = WidgetType.enabledWidgets
+            if widgets != enabledWidgets {
+                enabledWidgets = widgets
+                if let selectedWidget, !widgets.contains(selectedWidget) { self.selectedWidget = nil }
+                measuredExpandedHeight = nil
+            }
             // UserDefaults 变更时更新窗口大小
             if state == .collapsed {
                 let h = showTicker ? collapsedShapeHeight + tickerLineHeight + 4 : collapsedShapeHeight
@@ -448,8 +488,14 @@ struct NotchContentView: View {
             loadGifData()
         }
         .onDisappear {
+            collapseGeneration += 1
+            expandPending = false
             stopHoverPolling()
             cancelExpandedAutoHide()
+            resetHoverEffects()
+            notesManager.flushPendingChanges()
+            isWindowVisible = false
+            notchWindow?.keyEquivalentHandler = nil
             if let observer = terminateObserver {
                 NotificationCenter.default.removeObserver(observer)
                 terminateObserver = nil
@@ -462,6 +508,7 @@ struct NotchContentView: View {
     private func expand(to newState: IslandState) {
         guard !expandPending else { return }
         collapseGeneration += 1
+        let generation = collapseGeneration
         collapseAnimating = false
         expandPending = true
         expandedAt = Date()
@@ -470,6 +517,7 @@ struct NotchContentView: View {
         // 同步状态到窗口层
         if let window = notchWindow {
             window.islandState = newState
+            if !expandedByHover { window.makeKey() }
         }
 
         // 展开时恢复光标和果冻状态
@@ -483,18 +531,14 @@ struct NotchContentView: View {
 
         let target = targetSize(for: newState)
         if case .expanded = newState {
-            cachedExpandedShapeHeight = IslandSizeCalculator.expandedPanelShapeHeight(
-                visibleSessionCount: WidgetType.enabledWidgets.count,
-                focusSessionCardHeight: focusSessionCardHeight,
-                panelBaseHeight: panelBaseHeight
-            )
+            cachedExpandedShapeHeight = naturalExpandedHeight
         }
 
         // 1. 窗口立即调整到目标大小（无动画）
         onSizeChange?(target.width, target.height)
 
         let runExpansion = {
-            if self.reduceMotion {
+            if self.shouldReduceMotion {
                 self.state = newState
                 self.showContent = true
             } else {
@@ -512,16 +556,22 @@ struct NotchContentView: View {
 
         // 等 0.05s 让窗口先就位，再开始形状动画
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard generation == self.collapseGeneration, self.expandPending else { return }
             runExpansion()
         }
     }
 
+    /// 链接面板打开时只允许强制收起（例如切换应用），避免自动收起丢掉正在编辑的内容。
     static func allowsCollapse(isTaskLinksPresented: Bool, forced: Bool) -> Bool {
         forced || !isTaskLinksPresented
     }
 
     private func collapse(force: Bool = false) {
         guard Self.allowsCollapse(isTaskLinksPresented: isTaskLinksPresented, forced: force) else { return }
+        expandPending = false
+        expandedByHover = false
+        cancelExpandedAutoHide()
+        notesManager.flushPendingChanges()
         collapseGeneration += 1
         let generation = collapseGeneration
         lastCollapseAt = Date()
@@ -537,7 +587,7 @@ struct NotchContentView: View {
         }
 
         // 1. 形状动画收起
-        if reduceMotion {
+        if shouldReduceMotion {
             showContent = false
             state = .collapsed
         } else {
@@ -563,23 +613,15 @@ struct NotchContentView: View {
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (shouldReduceMotion ? 0 : 0.45)) {
             finishCollapse()
         }
     }
 
     private func targetSize(for state: IslandState) -> (width: CGFloat, height: CGFloat) {
-        // 收起状态传 0（无会话），展开状态传 widget 数量
-        let sessionCount = state == .expanded ? WidgetType.enabledWidgets.count : 0
-        // NookFlow 区域高度仅在展开时纳入
-        let cardHeight = state == .expanded ? focusSessionCardHeight : 0
-        return IslandSizeCalculator.targetSize(
-            for: state,
-            visibleSessionCount: sessionCount,
-            panelWidth: panelWidth,
-            focusSessionCardHeight: cardHeight,
-            panelBaseHeight: panelBaseHeight
-        )
+        state == .expanded
+            ? (effectivePanelWidth, naturalExpandedHeight)
+            : (pillWidth, collapsedTotalHeight)
     }
 
     // MARK: - 鼠标悬停检测
@@ -588,6 +630,8 @@ struct NotchContentView: View {
     private static let hoverPollIntervalSlow: TimeInterval = 0.25
     /// 高频轮询间隔（鼠标靠近时），保证吸附和果冻动画流畅
     private static let hoverPollIntervalFast: TimeInterval = 0.016
+    /// 自动收起的最小延迟；低于此值 ExpandedAutoHideController 不调度收起
+    private static let minimumAutoHideDelay: TimeInterval = 0.1
     /// 鼠标接近判定距离（屏幕宽度的一定比例）
     private static let hoverProximityRange: CGFloat = 300
 
@@ -670,6 +714,21 @@ struct NotchContentView: View {
         hoverTimer = nil
     }
 
+    /// 窗口隐藏后不再进入悬停分支，因此必须主动配对释放透明光标。
+    private func resetHoverEffects() {
+        guard isHoveringPill || jellyTrigger || jellySettled
+                || magneticOffset != .zero || wasPointerInsidePillHitFrame else { return }
+        if isHoveringPill {
+            Self.invisibleCursor.pop()
+            isHoveringPill = false
+        }
+        jellyGeneration += 1
+        jellyTrigger = false
+        jellySettled = false
+        magneticOffset = .zero
+        wasPointerInsidePillHitFrame = false
+    }
+
     private func resolveNotchWindow() -> NotchWindow? {
         if let appDelegateWindow = AppDelegate.shared?.notchWindow {
             if notchWindow !== appDelegateWindow {
@@ -707,6 +766,16 @@ struct NotchContentView: View {
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
             return
         }
+        let visible = window.isVisible && window.occlusionState.contains(.visible)
+        let panelSize = window.maximumExpandedContentSize()
+        if availablePanelSize != panelSize { availablePanelSize = panelSize }
+        if isWindowVisible != visible { isWindowVisible = visible }
+        guard visible else {
+            cancelExpandedAutoHide()
+            resetHoverEffects()
+            scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
+            return
+        }
         guard !window.isDragging else {
             scheduleHoverPoll(interval: Self.hoverPollIntervalFast)
             return
@@ -731,7 +800,7 @@ struct NotchContentView: View {
         if collapseAnimating { inside = false }
 
         // 检测鼠标从下方进入药丸（仅收起状态且无动画时）
-        if Self.shouldTriggerHoverJelly(
+        if !shouldReduceMotion && Self.shouldTriggerHoverJelly(
             isPointerInside: inside,
             wasPointerInside: wasInside,
             isExpanded: isExpanded,
@@ -769,11 +838,13 @@ struct NotchContentView: View {
             }
         }
 
-        previousMouseY = mouse.y
-        wasPointerInsidePillHitFrame = inside
+        // @State 的 setter 不做值相等判别，写一次就使视图失效一次。本函数最快以 0.016s
+        // 被调用，无条件写入会让展开后的面板持续全树重算，必须仅在值变化时写入。
+        if previousMouseY != mouse.y { previousMouseY = mouse.y }
+        if wasPointerInsidePillHitFrame != inside { wasPointerInsidePillHitFrame = inside }
 
         // 吸附效果：鼠标靠近药丸时水平偏移
-        if !isExpanded, !collapseAnimating {
+        if !shouldReduceMotion, !isExpanded, !collapseAnimating {
             let pillCenterX = window.frame.midX
             let pillCenterY = window.frame.minY + collapsedShapeHeight / 2
             let dx = mouse.x - pillCenterX
@@ -800,10 +871,8 @@ struct NotchContentView: View {
             magneticOffset = .zero
         }
 
-        // 鼠标在展开面板内时，重置自动隐藏计时器
-        if inside && isExpanded {
-            scheduleExpandedAutoHide()
-        }
+        // 指针进入时取消等待；离开后仅启动一次，重复轮询保持原倒计时。
+        scheduleExpandedAutoHide()
 
         if Self.shouldExpandForHover(
             isPointerInside: inside,
@@ -815,7 +884,7 @@ struct NotchContentView: View {
             expandedByHover = true
             expandedAt = Date()
             expand(to: .expanded)
-        } else if !inside && isExpanded && expandedByHover && !isTaskLinksPresented {
+        } else if !inside && isExpanded && expandedByHover && !shouldKeepPanelOpen(window) {
             // 鼠标移出展开面板时收起
             let elapsed = Date().timeIntervalSince(expandedAt)
             if elapsed > hoverExitCollapseDelay {
@@ -835,145 +904,134 @@ struct NotchContentView: View {
 
     // MARK: - 自动隐藏
 
-    @State private var autoHideGeneration = 0
-
     private func cancelExpandedAutoHide() {
-        autoHideGeneration += 1
+        autoHideController.cancel()
+    }
+
+    private func shouldKeepPanelOpen(_ window: NotchWindow) -> Bool {
+        notesManager.isEditing || isPanelInteractionActive || isTaskLinksPresented || window.isDragging
+            || window.attachedSheet != nil
+            || (window.childWindows?.contains(where: \.isVisible) ?? false)
+            || (window.isKeyWindow && window.firstResponder is NSTextView)
+            || RunLoop.current.currentMode == .eventTracking
+    }
+
+    private func installKeyboardHandler(on window: NotchWindow) {
+        window.keyEquivalentHandler = { event in
+            guard isExpanded, let action = PanelKeyboardAction.resolve(
+                characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags
+            ) else { return false }
+            guard !event.isARepeat else { return true }
+            switch action {
+            case .overview:
+                selectedWidget = nil
+            case .tool(let index):
+                let widget = WidgetType.allCases[index]
+                guard enabledWidgets.contains(widget) else { return false }
+                selectedWidget = widget
+            case .newNote:
+                selectedWidget = .notes
+                notesManager.createNote()
+            case .saveNote:
+                guard selectedWidget == .notes, notesManager.isEditing else { return false }
+                notesManager.flushPendingChanges()
+            }
+            return true
+        }
     }
 
     private func scheduleExpandedAutoHide() {
-        cancelExpandedAutoHide()
-        guard !isTaskLinksPresented else { return }
-        let delay = UserDefaults.standard.double(forKey: "expandedInactivityAutoHideDelay")
-        guard delay > 0 else { return }
-
-        let gen = autoHideGeneration
-        Task {
-            try? await Task.sleep(for: .seconds(delay))
-            guard autoHideGeneration == gen, isExpanded else { return }
-            if let window = resolveNotchWindow() {
-                if Self.shouldDeferExpandedAutoHide(
-                    mouseLocation: NSEvent.mouseLocation,
-                    windowFrame: window.frame,
-                    screenFrame: window.screen?.visibleFrame
-                ) {
-                    scheduleExpandedAutoHide()
-                    return
-                }
-            }
+        guard let window = resolveNotchWindow() else {
+            cancelExpandedAutoHide()
+            return
+        }
+        let shouldDefer = shouldKeepPanelOpen(window) || Self.shouldDeferExpandedAutoHide(
+            mouseLocation: NSEvent.mouseLocation,
+            windowFrame: window.frame,
+            screenFrame: window.screen?.visibleFrame
+        )
+        autoHideController.update(
+            isExpanded: isExpanded && isWindowVisible,
+            shouldDefer: shouldDefer,
+            // 0 或负值会让自动收起永不触发，面板会一直悬停；旧配置里可能残留 0，在此兜底。
+            delay: max(Self.minimumAutoHideDelay, expandedInactivityAutoHideDelay)
+        ) {
+            // 等待结束时重新检查，避免指针已进入但下一次轮询尚未执行。
+            guard isExpanded, isWindowVisible, !shouldKeepPanelOpen(window) else { return }
+            guard !Self.shouldDeferExpandedAutoHide(
+                mouseLocation: NSEvent.mouseLocation,
+                windowFrame: window.frame,
+                screenFrame: window.screen?.visibleFrame
+            ) else { return }
             collapse()
         }
     }
 
-    // MARK: - 展开内容（多 Widget 并排布局）
+    // MARK: - 展开面板
 
     private var expandedContent: some View {
-        VStack(spacing: 0) {
-            // 顶部栏
-            HStack(spacing: 8) {
-                // 应用标识（左侧）
-                HStack(spacing: 4) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(IslandStyle.accent(for: colorScheme))
-                    Text("Nook")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(IslandStyle.primaryText)
+        ExpandedPanelView(
+            selectedWidget: $selectedWidget,
+            calendarRecenterTrigger: $calendarRecenterTrigger,
+            enabledWidgets: enabledWidgets,
+            panelWidth: effectivePanelWidth,
+            mediaManager: mediaManager,
+            calendarManager: calendarManager,
+            notesManager: notesManager,
+            trayManager: trayManager,
+            focusSessionManager: focusSessionManager,
+            showHistory: showNookFlowHistory,
+            historyDisplayLimit: nookFlowHistoryDisplayLimit,
+            onCreateLinkedNote: createLinkedNote,
+            onLinkTrayFiles: linkTrayFiles,
+            onEndSession: endFocusSession,
+            onOpenNote: openLinkedNote,
+            onOpenFile: openLinkedFile,
+            onStartFocus: startFocusSession,
+            onInteractionChanged: { isPanelInteractionActive = $0 },
+            onLinksPresentationChanged: { presented in
+                isTaskLinksPresented = presented
+                if presented { cancelExpandedAutoHide() }
+                else if isExpanded { scheduleExpandedAutoHide() }
+            },
+            onSettings: openSettingsWindow,
+            onClose: { collapse(force: true) },
+            onMeasuredHeight: { height in
+                guard height.isFinite, height > 0 else { return }
+                if abs(height - (measuredExpandedHeight ?? 0)) > 1 {
+                    measuredExpandedHeight = height
                 }
-
-                Spacer()
-
-                // Widget 标签（仅显示已启用的）
-                ForEach(WidgetType.enabledWidgets, id: \.self) { widget in
-                    HStack(spacing: 3) {
-                        Image(systemName: widgetIcon(for: widget))
-                            .font(.system(size: 8))
-                        Text(widget.localizedName)
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .cornerRadius(4)
-                    .foregroundColor(IslandStyle.secondaryText)
-                }
-
-                Spacer()
-
-                // 关闭按钮（仅非悬停展开时显示）
-                if !expandedByHover {
-                    Button(action: { collapse() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(IslandStyle.secondaryText)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // 设置按钮（右侧）
-                Button(action: { openSettingsWindow() }) {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(IslandStyle.secondaryText)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-
-            // 分隔线
-            Rectangle()
-                .fill(IslandStyle.divider(for: colorScheme).opacity(IslandStyle.dividerOpacity(for: colorScheme)))
-                .frame(height: 0.5)
-
-            // NookFlow 区域：有活跃会话或有历史记录时显示
-            if isFocusSessionVisible {
-                FocusSessionView(
-                    manager: focusSessionManager,
-                    historyDisplayLimit: nookFlowHistoryDisplayLimit,
-                    trayFileCount: trayManager.files.count,
-                    onCreateLinkedNote: createLinkedNote,
-                    onLinkTrayFiles: linkTrayFiles,
-                    onEndSession: endFocusSession,
-                    onLinksPresentationChanged: { presented in
-                        isTaskLinksPresented = presented
-                        if presented { cancelExpandedAutoHide() }
-                        else if isExpanded { scheduleExpandedAutoHide() }
-                    }
-                )
-                // NookFlow 区域与下方 widget 网格之间的分隔线
-                Rectangle()
-                    .fill(IslandStyle.divider(for: colorScheme).opacity(IslandStyle.dividerOpacity(for: colorScheme)))
-                    .frame(height: 0.5)
-            }
-
-            // 始终显示紧凑网格
-            widgetCompactGrid
-        }
+        )
     }
 
     // MARK: - NookFlow 协调逻辑
 
+    private var nookFlowActions: NookFlowActions {
+        NookFlowActions(sessions: focusSessionManager, notes: notesManager, tray: trayManager)
+    }
+
     /// 创建关联笔记 — 立即将返回 Note 的 id 与 title 写入 activeSession 快照
-    private func createLinkedNote() {
-        let note = notesManager.createNote(
-            title: focusSessionManager.activeSession?.title ?? "Untitled",
-            content: "",
-            isMarkdown: true
-        )
-        focusSessionManager.linkNote(id: note.id, title: note.title)
+    private func createLinkedNote() -> Bool {
+        guard nookFlowActions.createLinkedNote() else { return false }
+        selectedWidget = .notes
+        return true
+    }
+
+    private func openLinkedNote(_ id: UUID) -> Bool {
+        guard nookFlowActions.openNote(id) else { return false }
+        selectedWidget = .notes
+        return true
+    }
+
+    private func openLinkedFile(_ file: LinkedFile) -> Bool {
+        nookFlowActions.openFile(file)
     }
 
     /// 关联当前文件架 — 遍历 trayManager.files，立即把每个文件的快照写入 activeSession
     /// 已关联的文件由 Manager 按 id 去重
     private func linkTrayFiles() {
-        guard focusSessionManager.activeSession != nil else { return }
-        for file in trayManager.files {
-            focusSessionManager.linkFile(id: file.id, name: file.name, icon: file.icon)
-        }
+        nookFlowActions.linkTrayFiles()
     }
 
     /// 结束当前任务会话 — 直接调用 Manager.end()，不回读其他 Manager
@@ -985,68 +1043,15 @@ struct NotchContentView: View {
     /// 写入 activeSession 后由 @Observable 驱动 expandedHeight 重算，
     /// onChange(of: expandedHeight) 同步窗口尺寸；若面板未展开则展开一次
     private func startFocusSession(from event: EKEvent) {
+        // 存储不可用时 start 返回 nil，此时不应展开面板，也不清掉当前选择的工具。
         guard focusSessionManager.start(
             title: event.title ?? "",
             eventIdentifier: event.eventIdentifier,
             scheduledEndAt: event.endDate
         ) != nil else { return }
+        selectedWidget = nil
         if !isExpanded {
             expand(to: .expanded)
-        }
-    }
-
-    // MARK: - Widget 紧凑网格
-
-    private var widgetCompactGrid: some View {
-        let enabled = WidgetType.enabledWidgets
-        return HStack(spacing: 0) {
-            ForEach(Array(enabled.enumerated()), id: \.element) { index, widget in
-                // Widget 内容
-                widgetView(for: widget)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 160)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-
-                // 垂直分隔线（最后一个不加）
-                if index < enabled.count - 1 {
-                    Rectangle()
-                        .fill(IslandStyle.divider(for: colorScheme).opacity(0.4))
-                        .frame(width: 0.5)
-                        .frame(height: 120)
-                }
-            }
-        }
-    }
-
-    /// 根据类型返回对应的 Widget 视图
-    @ViewBuilder
-    private func widgetView(for widget: WidgetType) -> some View {
-        switch widget {
-        case .media:
-            MediaWidgetView(mediaManager: mediaManager)
-        case .calendar:
-            CalendarWidgetView(
-                calendarManager: calendarManager,
-                recenterTrigger: $calendarRecenterTrigger,
-                onStartFocus: { event in startFocusSession(from: event) }
-            )
-            .onAppear { calendarManager.ensureAccess() }
-        case .notes:
-            NotesWidgetView(notesManager: notesManager)
-        case .tray:
-            TrayWidgetView(trayManager: trayManager)
-        }
-    }
-
-    // MARK: - 辅助方法
-
-    private func widgetIcon(for widget: WidgetType) -> String {
-        switch widget {
-        case .media: return "play.fill"
-        case .calendar: return "calendar"
-        case .notes: return "note.text"
-        case .tray: return "tray.full"
         }
     }
 
@@ -1081,57 +1086,25 @@ struct NotchContentView: View {
 
     private func loadGifData() {
         let defaults = UserDefaults.standard
-
-        // 新版：从 gifs 目录加载选中的 GIF
-        if let selectedName = defaults.string(forKey: "selectedGifName"),
-           let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let gifURL = appSupport.appendingPathComponent("XNook/gifs/\(selectedName)")
-            if let data = try? Data(contentsOf: gifURL) {
+        let selectedName = defaults.string(forKey: "selectedGifName")
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        let bookmarkData = defaults.data(forKey: "customGifBookmark")
+        gifLoadGeneration += 1
+        let generation = gifLoadGeneration
+        Task { @MainActor in
+            do {
+                let data = try await Task.detached(priority: .userInitiated) {
+                    try GifResource.selectedData(selectedName: selectedName, appSupport: appSupport, bookmarkData: bookmarkData)
+                }.value
+                guard generation == gifLoadGeneration else { return }
                 cachedGifData = data
-                return
+            } catch {
+                guard generation == gifLoadGeneration else { return }
+                // 加载失败时保留上一份已验证缓存和用户选择，设置页可显示错误。
+                NotificationCenter.default.post(name: GifResource.loadFailureNotification, object: nil, userInfo: [
+                    "message": L10n.gifLoadFailed(selectedName ?? "GIF", reason: error.localizedDescription)
+                ])
             }
-            // selectedGifName 已设置但文件不存在，不回退到旧版
-            cachedGifData = nil
-            return
-        }
-
-        // 旧版：从 custom.gif 加载（仅在未使用新版功能时）
-        if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let gifURL = appSupport.appendingPathComponent("XNook/custom.gif")
-            if let data = try? Data(contentsOf: gifURL) {
-                cachedGifData = data
-                return
-            }
-        }
-
-        // 回退：从 bookmark 加载（兼容旧版本）
-        guard let bookmarkData = defaults.data(forKey: "customGifBookmark") else {
-            cachedGifData = nil
-            return
-        }
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: bookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
-            cachedGifData = nil
-            return
-        }
-
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-        guard accessing else {
-            cachedGifData = nil
-            return
-        }
-
-        if let data = try? Data(contentsOf: url) {
-            cachedGifData = data
-        } else {
-            cachedGifData = nil
         }
     }
 }
@@ -1162,7 +1135,7 @@ struct CollapsedPillView: View {
         Button(action: onTap) {
             HStack(spacing: 0) {
                 // 左侧：专辑封面
-                if let artData = albumArtData, let nsImage = NSImage(data: artData) {
+                if let nsImage = albumArt {
                     Image(nsImage: nsImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -1204,8 +1177,10 @@ struct CollapsedPillView: View {
 
 // MARK: - Preview
 
+#if !XNOOK_DISABLE_PREVIEWS
 #Preview {
     NotchContentView()
         .frame(width: 420, height: 250)
         .background(Color.black)
 }
+#endif

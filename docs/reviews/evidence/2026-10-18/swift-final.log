@@ -1,0 +1,721 @@
+Building for debugging...
+[Using on-disk description]
+[1 / 1]
+[3 / 14] XNook-product
+[7 / 18] XNook-product
+[7 / 18] XNook
+[15 / 24] XNook-product
+[18 / 23] XNookTests-product
+[20 / 25] XNookTests-product
+/Users/meteor/github/XNook/Tests/XNookTests/GifViewTests.swift:84:18: warning: weak variable 'weakCoordinator' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 82 |         coordinator?.setupAnimation(gifData: try makeGIF(), imageView: imageView)
+ 83 |         coordinator?.resumeAnimation()
+ 84 |         weak var weakCoordinator = coordinator
+    |                  `- warning: weak variable 'weakCoordinator' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 85 |         coordinator = nil
+ 86 | 
+
+[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+[#WeakMutability]: <https://docs.swift.org/compiler/documentation/diagnostics/weak-mutability>
+[25 / 28] XNookTests-product
+[27 / 31] XNookTests-product
+Build complete! (5.05秒)
+Test Suite 'All tests' started at 2026-10-18 04:10:37.598.
+Test Suite 'XNookTests.xctest' started at 2026-10-18 04:10:37.599.
+Test Suite 'AppSwitcherTests' started at 2026-10-18 04:10:37.599.
+Test Case '-[XNookTests.AppSwitcherTests testCurrentAppNameReturnsXNookWhenBundleIDMatches]' started.
+Test Case '-[XNookTests.AppSwitcherTests testCurrentAppNameReturnsXNookWhenBundleIDMatches]' passed (0.001 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testIsOtherAppRunningReturnsBoolean]' started.
+Test Case '-[XNookTests.AppSwitcherTests testIsOtherAppRunningReturnsBoolean]' passed (0.001 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testOtherIslandNamesExcludesCurrentApp]' started.
+Test Case '-[XNookTests.AppSwitcherTests testOtherIslandNamesExcludesCurrentApp]' passed (0.000 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testOtherIslandNamesReturnsArray]' started.
+Test Case '-[XNookTests.AppSwitcherTests testOtherIslandNamesReturnsArray]' passed (0.000 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testOtherIslandNamesReturnsSortedArray]' started.
+Test Case '-[XNookTests.AppSwitcherTests testOtherIslandNamesReturnsSortedArray]' passed (0.000 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testSwitchToIslandWithCurrentAppDoesNothing]' started.
+Test Case '-[XNookTests.AppSwitcherTests testSwitchToIslandWithCurrentAppDoesNothing]' passed (0.000 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testSwitchToIslandWithInvalidTargetDoesNothing]' started.
+Test Case '-[XNookTests.AppSwitcherTests testSwitchToIslandWithInvalidTargetDoesNothing]' passed (0.000 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testSwitchToNextIslandDoesNotCrash]' started.
+Test Case '-[XNookTests.AppSwitcherTests testSwitchToNextIslandDoesNotCrash]' passed (0.002 seconds).
+Test Case '-[XNookTests.AppSwitcherTests testSwitchURLUsesTargetSpecificScheme]' started.
+Test Case '-[XNookTests.AppSwitcherTests testSwitchURLUsesTargetSpecificScheme]' passed (0.000 seconds).
+Test Suite 'AppSwitcherTests' passed at 2026-10-18 04:10:37.605.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+Test Suite 'CalendarManagerTests' started at 2026-10-18 04:10:37.605.
+Test Case '-[XNookTests.CalendarManagerTests testDayChangeFollowsToday]' started.
+Test Case '-[XNookTests.CalendarManagerTests testDayChangeFollowsToday]' passed (0.055 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testDayChangePreservesExplicitlySelectedDate]' started.
+Test Case '-[XNookTests.CalendarManagerTests testDayChangePreservesExplicitlySelectedDate]' passed (0.041 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testDayFilterIncludesSpanningEventsAndExcludesMidnightBoundary]' started.
+Test Case '-[XNookTests.CalendarManagerTests testDayFilterIncludesSpanningEventsAndExcludesMidnightBoundary]' passed (0.047 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testDeniedPermissionDoesNotTriggerRepeatedRequests]' started.
+Test Case '-[XNookTests.CalendarManagerTests testDeniedPermissionDoesNotTriggerRepeatedRequests]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testEmptyCalendarPreferenceSkipsFetchingEvents]' started.
+Test Case '-[XNookTests.CalendarManagerTests testEmptyCalendarPreferenceSkipsFetchingEvents]' passed (0.041 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testEnsureAccessDoesNotRequestPermissionAndSkipsUnauthorizedReads]' started.
+Test Case '-[XNookTests.CalendarManagerTests testEnsureAccessDoesNotRequestPermissionAndSkipsUnauthorizedReads]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testEventIntervalCoversSelectedCalendarDay]' started.
+Test Case '-[XNookTests.CalendarManagerTests testEventIntervalCoversSelectedCalendarDay]' passed (0.000 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testExplicitAccessRequestRefreshesGrantedEvents]' started.
+Test Case '-[XNookTests.CalendarManagerTests testExplicitAccessRequestRefreshesGrantedEvents]' passed (0.043 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testForegroundNotificationRefreshesAuthorization]' started.
+Test Case '-[XNookTests.CalendarManagerTests testForegroundNotificationRefreshesAuthorization]' passed (0.041 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testObserversDoNotRetainManagerOrReadAfterRelease]' started.
+Test Case '-[XNookTests.CalendarManagerTests testObserversDoNotRetainManagerOrReadAfterRelease]' passed (0.043 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testOverviewIsEmptyWhenAllEventsEndedButFullDayRetainsThem]' started.
+Test Case '-[XNookTests.CalendarManagerTests testOverviewIsEmptyWhenAllEventsEndedButFullDayRetainsThem]' passed (0.040 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testOverviewSkipsEndedEventsAndKeepsActiveBeforeUpcoming]' started.
+Test Case '-[XNookTests.CalendarManagerTests testOverviewSkipsEndedEventsAndKeepsActiveBeforeUpcoming]' passed (0.040 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testPastDayOverviewDoesNotHideItsEvents]' started.
+Test Case '-[XNookTests.CalendarManagerTests testPastDayOverviewDoesNotHideItsEvents]' passed (0.040 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testRevokingPermissionClearsPreviouslyVisibleEvents]' started.
+Test Case '-[XNookTests.CalendarManagerTests testRevokingPermissionClearsPreviouslyVisibleEvents]' passed (0.041 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testSelectedCalendarsPreserveExplicitEmptyPreference]' started.
+Test Case '-[XNookTests.CalendarManagerTests testSelectedCalendarsPreserveExplicitEmptyPreference]' passed (0.000 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testSelectedCalendarsUseAllCalendarsWhenNoPreferenceExists]' started.
+Test Case '-[XNookTests.CalendarManagerTests testSelectedCalendarsUseAllCalendarsWhenNoPreferenceExists]' passed (0.000 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testStoreChangeRefreshesDisplayedDate]' started.
+Test Case '-[XNookTests.CalendarManagerTests testStoreChangeRefreshesDisplayedDate]' passed (0.041 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesKeepTheOldestSelectionAfterMidnight]' started.
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesKeepTheOldestSelectionAfterMidnight]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesKeepTheUsualTwoWeekWindow]' started.
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesKeepTheUsualTwoWeekWindow]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesRetainSelectionAndTodayAfterLongSleepOrClockChange]' started.
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesRetainSelectionAndTodayAfterLongSleepOrClockChange]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesStayOnCalendarDaysAcrossDaylightSavingChange]' started.
+Test Case '-[XNookTests.CalendarManagerTests testVisibleDatesStayOnCalendarDaysAcrossDaylightSavingChange]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testWriteOnlyPermissionCannotReadEvents]' started.
+Test Case '-[XNookTests.CalendarManagerTests testWriteOnlyPermissionCannotReadEvents]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarManagerTests testZeroDurationEventsAreVisibleAtTheirStartButNotAfter]' started.
+Test Case '-[XNookTests.CalendarManagerTests testZeroDurationEventsAreVisibleAtTheirStartButNotAfter]' passed (0.041 seconds).
+Test Suite 'CalendarManagerTests' passed at 2026-10-18 04:10:38.166.
+	 Executed 23 tests, with 0 failures (0 unexpected) in 0.559 (0.561) seconds
+Test Suite 'CalendarReminderManagerTests' started at 2026-10-18 04:10:38.166.
+Test Case '-[XNookTests.CalendarReminderManagerTests testNextReminderReturnsEarliestDueUnnotifiedEvent]' started.
+Test Case '-[XNookTests.CalendarReminderManagerTests testNextReminderReturnsEarliestDueUnnotifiedEvent]' passed (0.000 seconds).
+Test Case '-[XNookTests.CalendarReminderManagerTests testNextReminderSkipsNotifiedAndOutOfWindowEvents]' started.
+Test Case '-[XNookTests.CalendarReminderManagerTests testNextReminderSkipsNotifiedAndOutOfWindowEvents]' passed (0.000 seconds).
+Test Case '-[XNookTests.CalendarReminderManagerTests testQuietHoursDisabledReturnsFalse]' started.
+Test Case '-[XNookTests.CalendarReminderManagerTests testQuietHoursDisabledReturnsFalse]' passed (0.000 seconds).
+Test Case '-[XNookTests.CalendarReminderManagerTests testQuietHoursHandlesOvernightWindow]' started.
+Test Case '-[XNookTests.CalendarReminderManagerTests testQuietHoursHandlesOvernightWindow]' passed (0.001 seconds).
+Test Case '-[XNookTests.CalendarReminderManagerTests testQuietHoursHandlesSameDayWindow]' started.
+Test Case '-[XNookTests.CalendarReminderManagerTests testQuietHoursHandlesSameDayWindow]' passed (0.000 seconds).
+Test Suite 'CalendarReminderManagerTests' passed at 2026-10-18 04:10:38.168.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'ExpandedAutoHideControllerTests' started at 2026-10-18 04:10:38.168.
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testCompletionHidesOnceAndAllowsNextExpansion]' started.
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testCompletionHidesOnceAndAllowsNextExpansion]' passed (0.000 seconds).
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testControllerCanDeallocateWhileWaitingAndCancelsWork]' started.
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testControllerCanDeallocateWhileWaitingAndCancelsWork]' passed (0.000 seconds).
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testDelayChangeCancelsPreviousWaitAndUsesNewDelay]' started.
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testDelayChangeCancelsPreviousWaitAndUsesNewDelay]' passed (0.000 seconds).
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testDisablingOrCollapsingCancelsWait]' started.
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testDisablingOrCollapsingCancelsWait]' passed (0.000 seconds).
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testRepeatedPollingStartsOnlyOneWaitAndEnteringCancelsIt]' started.
+Test Case '-[XNookTests.ExpandedAutoHideControllerTests testRepeatedPollingStartsOnlyOneWaitAndEnteringCancelsIt]' passed (0.002 seconds).
+Test Suite 'ExpandedAutoHideControllerTests' passed at 2026-10-18 04:10:38.172.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
+Test Suite 'ExpandedPanelLayoutTests' started at 2026-10-18 04:10:38.172.
+Test Case '-[XNookTests.ExpandedPanelLayoutTests testInvalidMeasurementsUseBoundedInitialHeight]' started.
+Test Case '-[XNookTests.ExpandedPanelLayoutTests testInvalidMeasurementsUseBoundedInitialHeight]' passed (0.000 seconds).
+Test Case '-[XNookTests.ExpandedPanelLayoutTests testNarrowPanelsUseOneColumnAndDefaultWidthUsesTwo]' started.
+Test Case '-[XNookTests.ExpandedPanelLayoutTests testNarrowPanelsUseOneColumnAndDefaultWidthUsesTwo]' passed (0.000 seconds).
+Test Case '-[XNookTests.ExpandedPanelLayoutTests testNaturalHeightFitsContentAndCapsOverflow]' started.
+Test Case '-[XNookTests.ExpandedPanelLayoutTests testNaturalHeightFitsContentAndCapsOverflow]' passed (0.000 seconds).
+Test Suite 'ExpandedPanelLayoutTests' passed at 2026-10-18 04:10:38.173.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'FocusSessionManagerTests' started at 2026-10-18 04:10:38.173.
+Test Case '-[XNookTests.FocusSessionManagerTests testCorruptedStoreIsNotOverwrittenByAnySessionOperation]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testCorruptedStoreIsNotOverwrittenByAnySessionOperation]' passed (0.003 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testDuplicateFileLinkIsDeduplicated]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testDuplicateFileLinkIsDeduplicated]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testEmptyTitleFallsBackToDefault]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testEmptyTitleFallsBackToDefault]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testEndMovesSessionToHistory]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testEndMovesSessionToHistory]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testFileBookmarkSurvivesEndAndReload]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testFileBookmarkSurvivesEndAndReload]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testLegacyFileWithoutBookmarkStillDecodes]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testLegacyFileWithoutBookmarkStillDecodes]' passed (0.000 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testLinkOperationsAreNoOpWhenNoActiveSession]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testLinkOperationsAreNoOpWhenNoActiveSession]' passed (0.001 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testManualSessionTrimsTitleAndHasNoCalendarDependency]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testManualSessionTrimsTitleAndHasNoCalendarDependency]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testRelinkingLegacyFileAddsBookmarkWithoutDuplicatingOrRenaming]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testRelinkingLegacyFileAddsBookmarkWithoutDuplicatingOrRenaming]' passed (0.001 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testReloadRestoresActiveSessionAndHistory]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testReloadRestoresActiveSessionAndHistory]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testRetryRestoresRepairedStoreAndAllowsNewTasks]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testRetryRestoresRepairedStoreAndAllowsNewTasks]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testRetryWithUnrepairedStoreKeepsOriginalData]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testRetryWithUnrepairedStoreKeepsOriginalData]' passed (0.001 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testSnapshotsPreservedAfterEndAndReload]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testSnapshotsPreservedAfterEndAndReload]' passed (0.002 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testStartCreatesActiveSession]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testStartCreatesActiveSession]' passed (0.001 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testStartingAnotherTaskPreservesCurrentTaskAndExplainsConflict]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testStartingAnotherTaskPreservesCurrentTaskAndExplainsConflict]' passed (0.001 seconds).
+Test Case '-[XNookTests.FocusSessionManagerTests testWrongStorageTypeIsProtected]' started.
+Test Case '-[XNookTests.FocusSessionManagerTests testWrongStorageTypeIsProtected]' passed (0.001 seconds).
+Test Suite 'FocusSessionManagerTests' passed at 2026-10-18 04:10:38.200.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.026 (0.027) seconds
+Test Suite 'GifResourceTests' started at 2026-10-18 04:10:38.200.
+Test Case '-[XNookTests.GifResourceTests testAcceptsCommentsApplicationExtensionAndLocalPalette]' started.
+Test Case '-[XNookTests.GifResourceTests testAcceptsCommentsApplicationExtensionAndLocalPalette]' passed (0.004 seconds).
+Test Case '-[XNookTests.GifResourceTests testAcceptsGIF87aGIF89aAndTransparentStill]' started.
+Test Case '-[XNookTests.GifResourceTests testAcceptsGIF87aGIF89aAndTransparentStill]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifResourceTests testDimensionLimitsAndZeroCanvas]' started.
+Test Case '-[XNookTests.GifResourceTests testDimensionLimitsAndZeroCanvas]' passed (0.069 seconds).
+Test Case '-[XNookTests.GifResourceTests testEncodedSizeAtAndAboveLimitForDataAndFile]' started.
+Test Case '-[XNookTests.GifResourceTests testEncodedSizeAtAndAboveLimitForDataAndFile]' passed (0.038 seconds).
+Test Case '-[XNookTests.GifResourceTests testFrameCountAtAndAboveLimitIncludingOriginalTrigger]' started.
+Test Case '-[XNookTests.GifResourceTests testFrameCountAtAndAboveLimitIncludingOriginalTrigger]' passed (0.009 seconds).
+Test Case '-[XNookTests.GifResourceTests testLegacyBookmarkReadsThroughTheSameBudget]' started.
+Test Case '-[XNookTests.GifResourceTests testLegacyBookmarkReadsThroughTheSameBudget]' passed (0.083 seconds).
+Test Case '-[XNookTests.GifResourceTests testLocalFrameDimensionsCannotBypassCanvasLimit]' started.
+Test Case '-[XNookTests.GifResourceTests testLocalFrameDimensionsCannotBypassCanvasLimit]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifResourceTests testReaderBoundsEachReadAndRejectsGrowthAfterInitialChunks]' started.
+Test Case '-[XNookTests.GifResourceTests testReaderBoundsEachReadAndRejectsGrowthAfterInitialChunks]' passed (0.002 seconds).
+Test Case '-[XNookTests.GifResourceTests testRejectsDirectoryAndNamedPipeBeforeReading]' started.
+Test Case '-[XNookTests.GifResourceTests testRejectsDirectoryAndNamedPipeBeforeReading]' passed (0.001 seconds).
+Test Case '-[XNookTests.GifResourceTests testRejectsNonGIFEmptyAndTruncatedInput]' started.
+Test Case '-[XNookTests.GifResourceTests testRejectsNonGIFEmptyAndTruncatedInput]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifResourceTests testRejectsTruncatedBlocksMissingTrailerAndOversizedFrameOffsets]' started.
+Test Case '-[XNookTests.GifResourceTests testRejectsTruncatedBlocksMissingTrailerAndOversizedFrameOffsets]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifResourceTests testSelectedCopyAndLegacyFileAreValidatedWithoutFallback]' started.
+Test Case '-[XNookTests.GifResourceTests testSelectedCopyAndLegacyFileAreValidatedWithoutFallback]' passed (0.002 seconds).
+Test Case '-[XNookTests.GifResourceTests testThumbnailUsesBoundedPixelDimensions]' started.
+Test Case '-[XNookTests.GifResourceTests testThumbnailUsesBoundedPixelDimensions]' passed (0.002 seconds).
+Test Case '-[XNookTests.GifResourceTests testTotalPixelBudgetAtAndAboveLimit]' started.
+Test Case '-[XNookTests.GifResourceTests testTotalPixelBudgetAtAndAboveLimit]' passed (0.369 seconds).
+Test Suite 'GifResourceTests' passed at 2026-10-18 04:10:38.781.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.580 (0.581) seconds
+Test Suite 'GifViewTests' started at 2026-10-18 04:10:38.781.
+Test Case '-[XNookTests.GifViewTests testCoordinatorIsReleasedWhileDisplayDriverStillExists]' started.
+Test Case '-[XNookTests.GifViewTests testCoordinatorIsReleasedWhileDisplayDriverStillExists]' passed (0.058 seconds).
+Test Case '-[XNookTests.GifViewTests testDirectDataCannotBypassResourceBudgetsOrFallBackToNSImage]' started.
+Test Case '-[XNookTests.GifViewTests testDirectDataCannotBypassResourceBudgetsOrFallBackToNSImage]' passed (0.003 seconds).
+Test Case '-[XNookTests.GifViewTests testDismantleInvalidatesAndCannotRestart]' started.
+Test Case '-[XNookTests.GifViewTests testDismantleInvalidatesAndCannotRestart]' passed (0.001 seconds).
+Test Case '-[XNookTests.GifViewTests testInvalidReplacementClearsDisplayedImageAndCannotRestartOldDriver]' started.
+Test Case '-[XNookTests.GifViewTests testInvalidReplacementClearsDisplayedImageAndCannotRestartOldDriver]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifViewTests testNonGIFDataIsNotDecodedThroughStillImageFallback]' started.
+Test Case '-[XNookTests.GifViewTests testNonGIFDataIsNotDecodedThroughStillImageFallback]' passed (0.001 seconds).
+Test Case '-[XNookTests.GifViewTests testPauseStopsRefreshAndIgnoresPendingTick]' started.
+Test Case '-[XNookTests.GifViewTests testPauseStopsRefreshAndIgnoresPendingTick]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifViewTests testRepeatedResumeDoesNotResetFrameClock]' started.
+Test Case '-[XNookTests.GifViewTests testRepeatedResumeDoesNotResetFrameClock]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifViewTests testReplacingAnimationWithStillOrInvalidDataClearsAnimationState]' started.
+Test Case '-[XNookTests.GifViewTests testReplacingAnimationWithStillOrInvalidDataClearsAnimationState]' passed (0.001 seconds).
+Test Case '-[XNookTests.GifViewTests testReplacingPausedGIFDoesNotStartUntilResumed]' started.
+Test Case '-[XNookTests.GifViewTests testReplacingPausedGIFDoesNotStartUntilResumed]' passed (0.001 seconds).
+Test Case '-[XNookTests.GifViewTests testReplacingPlayingGIFResetsFrameAndRejectsOldCallback]' started.
+Test Case '-[XNookTests.GifViewTests testReplacingPlayingGIFResetsFrameAndRejectsOldCallback]' passed (0.001 seconds).
+Test Case '-[XNookTests.GifViewTests testResumeAfterPauseStartsNewFrameInterval]' started.
+Test Case '-[XNookTests.GifViewTests testResumeAfterPauseStartsNewFrameInterval]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifViewTests testSetupShowsFirstFrameWithoutStartingRefresh]' started.
+Test Case '-[XNookTests.GifViewTests testSetupShowsFirstFrameWithoutStartingRefresh]' passed (0.000 seconds).
+Test Case '-[XNookTests.GifViewTests testSingleTransparentGIFShowsWithoutAnimation]' started.
+Test Case '-[XNookTests.GifViewTests testSingleTransparentGIFShowsWithoutAnimation]' passed (0.000 seconds).
+Test Suite 'GifViewTests' passed at 2026-10-18 04:10:38.848.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.066 (0.067) seconds
+Test Suite 'IslandIntegrationSettingsTests' started at 2026-10-18 04:10:38.848.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testClaimVisibilityAllowsLaunchWhenLastShownIslandIsNotRunning]' started.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testClaimVisibilityAllowsLaunchWhenLastShownIslandIsNotRunning]' passed (0.001 seconds).
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testClaimVisibilityKeepsCurrentIslandHiddenWhenPeerIsRunning]' started.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testClaimVisibilityKeepsCurrentIslandHiddenWhenPeerIsRunning]' passed (0.000 seconds).
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testPeerProtocolRequiresPeerSpecificHandshake]' started.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testPeerProtocolRequiresPeerSpecificHandshake]' passed (0.001 seconds).
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testPreferredStartupIslandFallsBackToXNookWhenPeerInstalled]' started.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testPreferredStartupIslandFallsBackToXNookWhenPeerInstalled]' passed (0.000 seconds).
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testPreferredStartupIslandUsesLastShownIsland]' started.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testPreferredStartupIslandUsesLastShownIsland]' passed (0.000 seconds).
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testShouldShowOnLaunchFallsBackWhenPreferredAppIsNotRunning]' started.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testShouldShowOnLaunchFallsBackWhenPreferredAppIsNotRunning]' passed (0.000 seconds).
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testSwipeSensitivityChangesTriggerThreshold]' started.
+Test Case '-[XNookTests.IslandIntegrationSettingsTests testSwipeSensitivityChangesTriggerThreshold]' passed (0.000 seconds).
+Test Suite 'IslandIntegrationSettingsTests' passed at 2026-10-18 04:10:38.851.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'IslandWindowOwnershipTests' started at 2026-10-18 04:10:38.851.
+Test Case '-[XNookTests.IslandWindowOwnershipTests testFrontmostOverlappingIslandOwnsGlobalSwipe]' started.
+Test Case '-[XNookTests.IslandWindowOwnershipTests testFrontmostOverlappingIslandOwnsGlobalSwipe]' passed (0.000 seconds).
+Test Case '-[XNookTests.IslandWindowOwnershipTests testGlobalSwipeRequiresVisibleCollapsedIslandUnderPointer]' started.
+Test Case '-[XNookTests.IslandWindowOwnershipTests testGlobalSwipeRequiresVisibleCollapsedIslandUnderPointer]' passed (0.000 seconds).
+Test Case '-[XNookTests.IslandWindowOwnershipTests testVisibleIslandWindowRecognizesItselfAsFrontmost]' started.
+Test Case '-[XNookTests.IslandWindowOwnershipTests testVisibleIslandWindowRecognizesItselfAsFrontmost]' passed (0.090 seconds).
+Test Suite 'IslandWindowOwnershipTests' passed at 2026-10-18 04:10:38.942.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.090 (0.091) seconds
+Test Suite 'LyricsCacheTests' started at 2026-10-18 04:10:38.942.
+Test Case '-[XNookTests.LyricsCacheTests testCacheKeyIgnoresEmptyAlbum]' started.
+Test Case '-[XNookTests.LyricsCacheTests testCacheKeyIgnoresEmptyAlbum]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testCacheKeyIncludesAlbum]' started.
+Test Case '-[XNookTests.LyricsCacheTests testCacheKeyIncludesAlbum]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testCacheKeyNormalizesCaseAndPunctuation]' started.
+Test Case '-[XNookTests.LyricsCacheTests testCacheKeyNormalizesCaseAndPunctuation]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testDurationDoesNotAffectLookup]' started.
+Test Case '-[XNookTests.LyricsCacheTests testDurationDoesNotAffectLookup]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testEntryTypeRoundTrip]' started.
+Test Case '-[XNookTests.LyricsCacheTests testEntryTypeRoundTrip]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testEntryWithMismatchedKeyIsTreatedAsMiss]' started.
+Test Case '-[XNookTests.LyricsCacheTests testEntryWithMismatchedKeyIsTreatedAsMiss]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testExpiredEntryIsTreatedAsMiss]' started.
+Test Case '-[XNookTests.LyricsCacheTests testExpiredEntryIsTreatedAsMiss]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testReadMissingReturnsNil]' started.
+Test Case '-[XNookTests.LyricsCacheTests testReadMissingReturnsNil]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testWriteThenReadReturnsPlainEntry]' started.
+Test Case '-[XNookTests.LyricsCacheTests testWriteThenReadReturnsPlainEntry]' passed (0.001 seconds).
+Test Case '-[XNookTests.LyricsCacheTests testWriteThenReadReturnsSyncedEntry]' started.
+Test Case '-[XNookTests.LyricsCacheTests testWriteThenReadReturnsSyncedEntry]' passed (0.001 seconds).
+Test Suite 'LyricsCacheTests' passed at 2026-10-18 04:10:38.951.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.008 (0.009) seconds
+Test Suite 'LyricsManagerTests' started at 2026-10-18 04:10:38.951.
+Test Case '-[XNookTests.LyricsManagerTests testCoreTitleMatchesAcrossBracketAnnotations]' started.
+Test Case '-[XNookTests.LyricsManagerTests testCoreTitleMatchesAcrossBracketAnnotations]' passed (0.001 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackMatchesDifferentArtistWhenDurationIsClose]' started.
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackMatchesDifferentArtistWhenDurationIsClose]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackRejectsCandidateWithoutDuration]' started.
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackRejectsCandidateWithoutDuration]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackRejectsDistantDuration]' started.
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackRejectsDistantDuration]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackRejectsSameTitleWhenDurationUnknown]' started.
+Test Case '-[XNookTests.LyricsManagerTests testCoverFallbackRejectsSameTitleWhenDurationUnknown]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testExactLookupRequiresAlbumAndDuration]' started.
+Test Case '-[XNookTests.LyricsManagerTests testExactLookupRequiresAlbumAndDuration]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testFallbackSearchURLKeepsWordBoundaries]' started.
+Test Case '-[XNookTests.LyricsManagerTests testFallbackSearchURLKeepsWordBoundaries]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testFallbackSearchURLOmitsEmptyArtist]' started.
+Test Case '-[XNookTests.LyricsManagerTests testFallbackSearchURLOmitsEmptyArtist]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testHasLyricsFalseByDefault]' started.
+Test Case '-[XNookTests.LyricsManagerTests testHasLyricsFalseByDefault]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testLyricsStateChangedFiresOnReset]' started.
+Test Case '-[XNookTests.LyricsManagerTests testLyricsStateChangedFiresOnReset]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testMalformedSyncedLyricsDoNotBoostPlainCandidateScore]' started.
+Test Case '-[XNookTests.LyricsManagerTests testMalformedSyncedLyricsDoNotBoostPlainCandidateScore]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testOnlyTransientNetworkErrorsAreRetried]' started.
+Test Case '-[XNookTests.LyricsManagerTests testOnlyTransientNetworkErrorsAreRetried]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testParseLrcExpandsMultipleTimestampsForOneLine]' started.
+Test Case '-[XNookTests.LyricsManagerTests testParseLrcExpandsMultipleTimestampsForOneLine]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testParseLrcRejectsPlainLyricsWithoutTimestamps]' started.
+Test Case '-[XNookTests.LyricsManagerTests testParseLrcRejectsPlainLyricsWithoutTimestamps]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testParseLrcSortsTimestampedLines]' started.
+Test Case '-[XNookTests.LyricsManagerTests testParseLrcSortsTimestampedLines]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineKeepsLyricContainingInstrumental]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineKeepsLyricContainingInstrumental]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineReturnsEmptyForAllInstrumental]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineReturnsEmptyForAllInstrumental]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineReturnsEmptyForEmptyInput]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineReturnsEmptyForEmptyInput]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineReturnsFirstNonEmptyLine]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineReturnsFirstNonEmptyLine]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsBlankAndMetadataLines]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsBlankAndMetadataLines]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsInstrumentalBreakMarker]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsInstrumentalBreakMarker]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsInstrumentalMarkers]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsInstrumentalMarkers]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsSoloMarker]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineSkipsSoloMarker]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineTruncatesLongLines]' started.
+Test Case '-[XNookTests.LyricsManagerTests testPreviewLineTruncatesLongLines]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultMatchesArtistAlias]' started.
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultMatchesArtistAlias]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultPrefersSyncedLyricsOverCloserPlainLyrics]' started.
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultPrefersSyncedLyricsOverCloserPlainLyrics]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultRejectsUnusableLyricsInEveryMatchingRound]' started.
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultRejectsUnusableLyricsInEveryMatchingRound]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultSkipsMalformedSyncedLyricsForUsablePlainLyrics]' started.
+Test Case '-[XNookTests.LyricsManagerTests testSearchResultSkipsMalformedSyncedLyricsForUsablePlainLyrics]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testShortTitleDoesNotMatchLongerCandidate]' started.
+Test Case '-[XNookTests.LyricsManagerTests testShortTitleDoesNotMatchLongerCandidate]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testShortTitleExactMatchStillWorks]' started.
+Test Case '-[XNookTests.LyricsManagerTests testShortTitleExactMatchStillWorks]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testStrippedTitleKeepsWhollyBracketedTitle]' started.
+Test Case '-[XNookTests.LyricsManagerTests testStrippedTitleKeepsWhollyBracketedTitle]' passed (0.000 seconds).
+Test Case '-[XNookTests.LyricsManagerTests testStrippedTitleRemovesBracketSuffix]' started.
+Test Case '-[XNookTests.LyricsManagerTests testStrippedTitleRemovesBracketSuffix]' passed (0.000 seconds).
+Test Suite 'LyricsManagerTests' passed at 2026-10-18 04:10:38.958.
+	 Executed 32 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+Test Suite 'LyricsRequestTests' started at 2026-10-18 04:10:38.958.
+Test Case '-[XNookTests.LyricsRequestTests testConfirmedNoMatchDoesNotRetryEveryPoll]' started.
+Test Case '-[XNookTests.LyricsRequestTests testConfirmedNoMatchDoesNotRetryEveryPoll]' passed (0.003 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testDisablingLyricsInvalidatesInFlightResult]' started.
+Test Case '-[XNookTests.LyricsRequestTests testDisablingLyricsInvalidatesInFlightResult]' passed (0.106 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testExactPlainLyricsAreVisibleWhileOptionalSearchIsPending]' started.
+Test Case '-[XNookTests.LyricsRequestTests testExactPlainLyricsAreVisibleWhileOptionalSearchIsPending]' passed (0.003 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testExactPlainLyricsSurviveEmptySearchResults]' started.
+Test Case '-[XNookTests.LyricsRequestTests testExactPlainLyricsSurviveEmptySearchResults]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testExactPlainLyricsSurviveSearchNetworkFailure]' started.
+Test Case '-[XNookTests.LyricsRequestTests testExactPlainLyricsSurviveSearchNetworkFailure]' passed (0.001 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testExactTimeoutStillAllowsSuccessfulSearch]' started.
+Test Case '-[XNookTests.LyricsRequestTests testExactTimeoutStillAllowsSuccessfulSearch]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testMalformedSyncedPayloadFallsBackToAvailablePlainLyrics]' started.
+Test Case '-[XNookTests.LyricsRequestTests testMalformedSyncedPayloadFallsBackToAvailablePlainLyrics]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testSearchSkipsMalformedSyncedCandidateAfterExactMiss]' started.
+Test Case '-[XNookTests.LyricsRequestTests testSearchSkipsMalformedSyncedCandidateAfterExactMiss]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testServerFailureIsNotRecordedAsPermanentNoLyrics]' started.
+Test Case '-[XNookTests.LyricsRequestTests testServerFailureIsNotRecordedAsPermanentNoLyrics]' passed (0.002 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testSmallDurationChangesDoNotRestartPendingLookup]' started.
+Test Case '-[XNookTests.LyricsRequestTests testSmallDurationChangesDoNotRestartPendingLookup]' passed (0.102 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testSuccessfulNoMatchAfterRetryClearsPreviousNetworkError]' started.
+Test Case '-[XNookTests.LyricsRequestTests testSuccessfulNoMatchAfterRetryClearsPreviousNetworkError]' passed (0.003 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testTransientFailureCanRecoverForUnchangedSongAfterCooldown]' started.
+Test Case '-[XNookTests.LyricsRequestTests testTransientFailureCanRecoverForUnchangedSongAfterCooldown]' passed (0.004 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testUnusableSearchCandidateAllowsQueryFallback]' started.
+Test Case '-[XNookTests.LyricsRequestTests testUnusableSearchCandidateAllowsQueryFallback]' passed (0.003 seconds).
+Test Case '-[XNookTests.LyricsRequestTests testWhitespaceExactPlainLyricsDoNotHideSearchPlainLyrics]' started.
+Test Case '-[XNookTests.LyricsRequestTests testWhitespaceExactPlainLyricsDoNotHideSearchPlainLyrics]' passed (0.002 seconds).
+Test Suite 'LyricsRequestTests' passed at 2026-10-18 04:10:39.197.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.238 (0.239) seconds
+Test Suite 'MediaManagerTests' started at 2026-10-18 04:10:39.197.
+Test Case '-[XNookTests.MediaManagerTests testAlbumChangeResetsTrackIdentity]' started.
+Test Case '-[XNookTests.MediaManagerTests testAlbumChangeResetsTrackIdentity]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testAlbumChangeTriggersSync]' started.
+Test Case '-[XNookTests.MediaManagerTests testAlbumChangeTriggersSync]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testArtistChangeTriggersSync]' started.
+Test Case '-[XNookTests.MediaManagerTests testArtistChangeTriggersSync]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testCompensatedElapsedTimeAddsFetchLatency]' started.
+Test Case '-[XNookTests.MediaManagerTests testCompensatedElapsedTimeAddsFetchLatency]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testCompensatedElapsedTimeClampsClockSkew]' started.
+Test Case '-[XNookTests.MediaManagerTests testCompensatedElapsedTimeClampsClockSkew]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testCompensatedElapsedTimeIgnoresLatencyWhenPaused]' started.
+Test Case '-[XNookTests.MediaManagerTests testCompensatedElapsedTimeIgnoresLatencyWhenPaused]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testDisablingLyricsTriggersSync]' started.
+Test Case '-[XNookTests.MediaManagerTests testDisablingLyricsTriggersSync]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testDurationArrivalTriggersLyricsRefresh]' started.
+Test Case '-[XNookTests.MediaManagerTests testDurationArrivalTriggersLyricsRefresh]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testEmptyTitleStillTriggersOnFirstFetch]' started.
+Test Case '-[XNookTests.MediaManagerTests testEmptyTitleStillTriggersOnFirstFetch]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testEnablingLyricsRefreshesUnchangedTrack]' started.
+Test Case '-[XNookTests.MediaManagerTests testEnablingLyricsRefreshesUnchangedTrack]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeFractionalSecondsTruncated]' started.
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeFractionalSecondsTruncated]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeLargeDuration]' started.
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeLargeDuration]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeMinutes]' started.
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeMinutes]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeMinutesAndSeconds]' started.
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeMinutesAndSeconds]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeSeconds]' started.
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeSeconds]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeZero]' started.
+Test Case '-[XNookTests.MediaManagerTests testFormatTimeZero]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testLyricTimelineRequiresPlayingStateAndLyrics]' started.
+Test Case '-[XNookTests.MediaManagerTests testLyricTimelineRequiresPlayingStateAndLyrics]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testNoChangeSkipsSync]' started.
+Test Case '-[XNookTests.MediaManagerTests testNoChangeSkipsSync]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testTimedOutInfoFetchAllowsNextRequestAndRejectsStaleResult]' started.
+Test Case '-[XNookTests.MediaManagerTests testTimedOutInfoFetchAllowsNextRequestAndRejectsStaleResult]' passed (0.000 seconds).
+Test Case '-[XNookTests.MediaManagerTests testTitleChangeTriggersSync]' started.
+Test Case '-[XNookTests.MediaManagerTests testTitleChangeTriggersSync]' passed (0.000 seconds).
+Test Suite 'MediaManagerTests' passed at 2026-10-18 04:10:39.200.
+	 Executed 20 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'MediaPlaybackPipelineTests' started at 2026-10-18 04:10:39.200.
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testLateArtworkDoesNotBlockMetadataOrReplaceNextTracksCover]' started.
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testLateArtworkDoesNotBlockMetadataOrReplaceNextTracksCover]' passed (0.109 seconds).
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testLocalClockDoesNotRunBeyondStalePlayerSample]' started.
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testLocalClockDoesNotRunBeyondStalePlayerSample]' passed (0.004 seconds).
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testNoPlayerClearsPlaybackState]' started.
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testNoPlayerClearsPlaybackState]' passed (0.002 seconds).
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testPlaybackNotificationUsesSameInFlightGateAsRegularPoll]' started.
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testPlaybackNotificationUsesSameInFlightGateAsRegularPoll]' passed (0.103 seconds).
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testSameTrackRecoversLyricsViaNormalMediaPoll]' started.
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testSameTrackRecoversLyricsViaNormalMediaPoll]' passed (0.003 seconds).
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testTemporaryReadFailureKeepsLastKnownTrackAndLyrics]' started.
+Test Case '-[XNookTests.MediaPlaybackPipelineTests testTemporaryReadFailureKeepsLastKnownTrackAndLyrics]' passed (0.002 seconds).
+Test Suite 'MediaPlaybackPipelineTests' passed at 2026-10-18 04:10:39.423.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.222 (0.223) seconds
+Test Suite 'NookFlowActionsTests' started at 2026-10-18 04:10:39.423.
+Test Case '-[XNookTests.NookFlowActionsTests testLegacyFileUsesTrayBookmarkAndUnavailableFileReturnsFailure]' started.
+Test Case '-[XNookTests.NookFlowActionsTests testLegacyFileUsesTrayBookmarkAndUnavailableFileReturnsFailure]' passed (0.001 seconds).
+Test Case '-[XNookTests.NookFlowActionsTests testTaskResourcesCanBeRecoveredAfterEndingAndReloading]' started.
+Test Case '-[XNookTests.NookFlowActionsTests testTaskResourcesCanBeRecoveredAfterEndingAndReloading]' passed (0.006 seconds).
+Test Suite 'NookFlowActionsTests' passed at 2026-10-18 04:10:39.430.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.006 (0.006) seconds
+Test Suite 'NookFlowHistoryDisplayTests' started at 2026-10-18 04:10:39.430.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testExpandedPanelHeightCapsAtConfiguredMaximum]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testExpandedPanelHeightCapsAtConfiguredMaximum]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testExpandedPanelHeightFitsContentWhenBelowCap]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testExpandedPanelHeightFitsContentWhenBelowCap]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testHistoryDisplayLimitUsesDefaultAndClampsToSupportedRange]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testHistoryDisplayLimitUsesDefaultAndClampsToSupportedRange]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testHistoryListHeightAddsExactlyOneRowForEachVisibleRecord]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testHistoryListHeightAddsExactlyOneRowForEachVisibleRecord]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testPanelBaseHeightUsesDefault]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testPanelBaseHeightUsesDefault]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testPanelHeightMaximumRespectsScreenHeightAndHardLimit]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testPanelHeightMaximumRespectsScreenHeightAndHardLimit]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testPanelWidthMaximumRespectsScreenWidthAndHardLimit]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testPanelWidthMaximumRespectsScreenWidthAndHardLimit]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testRecentTaskHistoryIsShownByDefault]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testRecentTaskHistoryIsShownByDefault]' passed (0.000 seconds).
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testTargetSizeUsesConfiguredHeightWhenContentOverflows]' started.
+Test Case '-[XNookTests.NookFlowHistoryDisplayTests testTargetSizeUsesConfiguredHeightWhenContentOverflows]' passed (0.000 seconds).
+Test Suite 'NookFlowHistoryDisplayTests' passed at 2026-10-18 04:10:39.431.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'NotchContentViewTests' started at 2026-10-18 04:10:39.431.
+Test Case '-[XNookTests.NotchContentViewTests testExpandedAutoHideDefersWhilePointerRemainsInsidePanel]' started.
+Test Case '-[XNookTests.NotchContentViewTests testExpandedAutoHideDefersWhilePointerRemainsInsidePanel]' passed (0.000 seconds).
+Test Case '-[XNookTests.NotchContentViewTests testExpandedHoverHitFrameCoversWindowWithPadding]' started.
+Test Case '-[XNookTests.NotchContentViewTests testExpandedHoverHitFrameCoversWindowWithPadding]' passed (0.000 seconds).
+Test Case '-[XNookTests.NotchContentViewTests testHoverExpansionRespectsSettingWithoutStoppingHoverDetection]' started.
+Test Case '-[XNookTests.NotchContentViewTests testHoverExpansionRespectsSettingWithoutStoppingHoverDetection]' passed (0.000 seconds).
+Test Case '-[XNookTests.NotchContentViewTests testHoverJellyDoesNotTriggerWhileExpandedOrOutside]' started.
+Test Case '-[XNookTests.NotchContentViewTests testHoverJellyDoesNotTriggerWhileExpandedOrOutside]' passed (0.000 seconds).
+Test Case '-[XNookTests.NotchContentViewTests testHoverJellyTriggersOnFirstEntryEvenWithoutUpwardMotion]' started.
+Test Case '-[XNookTests.NotchContentViewTests testHoverJellyTriggersOnFirstEntryEvenWithoutUpwardMotion]' passed (0.000 seconds).
+Test Case '-[XNookTests.NotchContentViewTests testHoverJellyTriggersWhenPointerMovesUpwardInsidePill]' started.
+Test Case '-[XNookTests.NotchContentViewTests testHoverJellyTriggersWhenPointerMovesUpwardInsidePill]' passed (0.000 seconds).
+Test Suite 'NotchContentViewTests' passed at 2026-10-18 04:10:39.432.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'NotchWindowInteractionTests' started at 2026-10-18 04:10:39.432.
+Test Case '-[XNookTests.NotchWindowInteractionTests testExpandedPanelForwardsDraggingInsteadOfMovingWindow]' started.
+/Users/meteor/github/XNook/Tests/XNookTests/NotchWindowInteractionTests.swift:9: -[XNookTests.NotchWindowInteractionTests testExpandedPanelForwardsDraggingInsteadOfMovingWindow] : Test skipped - 与隔离 UI 验证一起运行，不要求普通单元测试连接 WindowServer
+Test Case '-[XNookTests.NotchWindowInteractionTests testExpandedPanelForwardsDraggingInsteadOfMovingWindow]' skipped (0.001 seconds).
+Test Suite 'NotchWindowInteractionTests' passed at 2026-10-18 04:10:39.433.
+	 Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'NotesManagerTests' started at 2026-10-18 04:10:39.433.
+Test Case '-[XNookTests.NotesManagerTests testClosingEditorFlushesLatestContent]' started.
+Test Case '-[XNookTests.NotesManagerTests testClosingEditorFlushesLatestContent]' passed (0.002 seconds).
+Test Case '-[XNookTests.NotesManagerTests testDebouncedEditUpdatesMemoryImmediately]' started.
+Test Case '-[XNookTests.NotesManagerTests testDebouncedEditUpdatesMemoryImmediately]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testDebounceWritesLatestContentAutomatically]' started.
+Test Case '-[XNookTests.NotesManagerTests testDebounceWritesLatestContentAutomatically]' passed (0.014 seconds).
+Test Case '-[XNookTests.NotesManagerTests testDeleteAndUndoRestoreLatestDraftAtOriginalPosition]' started.
+Test Case '-[XNookTests.NotesManagerTests testDeleteAndUndoRestoreLatestDraftAtOriginalPosition]' passed (0.002 seconds).
+Test Case '-[XNookTests.NotesManagerTests testEditsToDifferentNotesSurviveOneFlush]' started.
+Test Case '-[XNookTests.NotesManagerTests testEditsToDifferentNotesSurviveOneFlush]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testExplicitRecoveryDoesNotWriteWhenOriginalCannotBeBackedUp]' started.
+Test Case '-[XNookTests.NotesManagerTests testExplicitRecoveryDoesNotWriteWhenOriginalCannotBeBackedUp]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testExplicitRecoveryKeepsOriginalBackupBeforeSavingDrafts]' started.
+Test Case '-[XNookTests.NotesManagerTests testExplicitRecoveryKeepsOriginalBackupBeforeSavingDrafts]' passed (0.002 seconds).
+Test Case '-[XNookTests.NotesManagerTests testExplicitSaveCancelsOlderDebouncedWrite]' started.
+Test Case '-[XNookTests.NotesManagerTests testExplicitSaveCancelsOlderDebouncedWrite]' passed (0.102 seconds).
+Test Case '-[XNookTests.NotesManagerTests testExportCannotOverwriteRecoveryBackupOrStorageThroughSymbolicLink]' started.
+Test Case '-[XNookTests.NotesManagerTests testExportCannotOverwriteRecoveryBackupOrStorageThroughSymbolicLink]' passed (0.002 seconds).
+Test Case '-[XNookTests.NotesManagerTests testExportFailureLeavesNotesAndStorageUnchanged]' started.
+Test Case '-[XNookTests.NotesManagerTests testExportFailureLeavesNotesAndStorageUnchanged]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testExportRejectsMissingNoteAndStorageOverwrite]' started.
+Test Case '-[XNookTests.NotesManagerTests testExportRejectsMissingNoteAndStorageOverwrite]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testExportUsesLatestContentAndPreservesUnicodeAndMarkdown]' started.
+Test Case '-[XNookTests.NotesManagerTests testExportUsesLatestContentAndPreservesUnicodeAndMarkdown]' passed (0.002 seconds).
+Test Case '-[XNookTests.NotesManagerTests testFailedDeleteAndUndoKeepRestoredDraftUntilPersistenceSucceeds]' started.
+Test Case '-[XNookTests.NotesManagerTests testFailedDeleteAndUndoKeepRestoredDraftUntilPersistenceSucceeds]' passed (0.002 seconds).
+Test Case '-[XNookTests.NotesManagerTests testFailedSaveKeepsEditorOpenUntilRetrySucceeds]' started.
+Test Case '-[XNookTests.NotesManagerTests testFailedSaveKeepsEditorOpenUntilRetrySucceeds]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testFailedSaveRetainsDraftAndRetriesSuccessfully]' started.
+Test Case '-[XNookTests.NotesManagerTests testFailedSaveRetainsDraftAndRetriesSuccessfully]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testFirstLaunchCreatesPersistedWelcomeNotes]' started.
+Test Case '-[XNookTests.NotesManagerTests testFirstLaunchCreatesPersistedWelcomeNotes]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testFlushingWithoutChangesDoesNotRewriteStorage]' started.
+Test Case '-[XNookTests.NotesManagerTests testFlushingWithoutChangesDoesNotRewriteStorage]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testMalformedStorageIsNeverAutomaticallyOverwritten]' started.
+Test Case '-[XNookTests.NotesManagerTests testMalformedStorageIsNeverAutomaticallyOverwritten]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testOnlyLatestDeletionCanBeUndoneAndMissingDeleteDoesNotReplaceIt]' started.
+Test Case '-[XNookTests.NotesManagerTests testOnlyLatestDeletionCanBeUndoneAndMissingDeleteDoesNotReplaceIt]' passed (0.002 seconds).
+Test Case '-[XNookTests.NotesManagerTests testReadFailureDoesNotCreateWelcomeNotes]' started.
+Test Case '-[XNookTests.NotesManagerTests testReadFailureDoesNotCreateWelcomeNotes]' passed (0.000 seconds).
+Test Case '-[XNookTests.NotesManagerTests testReadOnlyStorageRejectsEditingDeletingCreatingAndUndo]' started.
+Test Case '-[XNookTests.NotesManagerTests testReadOnlyStorageRejectsEditingDeletingCreatingAndUndo]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testReloadFailurePreservesLoadedNotesAndCurrentEditor]' started.
+Test Case '-[XNookTests.NotesManagerTests testReloadFailurePreservesLoadedNotesAndCurrentEditor]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testReloadRemovingSelectedNoteAlsoClosesEditor]' started.
+Test Case '-[XNookTests.NotesManagerTests testReloadRemovingSelectedNoteAlsoClosesEditor]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testRenameAndBodyEditsUseLatestDraftAndPersistTogether]' started.
+Test Case '-[XNookTests.NotesManagerTests testRenameAndBodyEditsUseLatestDraftAndPersistTogether]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testRetryReadLoadsRepairedOriginal]' started.
+Test Case '-[XNookTests.NotesManagerTests testRetryReadLoadsRepairedOriginal]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testSearchIncludesNotesBeyondOverviewAndMatchesTitleOrContent]' started.
+Test Case '-[XNookTests.NotesManagerTests testSearchIncludesNotesBeyondOverviewAndMatchesTitleOrContent]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testSearchSupportsChineseContents]' started.
+Test Case '-[XNookTests.NotesManagerTests testSearchSupportsChineseContents]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testSelectingMissingIDDoesNotChangeEditorOrFlushPendingDraft]' started.
+Test Case '-[XNookTests.NotesManagerTests testSelectingMissingIDDoesNotChangeEditorOrFlushPendingDraft]' passed (0.003 seconds).
+Test Case '-[XNookTests.NotesManagerTests testSelectingStaleNoteUsesItsLatestInMemoryContent]' started.
+Test Case '-[XNookTests.NotesManagerTests testSelectingStaleNoteUsesItsLatestInMemoryContent]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testTerminationFlushesPendingEdits]' started.
+Test Case '-[XNookTests.NotesManagerTests testTerminationFlushesPendingEdits]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testTerminationIsBlockedOnlyWhenUnsavedEditsCannotBeWritten]' started.
+Test Case '-[XNookTests.NotesManagerTests testTerminationIsBlockedOnlyWhenUnsavedEditsCannotBeWritten]' passed (0.001 seconds).
+Test Case '-[XNookTests.NotesManagerTests testUnreadableStorageWithoutEditsDoesNotBlockTermination]' started.
+Test Case '-[XNookTests.NotesManagerTests testUnreadableStorageWithoutEditsDoesNotBlockTermination]' passed (0.001 seconds).
+Test Suite 'NotesManagerTests' passed at 2026-10-18 04:10:39.588.
+	 Executed 32 tests, with 0 failures (0 unexpected) in 0.153 (0.155) seconds
+Test Suite 'PanelKeyboardActionTests' started at 2026-10-18 04:10:39.588.
+Test Case '-[XNookTests.PanelKeyboardActionTests testNavigationAndQuickNoteKeys]' started.
+Test Case '-[XNookTests.PanelKeyboardActionTests testNavigationAndQuickNoteKeys]' passed (0.000 seconds).
+Test Case '-[XNookTests.PanelKeyboardActionTests testTypingAndEditorShortcutsAreNotIntercepted]' started.
+Test Case '-[XNookTests.PanelKeyboardActionTests testTypingAndEditorShortcutsAreNotIntercepted]' passed (0.000 seconds).
+Test Suite 'PanelKeyboardActionTests' passed at 2026-10-18 04:10:39.589.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'ScriptingBridgeHelperTests' started at 2026-10-18 04:10:39.589.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkCacheKeepsSuccessfulDataWhenPlaybackIsPaused]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkCacheKeepsSuccessfulDataWhenPlaybackIsPaused]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkCacheKeyDistinguishesFieldBoundaries]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkCacheKeyDistinguishesFieldBoundaries]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkFailureBacksOffAndConcurrentReadsAreDeduplicated]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkFailureBacksOffAndConcurrentReadsAreDeduplicated]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkIsRejectedWhenTrackChangesDuringRead]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testArtworkIsRejectedWhenTrackChangesDuringRead]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testClosedMusicIsNeverQueriedByDirectSnapshotMethod]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testClosedMusicIsNeverQueriedByDirectSnapshotMethod]' passed (0.102 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testMusicMetadataCompletesWhileArtworkIsStillPending]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testMusicMetadataCompletesWhileArtworkIsStillPending]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPausedTrackWinsOverStoppedPlayerInEitherSource]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPausedTrackWinsOverStoppedPlayerInEitherSource]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionFallsBackToAppleScriptWhenBridgeHasNoValue]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionFallsBackToAppleScriptWhenBridgeHasNoValue]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionPrefersAppleScriptWhenBridgeReportsZero]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionPrefersAppleScriptWhenBridgeReportsZero]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionRejectsInvalidValues]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionRejectsInvalidValues]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionUsesBridgeWhenAppleScriptIsUnavailable]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlaybackPositionUsesBridgeWhenAppleScriptIsUnavailable]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlayingMusicKeepsPriorityOverOtherPlayer]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlayingMusicKeepsPriorityOverOtherPlayer]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlayingSpotifyWinsOverPausedMusic]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testPlayingSpotifyWinsOverPausedMusic]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testRunningPlayerReadFailureIsDifferentFromAllPlayersClosed]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testRunningPlayerReadFailureIsDifferentFromAllPlayersClosed]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSelectedSourceIdentifiesMusicAndSpotify]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSelectedSourceIdentifiesMusicAndSpotify]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSinglePausedOrStoppedSnapshotRemainsAvailable]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSinglePausedOrStoppedSnapshotRemainsAvailable]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotDoesNotCoerceMissingOrInvalidPositionIntoZero]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotDoesNotCoerceMissingOrInvalidPositionIntoZero]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotParsesSecondsAndSamplesPositionAtCompletion]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotParsesSecondsAndSamplesPositionAtCompletion]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotRejectsMalformedReplyButAcceptsStoppedPlayer]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotRejectsMalformedReplyButAcceptsStoppedPlayer]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotScriptsHaveBoundedEventsAndDoNotFetchArtwork]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSnapshotScriptsHaveBoundedEventsAndDoNotFetchArtwork]' passed (0.000 seconds).
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSpotifySnapshotConvertsDurationFromMilliseconds]' started.
+Test Case '-[XNookTests.ScriptingBridgeHelperTests testSpotifySnapshotConvertsDurationFromMilliseconds]' passed (0.000 seconds).
+Test Suite 'ScriptingBridgeHelperTests' passed at 2026-10-18 04:10:39.695.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.105 (0.106) seconds
+Test Suite 'SingleInstanceLockTests' started at 2026-10-18 04:10:39.695.
+Test Case '-[XNookTests.SingleInstanceLockTests testBothBundleTypesAndLegacyDevelopmentInstancesExcludeEachOther]' started.
+Test Case '-[XNookTests.SingleInstanceLockTests testBothBundleTypesAndLegacyDevelopmentInstancesExcludeEachOther]' passed (0.001 seconds).
+Test Case '-[XNookTests.SingleInstanceLockTests testDevelopmentBundleUsesTheSameDataLockAsProduction]' started.
+Test Case '-[XNookTests.SingleInstanceLockTests testDevelopmentBundleUsesTheSameDataLockAsProduction]' passed (0.000 seconds).
+Test Case '-[XNookTests.SingleInstanceLockTests testIsDevelopmentBundleDetectsBuildPathComponent]' started.
+Test Case '-[XNookTests.SingleInstanceLockTests testIsDevelopmentBundleDetectsBuildPathComponent]' passed (0.000 seconds).
+Test Case '-[XNookTests.SingleInstanceLockTests testLockFilenameUsesProductionLockOutsideBuildDirectory]' started.
+Test Case '-[XNookTests.SingleInstanceLockTests testLockFilenameUsesProductionLockOutsideBuildDirectory]' passed (0.000 seconds).
+Test Case '-[XNookTests.SingleInstanceLockTests testUnsafeLockPathFailsWithoutWritingThroughIt]' started.
+Test Case '-[XNookTests.SingleInstanceLockTests testUnsafeLockPathFailsWithoutWritingThroughIt]' passed (0.001 seconds).
+Test Suite 'SingleInstanceLockTests' passed at 2026-10-18 04:10:39.697.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'SwipeGestureRecognizerTests' started at 2026-10-18 04:10:39.697.
+Test Case '-[XNookTests.SwipeGestureRecognizerTests testMomentumScrollDoesNotTriggerSwitch]' started.
+Test Case '-[XNookTests.SwipeGestureRecognizerTests testMomentumScrollDoesNotTriggerSwitch]' passed (0.000 seconds).
+Test Case '-[XNookTests.SwipeGestureRecognizerTests testNewGestureDoesNotReusePreviousPartialDistance]' started.
+Test Case '-[XNookTests.SwipeGestureRecognizerTests testNewGestureDoesNotReusePreviousPartialDistance]' passed (0.000 seconds).
+Test Case '-[XNookTests.SwipeGestureRecognizerTests testSuppressionPreventsTargetFromConsumingSameGesture]' started.
+Test Case '-[XNookTests.SwipeGestureRecognizerTests testSuppressionPreventsTargetFromConsumingSameGesture]' passed (0.000 seconds).
+Test Suite 'SwipeGestureRecognizerTests' passed at 2026-10-18 04:10:39.698.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'ThemeManagerTests' started at 2026-10-18 04:10:39.698.
+Test Case '-[XNookTests.ThemeManagerTests testAppearanceObservationReadsChangeWithoutWritingOverride]' started.
+Test Case '-[XNookTests.ThemeManagerTests testAppearanceObservationReadsChangeWithoutWritingOverride]' passed (0.102 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testDefaultModeIsSystem]' started.
+Test Case '-[XNookTests.ThemeManagerTests testDefaultModeIsSystem]' passed (0.001 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testManualModeDoesNotStartSystemObservation]' started.
+Test Case '-[XNookTests.ThemeManagerTests testManualModeDoesNotStartSystemObservation]' passed (0.002 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testModePersists]' started.
+Test Case '-[XNookTests.ThemeManagerTests testModePersists]' passed (0.001 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testQueuedSystemCallbackCannotOverrideNewManualMode]' started.
+Test Case '-[XNookTests.ThemeManagerTests testQueuedSystemCallbackCannotOverrideNewManualMode]' passed (0.158 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testResolvedSchemeDark]' started.
+Test Case '-[XNookTests.ThemeManagerTests testResolvedSchemeDark]' passed (0.002 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testResolvedSchemeLight]' started.
+Test Case '-[XNookTests.ThemeManagerTests testResolvedSchemeLight]' passed (0.005 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testResolvedSchemeSystemReturnsValidScheme]' started.
+Test Case '-[XNookTests.ThemeManagerTests testResolvedSchemeSystemReturnsValidScheme]' passed (0.002 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testSwitchingToSystemResolvesAfterRemovingManualOverride]' started.
+Test Case '-[XNookTests.ThemeManagerTests testSwitchingToSystemResolvesAfterRemovingManualOverride]' passed (0.004 seconds).
+Test Case '-[XNookTests.ThemeManagerTests testUnchangedSystemAppearanceDoesNotRetriggerCallbacks]' started.
+Test Case '-[XNookTests.ThemeManagerTests testUnchangedSystemAppearanceDoesNotRetriggerCallbacks]' passed (0.152 seconds).
+Test Suite 'ThemeManagerTests' passed at 2026-10-18 04:10:40.129.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.430 (0.431) seconds
+Test Suite 'TrayManagerTests' started at 2026-10-18 04:10:40.129.
+Test Case '-[XNookTests.TrayManagerTests testBookmarkCreationFailureDoesNotAddFileOrOverwriteStorage]' started.
+Test Case '-[XNookTests.TrayManagerTests testBookmarkCreationFailureDoesNotAddFileOrOverwriteStorage]' passed (0.002 seconds).
+Test Case '-[XNookTests.TrayManagerTests testCorruptStorageIsNotOverwrittenByAddOrRemove]' started.
+Test Case '-[XNookTests.TrayManagerTests testCorruptStorageIsNotOverwrittenByAddOrRemove]' passed (0.001 seconds).
+Test Case '-[XNookTests.TrayManagerTests testFailedReloadKeepsDisplayedRecordsAndBlocksRemovalUntilSuccessfulRetry]' started.
+Test Case '-[XNookTests.TrayManagerTests testFailedReloadKeepsDisplayedRecordsAndBlocksRemovalUntilSuccessfulRetry]' passed (0.003 seconds).
+Test Case '-[XNookTests.TrayManagerTests testFailedSaveDoesNotShowNewFileAsPersisted]' started.
+Test Case '-[XNookTests.TrayManagerTests testFailedSaveDoesNotShowNewFileAsPersisted]' passed (0.001 seconds).
+Test Case '-[XNookTests.TrayManagerTests testFailedStaleBookmarkRefreshPreservesOriginalRecord]' started.
+Test Case '-[XNookTests.TrayManagerTests testFailedStaleBookmarkRefreshPreservesOriginalRecord]' passed (0.001 seconds).
+Test Case '-[XNookTests.TrayManagerTests testUnavailableRecordCanBeResolvedAfterReload]' started.
+Test Case '-[XNookTests.TrayManagerTests testUnavailableRecordCanBeResolvedAfterReload]' passed (0.001 seconds).
+Test Case '-[XNookTests.TrayManagerTests testUnavailableRecordSurvivesAddingAndRemovingAnotherFile]' started.
+Test Case '-[XNookTests.TrayManagerTests testUnavailableRecordSurvivesAddingAndRemovingAnotherFile]' passed (0.001 seconds).
+Test Case '-[XNookTests.TrayManagerTests testUnavailableRecordSurvivesBookmarkRefreshAndLaterSave]' started.
+Test Case '-[XNookTests.TrayManagerTests testUnavailableRecordSurvivesBookmarkRefreshAndLaterSave]' passed (0.002 seconds).
+Test Suite 'TrayManagerTests' passed at 2026-10-18 04:10:40.142.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+Test Suite 'UpdateManagerTests' started at 2026-10-18 04:10:40.142.
+Test Case '-[XNookTests.UpdateManagerTests testApplyCheckResultTransitionsToUpdateAvailable]' started.
+Test Case '-[XNookTests.UpdateManagerTests testApplyCheckResultTransitionsToUpdateAvailable]' passed (0.001 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testApplyCheckResultTransitionsToUpToDateForCurrentVersion]' started.
+Test Case '-[XNookTests.UpdateManagerTests testApplyCheckResultTransitionsToUpToDateForCurrentVersion]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testApplyCheckResultWithOlderRemoteSetsUpToDate]' started.
+Test Case '-[XNookTests.UpdateManagerTests testApplyCheckResultWithOlderRemoteSetsUpToDate]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testCheckForUpdatesClearsStaleReleaseOnDecodeFailure]' started.
+Test Case '-[XNookTests.UpdateManagerTests testCheckForUpdatesClearsStaleReleaseOnDecodeFailure]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testDmgURLPicksFirstDmgAsset]' started.
+Test Case '-[XNookTests.UpdateManagerTests testDmgURLPicksFirstDmgAsset]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testDmgURLReturnsNilWhenNoDmg]' started.
+Test Case '-[XNookTests.UpdateManagerTests testDmgURLReturnsNilWhenNoDmg]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testEmptyVersionReturnsFalse]' started.
+Test Case '-[XNookTests.UpdateManagerTests testEmptyVersionReturnsFalse]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testInvalidVersionReturnsFalse]' started.
+Test Case '-[XNookTests.UpdateManagerTests testInvalidVersionReturnsFalse]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeNoPrefix]' started.
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeNoPrefix]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeStripsCapitalVPrefix]' started.
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeStripsCapitalVPrefix]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeStripsVPrefix]' started.
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeStripsVPrefix]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeTrimsWhitespace]' started.
+Test Case '-[XNookTests.UpdateManagerTests testNormalizeTrimsWhitespace]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testParsesGitHubReleasePayload]' started.
+Test Case '-[XNookTests.UpdateManagerTests testParsesGitHubReleasePayload]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testRemoteEqual]' started.
+Test Case '-[XNookTests.UpdateManagerTests testRemoteEqual]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testRemoteLongerVersionTreatedAsNewer]' started.
+Test Case '-[XNookTests.UpdateManagerTests testRemoteLongerVersionTreatedAsNewer]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testRemoteNewerMajor]' started.
+Test Case '-[XNookTests.UpdateManagerTests testRemoteNewerMajor]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testRemoteNewerMinor]' started.
+Test Case '-[XNookTests.UpdateManagerTests testRemoteNewerMinor]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testRemoteNewerPatch]' started.
+Test Case '-[XNookTests.UpdateManagerTests testRemoteNewerPatch]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testRemoteOlder]' started.
+Test Case '-[XNookTests.UpdateManagerTests testRemoteOlder]' passed (0.000 seconds).
+Test Case '-[XNookTests.UpdateManagerTests testRemoteShorterVersionTreatedAsOlder]' started.
+Test Case '-[XNookTests.UpdateManagerTests testRemoteShorterVersionTreatedAsOlder]' passed (0.000 seconds).
+Test Suite 'UpdateManagerTests' passed at 2026-10-18 04:10:40.147.
+	 Executed 20 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+Test Suite 'WorkflowPreviewTests' started at 2026-10-18 04:10:40.147.
+Test Case '-[XNookTests.WorkflowPreviewTests testRenderIsolatedWorkflowPanels]' started.
+/Users/meteor/github/XNook/Tests/XNookTests/WorkflowPreviewTests.swift:13: -[XNookTests.WorkflowPreviewTests testRenderIsolatedWorkflowPanels] : Test skipped - Set XNOOK_RENDER_UI=1 to render isolated workflow previews.
+Test Case '-[XNookTests.WorkflowPreviewTests testRenderIsolatedWorkflowPanels]' skipped (0.000 seconds).
+Test Suite 'WorkflowPreviewTests' passed at 2026-10-18 04:10:40.148.
+	 Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'XNookTests.xctest' passed at 2026-10-18 04:10:40.148.
+	 Executed 300 tests, with 2 tests skipped and 0 failures (0 unexpected) in 2.527 (2.549) seconds
+Test Suite 'All tests' passed at 2026-10-18 04:10:40.148.
+	 Executed 300 tests, with 2 tests skipped and 0 failures (0 unexpected) in 2.527 (2.550) seconds
+[Lyrics] 歌词获取失败: 歌词服务返回 HTTP 503
+[Lyrics] 歌词获取失败: 未能完成操作。（NSURLErrorDomain错误-1009。）
+[Lyrics] 歌词获取失败: 未能完成操作。（NSURLErrorDomain错误-1009。）
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

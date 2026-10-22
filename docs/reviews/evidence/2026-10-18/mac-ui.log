@@ -1,0 +1,26 @@
+Building for debugging...
+[1 / 1]
+Build complete! (0.49秒)
+Test Suite 'Selected tests' started at 2026-10-18 04:13:31.423.
+Test Suite 'XNookTests.xctest' started at 2026-10-18 04:13:31.424.
+Test Suite 'NotchWindowInteractionTests' started at 2026-10-18 04:13:31.424.
+Test Case '-[XNookTests.NotchWindowInteractionTests testExpandedPanelForwardsDraggingInsteadOfMovingWindow]' started.
+Test Case '-[XNookTests.NotchWindowInteractionTests testExpandedPanelForwardsDraggingInsteadOfMovingWindow]' passed (0.097 seconds).
+Test Suite 'NotchWindowInteractionTests' passed at 2026-10-18 04:13:31.521.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.097 (0.097) seconds
+Test Suite 'WorkflowPreviewTests' started at 2026-10-18 04:13:31.521.
+Test Case '-[XNookTests.WorkflowPreviewTests testRenderIsolatedWorkflowPanels]' started.
+Test Case '-[XNookTests.WorkflowPreviewTests testRenderIsolatedWorkflowPanels]' passed (2.263 seconds).
+Test Suite 'WorkflowPreviewTests' passed at 2026-10-18 04:13:33.784.
+	 Executed 1 test, with 0 failures (0 unexpected) in 2.263 (2.263) seconds
+Test Suite 'XNookTests.xctest' passed at 2026-10-18 04:13:33.784.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 2.359 (2.360) seconds
+Test Suite 'Selected tests' passed at 2026-10-18 04:13:33.784.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 2.359 (2.361) seconds
+Workflow preview: /tmp/xnook-workflow-ui/overview-800-dark.png (1600 × 800)
+Workflow preview: /tmp/xnook-workflow-ui/overview-800-light.png (1600 × 800)
+Workflow preview: /tmp/xnook-workflow-ui/overview-160-dark.png (320 × 800)
+Workflow preview: /tmp/xnook-workflow-ui/notes-list-320-light.png (640 × 800)
+Workflow preview: /tmp/xnook-workflow-ui/notes-editor-320-dark.png (640 × 800)
+Workflow preview: /tmp/xnook-workflow-ui/calendar-320-light.png (640 × 800)
+Workflow preview: /tmp/xnook-workflow-ui/history-320-light.png (640 × 800)

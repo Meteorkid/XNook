@@ -1,0 +1,6 @@
+{
+  "source": "https://api.osv.dev/v1/querybatch",
+  "date": "2026-10-18",
+  "complete": false,
+  "error": "Remote end closed connection without response"
+}

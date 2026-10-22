@@ -1,0 +1,4 @@
+{
+  "postTestSourceChange": "windows/src/settings-view.ts",
+  "reason": "Only about-dialog version label 0.3.1 -> 0.3.2; reverse substitution exactly matches tested hash. Final TypeScript/build checks ran after change."
+}

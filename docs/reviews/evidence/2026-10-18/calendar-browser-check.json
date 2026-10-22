@@ -1,0 +1,12 @@
+{
+  "heartbeat": 121,
+  "notes": [
+    "解析期间仍可编辑并保存"
+  ],
+  "calendars": 0,
+  "timeout": "日历处理超时，已停止此文件；请减少重复规则或导出较短日期范围",
+  "recoveryImported": true,
+  "realBrowser": "Chrome",
+  "nativeBoundary": "controlled fixture",
+  "windowsRuntimeVerified": false
+}

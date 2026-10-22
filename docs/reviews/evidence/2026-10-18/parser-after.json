@@ -1,0 +1,16 @@
+[
+  {
+    "fixture": "ics-baseline.ts",
+    "count": 16000,
+    "exit": 1,
+    "output": "",
+    "errorSummary": "CalendarLimitError: 日历组件总量或嵌套层级超过安全上限"
+  },
+  {
+    "fixture": "lyrics-baseline.ts",
+    "count": 100000,
+    "exit": 0,
+    "output": "{\"bytes\":100010,\"elapsedMs\":0,\"lines\":1}",
+    "errorSummary": ""
+  }
+]

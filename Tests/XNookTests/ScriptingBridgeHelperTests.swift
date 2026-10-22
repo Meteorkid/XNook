@@ -268,6 +268,53 @@ final class ScriptingBridgeHelperTests: XCTestCase {
         XCTAssertEqual(selected["title"] as? String, "Playing Spotify Track")
     }
 
+    func testPausedTrackWinsOverStoppedPlayerInEitherSource() {
+        for emptyTitle in ["", " \n\t "] {
+            for pausedApp in [ScriptingBridgeHelper.SupportedApp.music, .spotify] {
+                let paused: [String: Any] = [
+                    "source": pausedApp.rawValue, "title": "Paused Track", "playbackRate": 0.0,
+                ]
+                let stopped: [String: Any] = [
+                    "source": pausedApp == .music ? "Spotify" : "Music",
+                    "title": emptyTitle, "playbackRate": 0.0,
+                ]
+                let selected = ScriptingBridgeHelper.selectNowPlayingInfo(
+                    music: pausedApp == .music ? paused : stopped,
+                    spotify: pausedApp == .spotify ? paused : stopped
+                )
+
+                XCTAssertEqual(selected["title"] as? String, "Paused Track")
+                XCTAssertEqual(ScriptingBridgeHelper.supportedApp(from: selected), pausedApp)
+            }
+        }
+    }
+
+    func testSinglePausedOrStoppedSnapshotRemainsAvailable() {
+        for app in [ScriptingBridgeHelper.SupportedApp.music, .spotify] {
+            for title in ["Paused Track", ""] {
+                let snapshot: [String: Any] = ["source": app.rawValue, "title": title, "playbackRate": 0.0]
+                let selected = ScriptingBridgeHelper.selectNowPlayingInfo(
+                    music: app == .music ? snapshot : nil,
+                    spotify: app == .spotify ? snapshot : nil
+                )
+
+                XCTAssertEqual(selected["title"] as? String, title)
+                XCTAssertEqual(ScriptingBridgeHelper.supportedApp(from: selected), app)
+            }
+        }
+        XCTAssertTrue(ScriptingBridgeHelper.selectNowPlayingInfo(music: nil, spotify: nil).isEmpty)
+    }
+
+    func testPlayingMusicKeepsPriorityOverOtherPlayer() {
+        let music: [String: Any] = ["source": "Music", "title": "Playing Music", "playbackRate": 1.0]
+        for spotifyRate in [0.0, 1.0] {
+            let spotify: [String: Any] = ["source": "Spotify", "title": "Spotify Track", "playbackRate": spotifyRate]
+            let selected = ScriptingBridgeHelper.selectNowPlayingInfo(music: music, spotify: spotify)
+
+            XCTAssertEqual(ScriptingBridgeHelper.supportedApp(from: selected), .music)
+        }
+    }
+
     func testSelectedSourceIdentifiesMusicAndSpotify() {
         XCTAssertEqual(
             ScriptingBridgeHelper.supportedApp(from: ["source": "Music"]),

@@ -3,10 +3,11 @@ import SwiftUI
 /// 媒体播放 Widget 视图
 struct MediaWidgetView: View {
     var mediaManager: MediaManager
+    var isDetail = false
 
     var body: some View {
         VStack(spacing: 8) {
-            Spacer()
+            if isDetail { Spacer() }
 
             // 专辑封面
             Button(action: { mediaManager.openCurrentPlayer() }) {
@@ -53,7 +54,7 @@ struct MediaWidgetView: View {
             }
             .foregroundColor(.primary)
 
-            Spacer()
+            if isDetail { Spacer() }
         }
     }
 
@@ -86,7 +87,9 @@ struct MediaWidgetView: View {
     }
 }
 
+#if !XNOOK_DISABLE_PREVIEWS
 #Preview {
     MediaWidgetView(mediaManager: MediaManager())
         .background(Color.black)
 }
+#endif

@@ -269,6 +269,14 @@ enum ScriptingBridgeHelper {
         if let spotify, (spotify["playbackRate"] as? Double ?? 0) > 0 {
             return spotify
         }
+        if let music, let title = music["title"] as? String,
+           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return music
+        }
+        if let spotify, let title = spotify["title"] as? String,
+           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return spotify
+        }
         return music ?? spotify ?? [:]
     }
 

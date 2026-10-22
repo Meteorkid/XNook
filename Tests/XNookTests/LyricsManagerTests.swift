@@ -92,6 +92,51 @@ final class LyricsManagerTests: XCTestCase {
         XCTAssertTrue(selected.hasSyncedLyrics)
     }
 
+    func testSearchResultSkipsMalformedSyncedLyricsForUsablePlainLyrics() {
+        let candidates = [
+            LrcResponse(trackName: "Song", artistName: "Artist", duration: 180,
+                        syncedLyrics: "[ti:Song]", plainLyrics: nil),
+            LrcResponse(trackName: "Song", artistName: "Artist", duration: 180,
+                        syncedLyrics: nil, plainLyrics: "Usable lyrics"),
+        ]
+
+        let selected = LyricsManager.bestSearchResult(
+            from: candidates, title: "Song", artist: "Artist", duration: 180
+        )
+
+        XCTAssertEqual(selected?.plainLyrics, "Usable lyrics")
+    }
+
+    func testMalformedSyncedLyricsDoNotBoostPlainCandidateScore() {
+        let candidates = [
+            LrcResponse(trackName: "Song", artistName: "Artist", duration: 150,
+                        syncedLyrics: "[ti:Song]", plainLyrics: "Farther plain lyrics"),
+            LrcResponse(trackName: "Song", artistName: "Artist", duration: 180,
+                        syncedLyrics: nil, plainLyrics: "Closer plain lyrics"),
+        ]
+
+        let selected = LyricsManager.bestSearchResult(
+            from: candidates, title: "Song", artist: "Artist", duration: 180
+        )
+
+        XCTAssertEqual(selected?.plainLyrics, "Closer plain lyrics")
+    }
+
+    func testSearchResultRejectsUnusableLyricsInEveryMatchingRound() {
+        for (title, artist) in [("Song", "Artist"), ("Song (Live)", "Artist"), ("Song", "Other")] {
+            for synced in [nil, "[ti:Song]"] as [String?] {
+                let candidate = LrcResponse(
+                    trackName: title, artistName: artist, duration: 180,
+                    syncedLyrics: synced, plainLyrics: " \n\t "
+                )
+
+                XCTAssertNil(LyricsManager.bestSearchResult(
+                    from: [candidate], title: "Song (Studio)", artist: "Artist", duration: 180
+                ))
+            }
+        }
+    }
+
     // MARK: - 短歌名匹配（防回归）
 
     func testShortTitleExactMatchStillWorks() throws {

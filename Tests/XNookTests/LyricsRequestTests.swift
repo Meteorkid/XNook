@@ -167,6 +167,63 @@ final class LyricsRequestTests: XCTestCase {
         XCTAssertEqual(fixture.writes.last?.0, .plain)
     }
 
+    func testSearchSkipsMalformedSyncedCandidateAfterExactMiss() async {
+        let fixture = LyricsRequestFixture()
+        var requests = 0
+        let manager = fixture.manager { request in
+            requests += 1
+            if request.url!.path.hasSuffix("/get") {
+                return Self.response(request, json: "{}", status: 404)
+            }
+            return Self.response(request, json: #"[{"trackName":"Song","artistName":"Artist","duration":180,"syncedLyrics":"[ti:Song]"},{"trackName":"Song","artistName":"Artist","duration":180,"plainLyrics":"Usable lyrics"}]"#)
+        }
+
+        await fetch(manager)
+
+        XCTAssertEqual(requests, 2)
+        XCTAssertFalse(manager.hasLyrics)
+        XCTAssertEqual(manager.plainLyricPreview, "Usable lyrics")
+        XCTAssertEqual(fixture.writes.last?.0, .plain)
+        XCTAssertEqual(fixture.writes.last?.1, "Usable lyrics")
+    }
+
+    func testUnusableSearchCandidateAllowsQueryFallback() async {
+        let fixture = LyricsRequestFixture()
+        var usedQueryFallback = false
+        let manager = fixture.manager { request in
+            if request.url!.path.hasSuffix("/get") {
+                return Self.response(request, json: "{}", status: 404)
+            }
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            if query?.contains(where: { $0.name == "q" }) == true {
+                usedQueryFallback = true
+                return Self.response(request, json: "[\(Self.syncedJSON)]")
+            }
+            return Self.response(request, json: #"[{"trackName":"Song","artistName":"Artist","duration":180,"syncedLyrics":"[ti:Song]","plainLyrics":" \n\t "}]"#)
+        }
+
+        await fetch(manager)
+        manager.updateCurrentLine(elapsedTime: 2)
+
+        XCTAssertTrue(usedQueryFallback)
+        XCTAssertEqual(manager.currentLine, "Recovered line")
+        XCTAssertEqual(fixture.writes.last?.0, .synced)
+    }
+
+    func testWhitespaceExactPlainLyricsDoNotHideSearchPlainLyrics() async {
+        let fixture = LyricsRequestFixture()
+        let manager = fixture.manager { request in
+            Self.response(request, json: request.url!.path.hasSuffix("/get")
+                ? #"{"plainLyrics":" \n\t "}"#
+                : #"[{"trackName":"Song","artistName":"Artist","duration":180,"plainLyrics":"Usable lyrics"}]"#)
+        }
+
+        await fetch(manager)
+
+        XCTAssertEqual(manager.plainLyricPreview, "Usable lyrics")
+        XCTAssertEqual(fixture.writes.last?.1, "Usable lyrics")
+    }
+
     func testDisablingLyricsInvalidatesInFlightResult() async throws {
         let fixture = LyricsRequestFixture()
         let started = expectation(description: "Request started")

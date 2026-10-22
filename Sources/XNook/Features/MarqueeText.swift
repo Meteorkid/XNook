@@ -6,6 +6,8 @@ struct MarqueeText: View {
     let font: Font
     let availableWidth: CGFloat
     var speed: CGFloat = 25
+    var isAnimated = true
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     @State private var textWidth: CGFloat = 0
     @State private var startTime: Date = .now
@@ -14,11 +16,17 @@ struct MarqueeText: View {
 
     var body: some View {
         Group {
-            if needsScroll {
+            if needsScroll && isAnimated && !systemReduceMotion && speed > 0 {
                 TimelineView(.animation) { context in
                     label
                         .offset(x: calculateOffset(at: context.date))
                 }
+            } else if needsScroll {
+                Text(text)
+                    .font(font)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: availableWidth, alignment: .leading)
             } else {
                 // 文字放得下时不要套 TimelineView：它跟随屏幕刷新率逐帧重建，
                 // 而此时偏移恒为 0 —— 在 ProMotion 上等于常态 120fps 重绘一行静止文本。
@@ -27,6 +35,7 @@ struct MarqueeText: View {
         }
         .frame(width: availableWidth, height: 14)
         .clipped()
+        .help(text)
         .background(
             label
                 .background(

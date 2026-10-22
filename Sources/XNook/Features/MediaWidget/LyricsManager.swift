@@ -328,6 +328,11 @@ final class LyricsManager {
         artist: String,
         duration: TimeInterval?
     ) -> LrcResponse? {
+        // 元数据或空白内容不能阻断后续候选与 q= 兜底搜索。
+        let usableCandidates = candidates.filter {
+            !parseLrc($0.syncedLyrics ?? "").isEmpty
+                || $0.plainLyrics?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
         let normalizedTitle = normalize(title)
         let normalizedArtist = normalize(artist)
         // 注意：coreTitle 必须从原始标题提取。normalize 会剥掉括号，
@@ -335,7 +340,7 @@ final class LyricsManager {
         let coreTitle = Self.coreTitle(title)
 
         // 第一轮：严格匹配（完整 normalize 字符串双向 contains）
-        let strict = candidates.filter { candidate in
+        let strict = usableCandidates.filter { candidate in
             matches(candidate, normalizedTitle: normalizedTitle, normalizedArtist: normalizedArtist)
         }
         if let best = strict.max(by: { searchScore($0, duration: duration) < searchScore($1, duration: duration) }) {
@@ -345,7 +350,7 @@ final class LyricsManager {
         // 第二轮：核心歌名匹配（去括号后比较）—— 解决括号内版本/来源标注不匹配
         // 例：Music "光亮 (大型纪录片...主题歌)" vs LRCLIB "光亮 (大型紀錄片...主題歌)"
         guard !coreTitle.isEmpty else { return nil }
-        let core = candidates.filter { candidate in
+        let core = usableCandidates.filter { candidate in
             guard candidate.hasLyrics else { return false }
             let candidateCore = Self.coreTitle(candidate.trackName ?? "")
             guard !candidateCore.isEmpty else { return false }
@@ -368,7 +373,7 @@ final class LyricsManager {
         // 切歌初期 duration 为 0、部分播放源不提供时长都会命中这种情况，
         // 代价远大于"翻唱匹配不上"，因此 duration 未知时直接放弃本轮。
         guard let duration else { return nil }
-        let coverMatch = candidates.filter { candidate in
+        let coverMatch = usableCandidates.filter { candidate in
             guard candidate.hasLyrics else { return false }
             guard let candidateDuration = candidate.duration else { return false }
             guard Self.coreTitle(candidate.trackName ?? "") == coreTitle else { return false }
@@ -445,7 +450,8 @@ final class LyricsManager {
                     if !parseLrc(exactResult.syncedLyrics ?? "").isEmpty {
                         return exactResult
                     }
-                    if let plain = exactResult.plainLyrics, !plain.isEmpty {
+                    if let plain = exactResult.plainLyrics,
+                       !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         exactFallback = exactResult
                         onPlainLyrics(plain)
                     }
@@ -599,7 +605,7 @@ final class LyricsManager {
         _ candidate: LrcResponse,
         duration: TimeInterval?
     ) -> Double {
-        var score = candidate.syncedLyrics?.isEmpty == false ? 100.0 : 0.0
+        var score = parseLrc(candidate.syncedLyrics ?? "").isEmpty ? 0.0 : 100.0
         if let duration, let candidateDuration = candidate.duration {
             score += max(0, 60 - abs(candidateDuration - duration))
         }

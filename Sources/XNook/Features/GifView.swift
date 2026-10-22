@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuartzCore
 
 /// GIF 动画视图 — 播放时动画，暂停时冻结
 struct GifView: NSViewRepresentable {
@@ -44,41 +45,54 @@ struct GifView: NSViewRepresentable {
         }
     }
 
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.dismantle()
+    }
+
     class Coordinator {
-        private var displayLink: CVDisplayLink?
+        private var displayLink: GifDisplayLinkDriving?
+        private let displayLinkFactory: (NSView, @escaping () -> Void) -> GifDisplayLinkDriving
+        private let clock: () -> TimeInterval
         private var source: CGImageSource?
         private var frameCount: Int = 0
         private var currentFrame: Int = 0
         private var frameDurations: [TimeInterval] = []
         private var lastFrameTime: TimeInterval = 0
         private var isAnimating: Bool = false
+        private var isDismantled = false
+        private var animationGeneration = 0
         private weak var imageView: NSImageView?
         private(set) var currentGifData: Data?
 
+        init(
+            displayLinkFactory: @escaping (NSView, @escaping () -> Void) -> GifDisplayLinkDriving = {
+                ViewGifDisplayLink(view: $0, callback: $1)
+            },
+            clock: @escaping () -> TimeInterval = CACurrentMediaTime
+        ) {
+            self.displayLinkFactory = displayLinkFactory
+            self.clock = clock
+        }
+
         func setupAnimation(gifData: Data, imageView: NSImageView) {
-            // 暂停当前动画，避免 tick() 读取中间状态
+            guard !isDismantled else { return }
             let wasAnimating = isAnimating
-            if wasAnimating, let displayLink = displayLink {
-                CVDisplayLinkStop(displayLink)
-                Unmanaged.passUnretained(self).release()
-                self.displayLink = nil
-            }
-            isAnimating = false
+            clearAnimation()
 
             self.imageView = imageView
             self.currentGifData = gifData
 
-            guard let source = CGImageSourceCreateWithData(gifData as CFData, nil) else {
-                imageView.image = NSImage(data: gifData)
+            imageView.image = nil
+            guard let resource = try? GifResource(data: gifData) else {
                 return
             }
-
-            self.frameCount = CGImageSourceGetCount(source)
-
-            guard frameCount > 1 else {
-                imageView.image = NSImage(data: gifData)
+            let source = resource.source
+            guard let firstImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
                 return
             }
+            imageView.image = NSImage(cgImage: firstImage, size: imageView.frame.size)
+            self.frameCount = resource.frameCount
+            guard frameCount > 1 else { return }
 
             var durations: [TimeInterval] = []
             for i in 0..<frameCount {
@@ -93,50 +107,55 @@ struct GifView: NSViewRepresentable {
             self.frameDurations = durations
             self.source = source
 
-            // 显示第一帧
-            if let firstImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
-                imageView.image = NSImage(cgImage: firstImage, size: imageView.frame.size)
+            if wasAnimating {
+                resumeAnimation()
             }
         }
 
         func resumeAnimation() {
-            guard frameCount > 1 else { return }
+            guard !isDismantled, !isAnimating, frameCount > 1, let imageView else { return }
             if displayLink == nil {
-                startDisplayLink()
+                let generation = animationGeneration
+                displayLink = displayLinkFactory(imageView) { [weak self] in
+                    guard let self, self.animationGeneration == generation else { return }
+                    self.tick()
+                }
             }
             isAnimating = true
-            lastFrameTime = CACurrentMediaTime()
+            lastFrameTime = clock()
+            displayLink?.resume()
         }
 
         func pauseAnimation() {
+            guard isAnimating else { return }
             isAnimating = false
+            displayLink?.pause()
         }
 
-        private func startDisplayLink() {
-            guard displayLink == nil else { return }
+        func dismantle() {
+            isDismantled = true
+            clearAnimation()
+            imageView = nil
+            currentGifData = nil
+        }
 
-            CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
-            guard let displayLink = displayLink else { return }
-
-            CVDisplayLinkSetOutputCallback(displayLink, { _, _, _, _, _, userInfo -> CVReturn in
-                guard let userInfo = userInfo else { return kCVReturnSuccess }
-                let coordinator = Unmanaged<Coordinator>.fromOpaque(userInfo).takeUnretainedValue()
-                // 全部在主线程处理，避免跨线程 data race
-                DispatchQueue.main.async {
-                    coordinator.tick()
-                }
-                return kCVReturnSuccess
-            }, Unmanaged.passRetained(self).toOpaque())
-
-            CVDisplayLinkStart(displayLink)
-            isAnimating = true
-            lastFrameTime = CACurrentMediaTime()
+        private func clearAnimation() {
+            isAnimating = false
+            // GIF 替换或拆卸后，旧驱动已排队的回调不能推进新动画。
+            animationGeneration += 1
+            displayLink?.invalidate()
+            displayLink = nil
+            source = nil
+            frameCount = 0
+            currentFrame = 0
+            frameDurations = []
+            lastFrameTime = 0
         }
 
         private func tick() {
             guard isAnimating, frameCount > 0 else { return }
 
-            let now = CACurrentMediaTime()
+            let now = clock()
             let elapsed = now - lastFrameTime
             let duration = frameDurations[currentFrame]
 
@@ -157,11 +176,44 @@ struct GifView: NSViewRepresentable {
         }
 
         deinit {
-            if let displayLink = displayLink {
-                CVDisplayLinkStop(displayLink)
-                // 释放 setupAnimation 和 startDisplayLink 中通过 passRetained 增加的引用计数
-                Unmanaged.passUnretained(self).release()
-            }
+            displayLink?.invalidate()
+        }
+    }
+}
+
+protocol GifDisplayLinkDriving: AnyObject {
+    func resume()
+    func pause()
+    func invalidate()
+}
+
+/// 使用视图所在屏幕的主 run loop 回调，避免跨线程排队和手动引用计数。
+private final class ViewGifDisplayLink: GifDisplayLinkDriving {
+    private let displayLink: CADisplayLink
+
+    init(view: NSView, callback: @escaping () -> Void) {
+        let target = CallbackTarget(callback: callback)
+        displayLink = view.displayLink(target: target, selector: #selector(CallbackTarget.tick(_:)))
+        displayLink.isPaused = true
+        displayLink.add(to: .main, forMode: .common)
+    }
+
+    func resume() { displayLink.isPaused = false }
+    func pause() { displayLink.isPaused = true }
+    func invalidate() { displayLink.invalidate() }
+
+    deinit { displayLink.invalidate() }
+
+    // displayLink 保留此代理，代理的闭包只弱引用 Coordinator。
+    private final class CallbackTarget: NSObject {
+        let callback: () -> Void
+
+        init(callback: @escaping () -> Void) {
+            self.callback = callback
+        }
+
+        @objc func tick(_ displayLink: CADisplayLink) {
+            callback()
         }
     }
 }

@@ -16,7 +16,7 @@ VERSION=$(cat "$(dirname "$0")/VERSION" | tr -d '[:space:]')
 echo "Building ${APP_NAME} v${VERSION}..."
 
 # Build the executable
-swift build -c release 2>&1
+swift build -c release "$@" 2>&1
 
 # Create app bundle structure
 mkdir -p "${MACOS}"
@@ -37,8 +37,19 @@ if [ -f "Resources/AppIcon.icns" ]; then
     cp "Resources/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
 fi
 
+ENTITLEMENTS="$(dirname "$0")/XNook.entitlements"
+
 # Re-sign the complete bundle after adding Info.plist and resources.
-codesign --force --deep --sign - "${APP_BUNDLE}"
+# Entitlements are always embedded so that a future Developer ID / notarised
+# build (which requires Hardened Runtime) keeps working: without
+# com.apple.security.files.bookmarks.app-scope every security-scoped bookmark
+# in the tray, GIF picker and NookFlow history fails to resolve after relaunch.
+if [[ "${XNOOK_ENABLE_HARDENED_RUNTIME:-0}" == "1" ]]; then
+    # Opt-in switch to validate the bundle behaves under Hardened Runtime.
+    codesign --force --deep --sign - --entitlements "${ENTITLEMENTS}" --options runtime "${APP_BUNDLE}"
+else
+    codesign --force --deep --sign - --entitlements "${ENTITLEMENTS}" "${APP_BUNDLE}"
+fi
 
 echo "App bundle created at: ${APP_BUNDLE}"
 echo "To run: open '${APP_BUNDLE}'"

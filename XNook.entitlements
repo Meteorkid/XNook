@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 文件架、GIF、NookFlow 任务附件全部依赖 app-scope security bookmark。
+         缺少此项时，启用 Hardened Runtime 后 bookmark 解析会直接失败，
+         表现为重启后这些条目全部打不开。 -->
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
+    <!-- 媒体 Widget 通过 AppleScript / ScriptingBridge 控制播放器。 -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>

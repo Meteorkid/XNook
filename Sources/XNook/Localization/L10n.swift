@@ -372,6 +372,26 @@ enum L10n {
     static var noNotes: String { localized(zh: "无笔记", en: "No notes") }
     static var markdown: String { localized(zh: "Markdown", en: "Markdown") }
     static var plainText: String { localized(zh: "纯文本", en: "Plain Text") }
+    static var notesReadFailed: String { localized(
+        zh: "无法读取笔记，原文件未修改。可重试读取，或保留原件副本后恢复使用。",
+        en: "Notes could not be read. The original file is unchanged. Retry reading or keep a backup and recover.") }
+    static var notesSaveFailed: String { localized(
+        zh: "笔记保存失败，编辑内容仍保留在内存中。请重试保存后再退出应用。",
+        en: "Notes could not be saved. Your edits remain in memory. Retry saving before quitting.") }
+    static var notesRecoveryFailed: String { localized(
+        zh: "无法备份原笔记文件，恢复已停止，原文件未修改。",
+        en: "The original notes could not be backed up. Recovery stopped without changing the original file.") }
+    static var notesStorageWarning: String { localized(zh: "笔记存储异常", en: "Notes storage issue") }
+    static var notesQuitWithoutSaving: String { localized(zh: "不保存并退出", en: "Quit Without Saving") }
+    static var notesRetry: String { localized(zh: "重试", en: "Retry") }
+    static var notesRecover: String { localized(zh: "保留原件并恢复", en: "Keep Original and Recover") }
+    static var notesShowBackup: String { localized(zh: "查看原件副本", en: "Show Original Backup") }
+    static var notesRecovered: String { localized(
+        zh: "笔记存储已恢复，原文件副本已保留，可在 Finder 中查看。",
+        en: "Notes storage is available again. A backup of the original file is available in Finder.") }
+    static var notesStorageReset: String { localized(
+        zh: "原笔记文件无法解析，已保留副本并从空列表重新开始。请从副本手动找回笔记。",
+        en: "The original notes file could not be parsed. A backup was kept and the list restarted empty. Restore your notes manually from the backup.") }
 
     // MARK: - Tray Widget
 
@@ -386,6 +406,16 @@ enum L10n {
     }
 
     static var collapseFiles: String { localized(zh: "收起", en: "Collapse") }
+
+    static func unavailableTrayFiles(_ count: Int) -> String {
+        localized(zh: "\(count) 个文件暂不可用，记录已保留", en: "\(count) files unavailable; records kept")
+    }
+
+    static var trayReadFailed: String { localized(zh: "文件架读取失败，原数据已保留", en: "Unable to load tray; original data kept") }
+    static var traySaveFailed: String { localized(zh: "保存失败，本次更改未生效", en: "Unable to save; change was not applied") }
+    static var trayBookmarkFailed: String { localized(zh: "无法访问此文件，请检查权限后重试", en: "Unable to access file; check permissions and retry") }
+    static var trayFileUnavailable: String { localized(zh: "文件暂不可用，请连接磁盘后重试", en: "File unavailable; reconnect its drive and retry") }
+    static var reloadTray: String { localized(zh: "重新加载文件架", en: "Reload tray") }
 
     static var openFile: String { localized(zh: "打开", en: "Open") }
 

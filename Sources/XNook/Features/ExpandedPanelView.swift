@@ -29,7 +29,7 @@ struct ExpandedPanelView: View {
     let onLinksPresentationChanged: (Bool) -> Void
     let onSettings: () -> Void
     let onClose: () -> Void
-    let onMeasuredHeight: (CGFloat) -> Void
+    let onMeasurement: (ExpandedPanelMeasurement) -> Void
     /// 面板顶部被物理刘海遮挡的死区，由窗口层按当前屏幕推导
     var deadZone: NotchDeadZone = .none
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
@@ -39,12 +39,17 @@ struct ExpandedPanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("expandedPanelHeader")
+                .expandedPanelDebugFrame(id: "expandedPanelHeader")
             navigation
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("expandedPanelNavigation")
+                .expandedPanelDebugFrame(id: "expandedPanelNavigation")
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: IslandTokens.Spacing.section) {
                     if selectedWidget == nil {
-                        focusContent
                         if enabledWidgets.isEmpty {
                             Text(L10n.panelNoWidgets)
                                 .font(.system(size: IslandTokens.Font.body))
@@ -54,6 +59,7 @@ struct ExpandedPanelView: View {
                         } else {
                             overview
                         }
+                        focusContent
                     } else if let selectedWidget {
                         widgetView(for: selectedWidget, isDetail: true)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -64,14 +70,22 @@ struct ExpandedPanelView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .background {
                     GeometryReader { geometry in
-                        Color.clear.preference(key: PanelContentHeightKey.self, value: geometry.size.height)
+                        Color.clear.preference(key: PanelContentHeightKey.self, value: ExpandedPanelMeasurement(
+                            width: geometry.size.width,
+                            height: geometry.size.height + ExpandedPanelLayout.headerHeight,
+                            selectedWidget: selectedWidget
+                        ))
                     }
                 }
             }
-            .onPreferenceChange(PanelContentHeightKey.self) { height in
-                onMeasuredHeight(height + ExpandedPanelLayout.headerHeight)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("expandedPanelBody")
+            .expandedPanelDebugFrame(id: "expandedPanelBody")
+            .onPreferenceChange(PanelContentHeightKey.self) { measurement in
+                if let measurement { onMeasurement(measurement) }
             }
         }
+        .expandedPanelDebugCoordinateSpace()
         .onExitCommand {
             if selectedWidget != nil { selectedWidget = nil }
             else { onClose() }
@@ -168,26 +182,28 @@ struct ExpandedPanelView: View {
         )
         .background(IslandStyle.cardRest(for: colorScheme))
         .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.card))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("expandedPanelRecentTasks")
+        .expandedPanelDebugFrame(id: "expandedPanelRecentTasks")
     }
 
     private var overview: some View {
         let count = ExpandedPanelLayout.columnCount(width: panelWidth, widgetCount: enabledWidgets.count)
-        return LazyVGrid(
-            columns: Array(
-                repeating: GridItem(.flexible(minimum: 0), spacing: IslandTokens.Spacing.standard),
-                count: count
-            ),
-            spacing: IslandTokens.Spacing.standard
-        ) {
+        return PanelWidgetGrid(columns: count, spacing: IslandTokens.Spacing.standard) {
             ForEach(enabledWidgets, id: \.self) { widget in
                 widgetView(for: widget, isDetail: false)
                     .padding(IslandTokens.Spacing.standard)
                     .frame(maxWidth: .infinity)
-                    .frame(height: ExpandedPanelLayout.compactWidgetHeight, alignment: .top)
                     .background(IslandStyle.cardRest(for: colorScheme))
                     .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.card))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("expandedPanelWidget-\(widget.rawValue)")
+                    .expandedPanelDebugFrame(id: "expandedPanelWidget-\(widget.rawValue)")
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("expandedPanelWidgets")
+        .expandedPanelDebugFrame(id: "expandedPanelWidgets")
     }
 
     @ViewBuilder
@@ -211,7 +227,117 @@ struct ExpandedPanelView: View {
     }
 }
 
+struct ExpandedPanelDebugGeometryKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+private struct ExpandedPanelDebugGeometryEnabledKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var reportsExpandedPanelDebugGeometry: Bool {
+        get { self[ExpandedPanelDebugGeometryEnabledKey.self] }
+        set { self[ExpandedPanelDebugGeometryEnabledKey.self] = newValue }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    fileprivate func expandedPanelDebugCoordinateSpace() -> some View {
+        #if DEBUG
+        coordinateSpace(name: "expandedPanelDebugGeometry")
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func expandedPanelDebugFrame(id: String) -> some View {
+        #if DEBUG
+        modifier(ExpandedPanelDebugGeometryModifier(id: id))
+        #else
+        self
+        #endif
+    }
+}
+
+#if DEBUG
+/// 离屏渲染不提供 SwiftUI 虚拟 AX 节点；诊断开启时从真实视图读取几何，发布构建不编译此层。
+private struct ExpandedPanelDebugGeometryModifier: ViewModifier {
+    let id: String
+    @Environment(\.reportsExpandedPanelDebugGeometry) private var enabled
+
+    func body(content: Content) -> some View {
+        content.background {
+            if enabled {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ExpandedPanelDebugGeometryKey.self,
+                        value: [id: geometry.frame(in: .named("expandedPanelDebugGeometry"))]
+                    )
+                }
+            }
+        }
+    }
+}
+#endif
+
 private struct PanelContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    static var defaultValue: ExpandedPanelMeasurement? = nil
+    static func reduce(value: inout ExpandedPanelMeasurement?, nextValue: () -> ExpandedPanelMeasurement?) {
+        if let next = nextValue(), next.matches(width: next.width, selectedWidget: next.selectedWidget) {
+            value = next
+        }
+    }
+}
+
+/// 同一层级的组件保留视图身份，每行以自然高度最高的卡片为准。
+struct PanelWidgetGrid: Layout {
+    var columns: Int
+    var spacing: CGFloat = 12
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = resolvedWidth(proposal.width, subviews: subviews)
+        let heights = rowHeights(width: width, subviews: subviews)
+        return CGSize(width: width, height: heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * spacing)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let count = max(1, columns)
+        let cellWidth = max(0, (bounds.width - CGFloat(count - 1) * spacing) / CGFloat(count))
+        let heights = rowHeights(width: bounds.width, subviews: subviews)
+        var y = bounds.minY
+        for index in subviews.indices {
+            let row = index / count
+            let column = index % count
+            if column == 0, row > 0 { y += heights[row - 1] + spacing }
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + CGFloat(column) * (cellWidth + spacing), y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: cellWidth, height: heights[row])
+            )
+        }
+    }
+
+    private func resolvedWidth(_ proposed: CGFloat?, subviews: Subviews) -> CGFloat {
+        if let proposed, proposed.isFinite { return max(0, proposed) }
+        let cellWidth = subviews.map { $0.sizeThatFits(.unspecified).width }.filter(\.isFinite).max() ?? 0
+        return cellWidth * CGFloat(max(1, columns)) + CGFloat(max(0, columns - 1)) * spacing
+    }
+
+    private func rowHeights(width: CGFloat, subviews: Subviews) -> [CGFloat] {
+        let count = max(1, columns)
+        let cellWidth = max(0, (width - CGFloat(count - 1) * spacing) / CGFloat(count))
+        var heights: [CGFloat] = []
+        for index in subviews.indices {
+            let height = subviews[index].sizeThatFits(ProposedViewSize(width: cellWidth, height: nil)).height
+            if index % count == 0 { heights.append(0) }
+            heights[index / count] = max(heights[index / count], height.isFinite ? max(0, height) : 0)
+        }
+        return heights
+    }
 }

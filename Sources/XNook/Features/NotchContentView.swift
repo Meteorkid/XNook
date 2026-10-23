@@ -24,7 +24,8 @@ struct NotchContentView: View {
     @State private var cachedExpandedShapeHeight: CGFloat = 220
     @State private var selectedWidget: WidgetType?
     @State private var enabledWidgets = WidgetType.enabledWidgets
-    @State private var measuredExpandedHeight: CGFloat?
+    @State private var expandedMeasurement: ExpandedPanelMeasurement?
+    @State private var expandedResizeScheduled = false
     @State private var availablePanelSize = CGSize(width: 1600, height: 900)
     @State private var isPanelInteractionActive = false
     @State private var hoverTimer: Timer?
@@ -73,6 +74,7 @@ struct NotchContentView: View {
 
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
     @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
+    @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
     @AppStorage("jellyIntensity") private var jellyIntensity = SettingsDefaults.string(for: "jellyIntensity", fallback: "medium")
 
     /// 根据强度设置返回果冻缩放值
@@ -163,7 +165,8 @@ struct NotchContentView: View {
     private var isExpanded: Bool { state == .expanded }
 
     private var effectivePanelWidth: CGFloat {
-        min(max(160, panelWidth), availablePanelSize.width)
+        let preferred = panelWidth.isFinite && panelWidth > 0 ? panelWidth : 800
+        return min(max(160, preferred), availablePanelSize.width)
     }
 
     private var expandedWidth: CGFloat {
@@ -171,9 +174,16 @@ struct NotchContentView: View {
     }
 
     private var naturalExpandedHeight: CGFloat {
-        ExpandedPanelLayout.height(
-            measuredContentHeight: measuredExpandedHeight,
-            maximumHeight: min(panelBaseHeight > 0 ? panelBaseHeight : SettingsDefaults.double(for: "panelBaseHeight"), availablePanelSize.height)
+        let measurement = expandedMeasurement.flatMap {
+            $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget) ? $0.height : nil
+        }
+        return ExpandedPanelLayout.height(
+            measuredContentHeight: measurement,
+            maximumHeight: ExpandedPanelLayout.maximumHeight(
+                availableHeight: availablePanelSize.height,
+                automaticallyFit: panelAutoSize,
+                manualMaxHeight: panelBaseHeight
+            )
         )
     }
 
@@ -363,14 +373,14 @@ struct NotchContentView: View {
         .onChange(of: expandedHeight) { _, newHeight in
             guard isExpanded else { return }
             cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, newHeight)
-            onSizeChange?(expandedWidth, newHeight)
+            scheduleExpandedWindowResize()
         }
-        .onChange(of: effectivePanelWidth) { _, newWidth in
-            measuredExpandedHeight = nil
-            if isExpanded { onSizeChange?(newWidth, naturalExpandedHeight) }
+        .onChange(of: effectivePanelWidth) { _, _ in
+            expandedMeasurement = nil
+            scheduleExpandedWindowResize()
         }
         .onChange(of: selectedWidget) { _, newWidget in
-            measuredExpandedHeight = nil
+            expandedMeasurement = nil
             if newWidget != .notes, notesManager.isEditing {
                 if !notesManager.closeEditor() { selectedWidget = .notes }
             }
@@ -481,7 +491,7 @@ struct NotchContentView: View {
             if widgets != enabledWidgets {
                 enabledWidgets = widgets
                 if let selectedWidget, !widgets.contains(selectedWidget) { self.selectedWidget = nil }
-                measuredExpandedHeight = nil
+                expandedMeasurement = nil
             }
             // UserDefaults 变更时更新窗口大小
             if state == .collapsed {
@@ -638,6 +648,17 @@ struct NotchContentView: View {
         state == .expanded
             ? (effectivePanelWidth, naturalExpandedHeight)
             : (pillWidth, collapsedTotalHeight)
+    }
+
+    private func scheduleExpandedWindowResize() {
+        guard isExpanded, !expandedResizeScheduled else { return }
+        expandedResizeScheduled = true
+        // 宽度、偏好和实测高度可在同一轮更新，合并后使用最新值，避免窗口反馈重复布局。
+        DispatchQueue.main.async {
+            expandedResizeScheduled = false
+            guard isExpanded else { return }
+            onSizeChange?(effectivePanelWidth, naturalExpandedHeight)
+        }
     }
 
     // MARK: - 鼠标悬停检测
@@ -1026,11 +1047,10 @@ struct NotchContentView: View {
             },
             onSettings: openSettingsWindow,
             onClose: { collapse(force: true) },
-            onMeasuredHeight: { height in
-                guard height.isFinite, height > 0 else { return }
-                if abs(height - (measuredExpandedHeight ?? 0)) > 1 {
-                    measuredExpandedHeight = height
-                }
+            onMeasurement: { measurement in
+                guard measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget),
+                      measurement.differs(from: expandedMeasurement) else { return }
+                expandedMeasurement = measurement
             },
             deadZone: panelDeadZone
         )

@@ -25,7 +25,15 @@ final class IslandWindowOwnershipTests: XCTestCase {
             throw XCTSkip("当前测试环境没有可用屏幕，跳过依赖 Window Server 的校验")
         }
 
-        let window = NotchWindow()
+        let suiteName = "XNookTests.WindowOwnership.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.set(false, forKey: "hideInFullscreen")
+        let window = NotchWindow(defaults: defaults, markVisible: {}, onExplicitShow: {})
+        NSWorkspace.shared.notificationCenter.removeObserver(window)
+        defer {
+            window.close()
+            defaults.removePersistentDomain(forName: suiteName)
+        }
         window.level = .screenSaver
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }

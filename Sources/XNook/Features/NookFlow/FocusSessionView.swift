@@ -307,6 +307,7 @@ struct FocusSessionView: View {
                     historyRow(record)
                 }
                 .buttonStyle(.plain)
+                .expandedPanelDebugFrame(id: "expandedPanelHistoryRow-\(record.id.uuidString)")
             }
             Button(L10n.flowViewAll(manager.history.count)) {
                 selectedHistoryID = nil

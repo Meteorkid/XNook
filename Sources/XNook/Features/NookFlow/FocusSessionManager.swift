@@ -14,10 +14,6 @@ final class FocusSessionManager {
     /// 二进制，与主偏好共用同一个 plist 会互相牵连：任一侧损坏都会连累另一侧。
     private static let storeSuiteName = "com.meteorkid.xnook.nookflow"
 
-    /// 历史保留上限。每条记录可携带 security-scoped bookmark（数百字节到数 KB），
-    /// 且每次写入都是全量编码，无节制增长会让启动解码与每次操作越来越慢。
-    static let historyLimit = 200
-
     /// 单个会话最多保留的文件快照，避免一次性关联整个文件架导致单条记录膨胀。
     static let linkedFileLimit = 50
 
@@ -32,42 +28,26 @@ final class FocusSessionManager {
 
     /// 存储介质（可注入 UserDefaults suite 用于测试）
     private let userDefaults: UserDefaults
+    private let legacyUserDefaults: UserDefaults?
     private let writeData: (Data) throws -> Void
 
     // MARK: - Init
 
     init(
         userDefaults: UserDefaults? = nil,
+        legacyUserDefaults: UserDefaults? = nil,
         writeData: ((Data) throws -> Void)? = nil
     ) {
-        guard let injected = userDefaults else {
-            let store = Self.resolvedStore()
-            self.userDefaults = store
-            self.writeData = writeData ?? { store.set($0, forKey: Self.storageKey) }
-            // 迁移只发生在默认存储路径上；注入的 store（如测试）一律不碰主偏好。
-            Self.migrateLegacyStore(to: store)
-            loadFromStorage()
-            return
-        }
-        self.userDefaults = injected
-        self.writeData = writeData ?? { injected.set($0, forKey: Self.storageKey) }
+        let store = userDefaults ?? Self.resolvedStore()
+        self.userDefaults = store
+        // 注入目标时只使用显式注入的迁移来源，测试不会接触主偏好。
+        self.legacyUserDefaults = legacyUserDefaults ?? (userDefaults == nil ? .standard : nil)
+        self.writeData = writeData ?? { store.set($0, forKey: Self.storageKey) }
         loadFromStorage()
     }
 
     private static func resolvedStore() -> UserDefaults {
         UserDefaults(suiteName: storeSuiteName) ?? .standard
-    }
-
-    /// 把仍停留在主偏好里的旧历史搬到独立存储域。
-    /// 只有写入新位置成功后才清除旧位置，搬运失败时保留原数据不动。
-    private static func migrateLegacyStore(to store: UserDefaults) {
-        let standard = UserDefaults.standard
-        guard store !== standard,
-              let payload = standard.object(forKey: storageKey),
-              store.object(forKey: storageKey) == nil else { return }
-        store.set(payload, forKey: storageKey)
-        guard store.object(forKey: storageKey) != nil else { return }
-        standard.removeObject(forKey: storageKey)
     }
 
     // MARK: - 会话生命周期
@@ -104,10 +84,8 @@ final class FocusSessionManager {
         guard var session = activeSession else { return true }
         session.endedAt = Date()
         session.state = .ended
-        var candidateHistory = [session] + history
-        if candidateHistory.count > Self.historyLimit {
-            candidateHistory = Array(candidateHistory.prefix(Self.historyLimit))
-        }
+        // 界面限制首批展示数量，持久化保留全部历史及可编辑的关联资料。
+        let candidateHistory = [session] + history
         guard persist(activeSession: nil, history: candidateHistory) else { return false }
         activityMessage = nil
         return true
@@ -269,8 +247,32 @@ final class FocusSessionManager {
         loadFromStorage()
     }
 
+    /// 只复制可解码的旧数据；保留旧域作为迁移时的回退快照，不覆盖已有目标。
+    private func migrateLegacyStoreIfNeeded() -> Bool {
+        guard userDefaults.object(forKey: Self.storageKey) == nil,
+              let payload = legacyUserDefaults?.object(forKey: Self.storageKey) else { return true }
+        guard let data = payload as? Data,
+              (try? JSONDecoder().decode(FocusSessionStore.self, from: data)) != nil else {
+            storageError = L10n.flowStorageReadError
+            return false
+        }
+        do {
+            try writeData(data)
+        } catch {
+            storageError = L10n.flowStorageWriteError
+            return false
+        }
+        // 读回仅校验存储接受了完整副本，不把同进程读取视为物理落盘保证。
+        guard userDefaults.data(forKey: Self.storageKey) == data else {
+            storageError = L10n.flowStorageWriteError
+            return false
+        }
+        return true
+    }
+
     @discardableResult
     private func loadFromStorage() -> Bool {
+        guard migrateLegacyStoreIfNeeded() else { return false }
         guard let storedValue = userDefaults.object(forKey: Self.storageKey) else {
             activeSession = nil
             history = []

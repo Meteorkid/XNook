@@ -155,23 +155,26 @@ final class GifResourceTests: XCTestCase {
     }
 
     func testLegacyBookmarkReadsThroughTheSameBudget() throws {
+        if let helperPath = ProcessInfo.processInfo.environment["XNOOK_BOOKMARK_HELPER"] {
+            try assertSignedBookmarkRegression(helperPath: helperPath)
+            return
+        }
+
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("bookmark.gif")
         let valid = makeBudgetGIF()
         try valid.write(to: url)
 
-        // 创建 security-scoped bookmark 需要 com.apple.security.files.bookmarks.app-scope。
-        // 该 entitlement 已声明在 XNook.entitlements，但 swift test 的宿主进程未经签名，
-        // 拿不到就会抛 NSCocoaErrorDomain 256。此时跳过而不是让整个套件报红——
-        // 打包产物由 build-app.sh 用该 entitlement 签名，实际运行不受影响。
+        // 直接验证当前宿主的实际行为；不要把任意创建失败当成权限不足而跳过。
         let bookmark: Data
         do {
             bookmark = try url.bookmarkData(options: .withSecurityScope,
                                             includingResourceValuesForKeys: nil,
                                             relativeTo: nil)
         } catch {
-            throw XCTSkip("测试宿主缺少 bookmarks.app-scope entitlement：\(error)")
+            XCTFail("书签创建失败：\(error)。可用 scripts/test-signed-bookmarks.sh --filter GifResourceTests 验证独立签名宿主。")
+            return
         }
 
         XCTAssertEqual(try GifResource.selectedData(selectedName: nil, appSupport: nil, bookmarkData: bookmark), valid)
@@ -179,6 +182,50 @@ final class GifResourceTests: XCTestCase {
         assertRejection(.frameCount) {
             try GifResource.selectedData(selectedName: nil, appSupport: nil, bookmarkData: bookmark)
         }
+    }
+
+    private func assertSignedBookmarkRegression(helperPath: String) throws {
+        guard FileManager.default.isExecutableFile(atPath: helperPath) else {
+            XCTFail("XNOOK_BOOKMARK_HELPER 不是可执行文件：\(helperPath)")
+            return
+        }
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let created = try runBookmarkHelper(helperPath, command: "create", directory: directory)
+        XCTAssertGreaterThan(try XCTUnwrap(created["bookmarkBytes"] as? Int), 0)
+        let creatorPID = try XCTUnwrap(created["pid"] as? Int)
+        let resolved = try runBookmarkHelper(helperPath, command: "resolve", directory: directory)
+        XCTAssertEqual(resolved["creatorPID"] as? Int, creatorPID)
+        XCTAssertNotEqual(resolved["pid"] as? Int, creatorPID)
+        XCTAssertEqual(resolved["validDataMatches"] as? Bool, true)
+        XCTAssertEqual(resolved["bookmarkUnchanged"] as? Bool, true)
+        XCTAssertEqual(resolved["rejections"] as? [String],
+                       ["invalidData", "frameCount", "encodedSize", "dimensions", "totalPixels"])
+    }
+
+    private func runBookmarkHelper(_ path: String, command: String, directory: URL) throws -> [String: Any] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = [command, directory.path]
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let stderr = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let diagnostics = "\(command): \(String(decoding: data, as: UTF8.self)) \(stderr)"
+        XCTAssertEqual(process.terminationReason, .exit, diagnostics)
+        XCTAssertEqual(process.terminationStatus, 0, diagnostics)
+        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any], diagnostics)
+        XCTAssertEqual(result["ok"] as? Bool, true, diagnostics)
+        XCTAssertEqual(result["command"] as? String, command)
+        XCTAssertGreaterThan(try XCTUnwrap(result["pid"] as? Int), 0)
+        XCTAssertEqual(result["entitlement"] as? Bool, true)
+        XCTAssertEqual(result["hardenedRuntime"] as? Bool, true)
+        print("Signed bookmark regression: \(String(decoding: data, as: UTF8.self))")
+        return result
     }
 
     private func temporaryDirectory() throws -> URL {

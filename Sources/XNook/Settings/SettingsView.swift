@@ -45,14 +45,17 @@ struct SettingsView: View {
     @AppStorage("showNookFlowHistory") private var showNookFlowHistory = SettingsDefaults.bool(for: "showNookFlowHistory", fallback: true)
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
     @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
+    @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
 
     private var panelHeightRange: ClosedRange<Double> {
-        160...Double(panelContentSizeLimit.height)
+        let upper = max(1, Double(panelContentSizeLimit.height))
+        return min(160, upper)...upper
     }
 
     private var panelWidthRange: ClosedRange<Double> {
-        160...Double(panelContentSizeLimit.width)
+        let upper = max(1, Double(panelContentSizeLimit.width))
+        return min(160, upper)...upper
     }
 
     private var panelContentSizeLimit: CGSize {
@@ -380,9 +383,15 @@ struct SettingsView: View {
                         AppStorageSlider(key: "panelWidth", range: panelWidthRange, format: "%.2fpt")
                     }
                     dividerLine
+                    settingRow(L10n.panelAutoSize, id: "panelAutoSize",
+                              description: L10n.panelAutoSizeDesc) {
+                        AppStorageToggle(key: "panelAutoSize")
+                    }
+                    dividerLine
                     settingRow(L10n.panelBaseHeight, id: "panelBaseHeight",
                               description: L10n.panelBaseHeightDesc) {
                         AppStorageSlider(key: "panelBaseHeight", range: panelHeightRange, format: "%.2fpt")
+                            .disabled(panelAutoSize)
                     }
                 }
             }

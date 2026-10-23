@@ -85,11 +85,7 @@ struct TrayWidgetView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             } else {
-                if isDetail {
-                    fileList
-                } else {
-                    ScrollView { fileList }
-                }
+                fileList
             }
         }
         .onDrop(of: [.fileURL], isTargeted: $trayManager.isDropTargeted) { providers in
@@ -105,6 +101,7 @@ struct TrayWidgetView: View {
                     VStack(spacing: 4) {
                         ForEach(displayFiles) { file in
                             fileRow(file: file)
+                                .expandedPanelDebugFrame(id: "expandedPanelTrayFile-\(file.id.uuidString)")
                         }
 
                         // 显示更多 / 收起按钮
@@ -122,6 +119,7 @@ struct TrayWidgetView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .expandedPanelDebugFrame(id: "expandedPanelTrayShowAll")
                         }
 
                         if showAllFiles && !isDetail && trayManager.files.count > 4 {

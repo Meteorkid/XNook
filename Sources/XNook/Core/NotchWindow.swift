@@ -27,12 +27,14 @@ final class NotchWindow: NSPanel {
     }
 
     static func maximumExpandedContentHeight(forScreenHeight screenHeight: CGFloat) -> CGFloat {
+        guard screenHeight.isFinite else { return maxExpandedHeight }
         let availableHeight = screenHeight - expandedPadding - windowTopExtension
-        return max(160, min(maxExpandedHeight, availableHeight))
+        return max(1, min(maxExpandedHeight, availableHeight))
     }
 
     static func maximumExpandedContentWidth(forScreenWidth screenWidth: CGFloat) -> CGFloat {
-        max(160, min(maxExpandedWidth, screenWidth - expandedPadding * 2))
+        guard screenWidth.isFinite else { return maxExpandedWidth }
+        return max(1, min(maxExpandedWidth, screenWidth - expandedPadding * 2))
     }
 
     func maximumExpandedContentSize() -> CGSize {
@@ -260,9 +262,10 @@ final class NotchWindow: NSPanel {
         let currentFrame = frame
         let x: CGFloat
         if let cx = customX, cx.isFinite {
-            let ratio = screen.frame.width / (self.screen?.frame.width ?? screen.frame.width)
+            let center = Self.mappedCenterX(cx, from: self.screen?.frame ?? screen.frame, to: screen.frame)
+            customX = center
             x = max(screen.frame.origin.x,
-                    min(cx * ratio - currentFrame.width / 2,
+                    min(center - currentFrame.width / 2,
                         screen.frame.origin.x + screen.frame.width - currentFrame.width))
         } else {
             x = screen.frame.origin.x + (screen.frame.width - currentFrame.width) / 2
@@ -270,7 +273,11 @@ final class NotchWindow: NSPanel {
         let screenTop = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen)
         // 窗口向上延伸，使屏幕顶端在窗口内部
         let y = screenTop - currentFrame.height + Self.windowTopExtension
-        setFrameDirect(NSRect(x: x, y: y, width: currentFrame.width, height: currentFrame.height), display: true)
+        let proposed = NSRect(x: x, y: y, width: currentFrame.width, height: currentFrame.height)
+        let fitted = islandState == .expanded
+            ? Self.fittingExpandedFrame(proposed, screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
+            : Self.safeFrame(proposed, screen: screen)
+        setFrameDirect(fitted, display: true)
     }
 
     func applySpaceBehavior() {
@@ -402,7 +409,10 @@ final class NotchWindow: NSPanel {
         let screenTop = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen)
         // 窗口向上延伸 windowTopExtension，使屏幕顶端在窗口内部
         let yComputed = screenTop - h + Self.windowTopExtension
-        let rect = Self.safeFrame(NSRect(x: x, y: yComputed, width: w, height: h), screen: screen)
+        let proposed = NSRect(x: x, y: yComputed, width: w, height: h)
+        let rect = islandState == .expanded
+            ? Self.fittingExpandedFrame(proposed, screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
+            : Self.safeFrame(proposed, screen: screen)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         setFrameDirect(rect, display: display)
@@ -451,6 +461,23 @@ final class NotchWindow: NSPanel {
         CATransaction.setDisableActions(true)
         setFrameDirect(target, display: true)
         CATransaction.commit()
+    }
+
+    /// 屏幕坐标可能为负；按相对横向位置映射，不能缩放全局坐标。
+    static func mappedCenterX(_ center: CGFloat, from source: CGRect, to target: CGRect) -> CGFloat {
+        guard center.isFinite, source.width.isFinite, source.width > 0 else { return target.midX }
+        guard source != target else { return center }
+        let fraction = min(1, max(0, (center - source.minX) / source.width))
+        return target.minX + fraction * target.width
+    }
+
+    /// 顶部仍贴屏幕边缘，横向和底部让开 Dock；跨屏时先限窗，再由内容重新测量。
+    static func fittingExpandedFrame(_ proposed: CGRect, screenFrame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let width = min(max(1, proposed.width.isFinite ? proposed.width : 1), max(1, visibleFrame.width))
+        let height = min(max(1, proposed.height.isFinite ? proposed.height : 1), max(1, visibleFrame.height))
+        let preferredX = proposed.origin.x.isFinite ? proposed.origin.x : screenFrame.midX - width / 2
+        let x = min(max(visibleFrame.minX, preferredX), visibleFrame.maxX - width)
+        return CGRect(x: x, y: screenFrame.maxY + windowTopExtension - height, width: width, height: height)
     }
 
     private static func safeFrame(_ rect: NSRect, screen: NSScreen) -> NSRect {
@@ -507,9 +534,6 @@ final class NotchWindow: NSPanel {
         let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
         if let mouseScreen {
             let screenID = mouseScreen.deviceDescription[NSDeviceDescriptionKey(rawValue: "NSScreenNumber")] as? CGDirectDisplayID
-            if screenID == lastActiveScreenID, let cached = cachedBestScreen {
-                return cached
-            }
             lastActiveScreenID = screenID
             cachedBestScreen = mouseScreen
             return mouseScreen
@@ -525,18 +549,14 @@ final class NotchWindow: NSPanel {
     }
 
     @objc private func screenDidChange(_ note: Notification) {
-        guard let screen = Self.bestScreen() else { return }
-        let x: CGFloat
-        if let cx = customX {
-            x = max(screen.frame.origin.x,
-                    min(cx - frame.width / 2, screen.frame.origin.x + screen.frame.width - frame.width))
-        } else {
-            x = screen.frame.origin.x + (screen.frame.width - frame.width) / 2
+        let currentScreen = NSScreen.screens.first {
+            ($0.deviceDescription[NSDeviceDescriptionKey(rawValue: "NSScreenNumber")] as? CGDirectDisplayID)
+                == lastActiveScreenID
         }
-        let screenTop = screen.frame.origin.y + screen.frame.height - Self.islandTopOffset(for: screen)
-        // 窗口向上延伸
-        let y = screenTop - frame.height + Self.windowTopExtension
-        setFrameDirect(NSRect(x: x, y: y, width: frame.width, height: frame.height), display: true)
+        guard let updated = currentScreen ?? Self.bestScreen() else { return }
+        cachedBestScreen = updated
+        lastActiveScreenID = updated.deviceDescription[NSDeviceDescriptionKey(rawValue: "NSScreenNumber")] as? CGDirectDisplayID
+        repositionOnScreen(updated)
     }
 
     private static func padding(forContentHeight contentHeight: CGFloat) -> CGFloat {

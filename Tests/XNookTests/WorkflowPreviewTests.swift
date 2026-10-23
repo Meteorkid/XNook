@@ -15,7 +15,8 @@ final class WorkflowPreviewTests: XCTestCase {
         _ = NSApplication.shared
         let fixture = try WorkflowPreviewFixture()
         defer { fixture.cleanUp() }
-        let outputDirectory = URL(fileURLWithPath: "/tmp/xnook-workflow-ui", isDirectory: true)
+        let outputDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent(".build/reliability-adaptive-evidence/ui/workflow", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
         try render(fixture, selected: nil, size: NSSize(width: 800, height: 400), scheme: .dark,
@@ -67,7 +68,7 @@ final class WorkflowPreviewTests: XCTestCase {
             onLinksPresentationChanged: { _ in },
             onSettings: {},
             onClose: {},
-            onMeasuredHeight: { measuredHeights.append($0) }
+            onMeasurement: { measuredHeights.append($0.height) }
         )
         .frame(width: size.width, height: size.height)
         .background(IslandStyle.surface(for: scheme))
@@ -123,7 +124,7 @@ final class WorkflowPreviewTests: XCTestCase {
 }
 
 @MainActor
-private final class WorkflowPreviewFixture {
+final class WorkflowPreviewFixture {
     let directory: URL
     let suiteName: String
     let defaults: UserDefaults
@@ -134,13 +135,13 @@ private final class WorkflowPreviewFixture {
     let calendar: CalendarManager
     let sampleNotes: [NotesManager.Note]
 
-    init() throws {
+    init(historyCount: Int = 4, trayFileCount: Int = 2) throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("XNookWorkflowPreview-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         suiteName = "XNook.WorkflowPreview.\(UUID().uuidString)"
         defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.set(true, forKey: "reduceMotion")
-        media = MediaManager(startMonitoring: false)
+        media = MediaManager(startMonitoring: false, defaults: defaults)
         media.currentTitle = "Quiet Working Session"
         media.currentArtist = "Local Preview"
 
@@ -155,13 +156,14 @@ private final class WorkflowPreviewFixture {
         try JSONEncoder().encode(sampleNotes).write(to: notesURL, options: .atomic)
         notes = NotesManager(storageURL: notesURL)
         tray = TrayManager(storageURL: directory.appendingPathComponent("tray.json"), resolveBookmark: { _ in nil }, makeBookmark: { _ in Data() })
-        tray.files = [
-            TrayManager.TrayFile(id: UUID(), bookmarkData: Data(), name: "项目验收记录.md", icon: "doc.text", size: 2048, addedAt: Date()),
-            TrayManager.TrayFile(id: UUID(), bookmarkData: Data(), name: "界面说明.pdf", icon: "doc.richtext", size: 4096, addedAt: Date())
-        ]
+        tray.files = (0..<trayFileCount).map { index in
+            TrayManager.TrayFile(id: UUID(), bookmarkData: Data(),
+                name: "项目资料 \(index + 1) · Preview file \(index + 1).txt",
+                icon: "doc.text", size: 2048 * (index + 1), addedAt: Date())
+        }
 
         focus = FocusSessionManager(userDefaults: defaults)
-        for index in 0..<4 {
+        for index in 0..<historyCount {
             _ = focus.start(title: "已完成任务 \(index + 1)：复核工作流和资料")
             focus.linkNote(id: sampleNotes[index].id, title: sampleNotes[index].title)
             focus.linkFile(id: UUID(), name: "相关设计文档.pdf", icon: "doc.richtext")

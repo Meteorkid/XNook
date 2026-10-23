@@ -33,6 +33,9 @@ struct NotchContentView: View {
     @State private var isWindowVisible = false
     @State private var lastCollapseAt: Date = .distantPast
     @State private var collapseAnimating = false
+    /// 当前屏幕尺寸对应的动效档位，随窗口所在屏幕更新
+    @State private var motionTier: IslandMotion.Tier = .regular
+    private var motionPreset: IslandMotion.Preset { IslandMotion.preset(for: motionTier) }
     @State private var collapseGeneration = 0
     @State private var expandedByHover = false
     @State private var expandedAt: Date = .distantPast
@@ -204,7 +207,16 @@ struct NotchContentView: View {
             )
     }
 
-    private var pillFillColor: Color { IslandStyle.surface(for: colorScheme) }
+    /// 灵动岛外轮廓。背景填充与描边共用同一形状，避免两处参数漂移。
+    private var islandShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: notchTopCornerRadius,
+            bottomLeadingRadius: notchBottomCornerRadius,
+            bottomTrailingRadius: notchBottomCornerRadius,
+            topTrailingRadius: notchTopCornerRadius,
+            style: .continuous
+        )
+    }
 
     private var pillStrokeOpacity: CGFloat { IslandStyle.strokeOpacity(for: colorScheme) }
 
@@ -225,25 +237,26 @@ struct NotchContentView: View {
 
     // MARK: - 动画
 
-    private static let expandSpring = Animation.spring(response: 0.4, dampingFraction: 0.82)
-    private static let collapseSpring = Animation.spring(response: 0.35, dampingFraction: 0.8)
-    private static let contentFade = Animation.easeInOut(duration: 0.2)
+    /// 展开与收起用不同弹簧：展开保留回弹，收起近乎不过冲。参数随屏幕尺寸分档，
+    /// 见 IslandMotion。
+    private var expandSpring: Animation { motionPreset.expand.animation }
+    private var collapseSpring: Animation { motionPreset.collapse.animation }
+    private static let contentFade = Animation.easeInOut(duration: IslandTokens.Duration.standard)
     /// Ticker 文本切换的淡入淡出动画：歌词行变化时不硬切
-    private static let tickerTextTransition = Animation.easeInOut(duration: 0.25)
+    private static let tickerTextTransition = Animation.easeInOut(duration: IslandTokens.Duration.text)
+    /// 收起看门狗在动画时长之外额外等待的余量
+    private static let collapseWatchdogSlack: TimeInterval = 0.25
 
     // MARK: - 主视图
 
     var body: some View {
         ZStack(alignment: .top) {
-            // 背景形状
-            UnevenRoundedRectangle(
-                topLeadingRadius: notchTopCornerRadius,
-                bottomLeadingRadius: notchBottomCornerRadius,
-                bottomTrailingRadius: notchBottomCornerRadius,
-                topTrailingRadius: notchTopCornerRadius,
-                style: .continuous
-            )
-            .fill(pillFillColor)
+            // 背景形状：macOS 26 走玻璃材质，低版本回退纯色填充
+            islandShape
+            .fill(Color.clear)
+            .background {
+                IslandGlassBackground(shape: islandShape, scheme: colorScheme, isExpanded: isExpanded)
+            }
             .shadow(
                 color: IslandStyle.shadowColor(for: colorScheme)
                     .opacity(IslandStyle.shadowOpacity(for: colorScheme) + 0.02 * notchShapeOpenProgress),
@@ -251,14 +264,7 @@ struct NotchContentView: View {
                 y: 3 + notchShapeOpenProgress
             )
             .overlay {
-                UnevenRoundedRectangle(
-                    topLeadingRadius: notchTopCornerRadius,
-                    bottomLeadingRadius: notchBottomCornerRadius,
-                    bottomTrailingRadius: notchBottomCornerRadius,
-                    topTrailingRadius: notchTopCornerRadius,
-                    style: .continuous
-                )
-                .strokeBorder(
+                islandShape.strokeBorder(
                     IslandStyle.strokeColor(for: colorScheme)
                         .opacity(pillStrokeOpacity + (isHoveringPill ? 0.15 : 0)),
                     lineWidth: 0.5
@@ -490,6 +496,7 @@ struct NotchContentView: View {
         .onDisappear {
             collapseGeneration += 1
             expandPending = false
+            collapseAnimating = false
             stopHoverPolling()
             cancelExpandedAutoHide()
             resetHoverEffects()
@@ -537,13 +544,13 @@ struct NotchContentView: View {
         // 1. 窗口立即调整到目标大小（无动画）
         onSizeChange?(target.width, target.height)
 
-        let runExpansion = {
+        let runExpansion = { [motionPreset] in
             if self.shouldReduceMotion {
                 self.state = newState
                 self.showContent = true
             } else {
                 // 2. 形状弹簧动画
-                withAnimation(Self.expandSpring) {
+                withAnimation(motionPreset.expand.animation) {
                     self.state = newState
                 }
                 // 3. 内容延迟淡入
@@ -591,30 +598,39 @@ struct NotchContentView: View {
             showContent = false
             state = .collapsed
         } else {
-            withAnimation(Self.collapseSpring) {
+            withAnimation(motionPreset.collapse.animation) {
                 showContent = false
                 state = .collapsed
             }
         }
 
-        // 2. 等 0.45s 形状动画完成，再调整窗口大小
-        let finishCollapse = {
-            guard generation == self.collapseGeneration, self.state == .collapsed else { return }
-            let w = self.pillWidth
-            let h = self.collapsedTotalHeight
-            DispatchQueue.main.async {
-                guard generation == self.collapseGeneration, self.state == .collapsed else { return }
-                if let window = notchWindow {
-                    window.resizeToFitCollapse(contentWidth: w, contentHeight: h)
-                    window.islandState = self.state
-                }
-                self.collapseAnimating = false
-                NotificationCenter.default.post(name: .islandDidCollapse, object: nil)
-            }
+        // 2. 形状动画结束后调整窗口大小。
+        // 收尾做成幂等，并由正常回调与看门狗两条路径调用：正常回调会因 generation
+        // 过期被吞掉（收起期间视图消失、屏幕切换等），那样 collapseAnimating 会永久
+        // 停在 true，此后轮询恒把指针判为在面板外，悬停展开彻底失效且只能重启。
+        let settleDelay = shouldReduceMotion ? 0 : IslandMotion.settleDuration(for: motionPreset.collapse)
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [self] in
+            completeCollapse(generation: generation)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay + Self.collapseWatchdogSlack) { [self] in
+            completeCollapse(generation: generation)
+        }
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + (shouldReduceMotion ? 0 : 0.45)) {
-            finishCollapse()
+    /// 收起收尾：把窗口收缩到胶囊尺寸并解除 collapseAnimating。幂等，可安全重复调用。
+    private func completeCollapse(generation: Int) {
+        // generation 已过期说明有更新的展开或收起接管，交给它收尾。
+        guard generation == collapseGeneration, collapseAnimating, state == .collapsed else { return }
+        let w = pillWidth
+        let h = collapsedTotalHeight
+        DispatchQueue.main.async { [self] in
+            guard generation == collapseGeneration, collapseAnimating, state == .collapsed else { return }
+            if let window = notchWindow {
+                window.resizeToFitCollapse(contentWidth: w, contentHeight: h)
+                window.islandState = state
+            }
+            collapseAnimating = false
+            NotificationCenter.default.post(name: .islandDidCollapse, object: nil)
         }
     }
 
@@ -770,6 +786,11 @@ struct NotchContentView: View {
         let panelSize = window.maximumExpandedContentSize()
         if availablePanelSize != panelSize { availablePanelSize = panelSize }
         if isWindowVisible != visible { isWindowVisible = visible }
+        // 形变距离随屏幕变大，动效参数跟着档位走；窗口跨屏后需要换档。
+        if let screenWidth = window.screen?.frame.width {
+            let tier = IslandMotion.tier(forScreenWidth: screenWidth)
+            if tier != motionTier { motionTier = tier }
+        }
         guard visible else {
             cancelExpandedAutoHide()
             resetHoverEffects()
@@ -945,11 +966,14 @@ struct NotchContentView: View {
             cancelExpandedAutoHide()
             return
         }
-        let shouldDefer = shouldKeepPanelOpen(window) || Self.shouldDeferExpandedAutoHide(
+        // 指针停在面板上时挂起倒计时并记账，离开后按剩余时间续上，
+        // 而不是把整个延迟重新计一遍——否则每次瞥一眼面板都会重置倒计时。
+        let pointerInsidePanel = Self.shouldDeferExpandedAutoHide(
             mouseLocation: NSEvent.mouseLocation,
             windowFrame: window.frame,
             screenFrame: window.screen?.visibleFrame
         )
+        let shouldDefer = shouldKeepPanelOpen(window) || pointerInsidePanel
         autoHideController.update(
             isExpanded: isExpanded && isWindowVisible,
             shouldDefer: shouldDefer,
@@ -968,6 +992,12 @@ struct NotchContentView: View {
     }
 
     // MARK: - 展开面板
+
+    /// 面板顶部的物理刘海死区。窗口不在刘海正下方时为空，不影响无刘海屏幕。
+    private var panelDeadZone: NotchDeadZone {
+        guard isExpanded, let window = notchWindow else { return .none }
+        return NotchDeadZone.resolve(for: window)
+    }
 
     private var expandedContent: some View {
         ExpandedPanelView(
@@ -1001,7 +1031,8 @@ struct NotchContentView: View {
                 if abs(height - (measuredExpandedHeight ?? 0)) > 1 {
                     measuredExpandedHeight = height
                 }
-            }
+            },
+            deadZone: panelDeadZone
         )
     }
 

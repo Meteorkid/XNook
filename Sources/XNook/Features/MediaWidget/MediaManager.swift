@@ -117,6 +117,12 @@ final class MediaManager {
     private var cachedArtworkImage: NSImage?
     private var cachedArtworkData: Data?
 
+    /// 从封面提取的强调色。切歌时后台计算，避免在轮询路径上做图像处理。
+    private(set) var artworkPalette: AlbumArtworkPalette?
+    /// 取色任务的请求号，防止旧封面的结果覆盖新封面
+    private var paletteRequestID = 0
+    private var paletteTask: Task<Void, Never>?
+
     /// 获取封面 NSImage（带缓存，避免每次访问都从 Data 重建）
     var currentArtwork: NSImage? {
         if currentArtworkData != cachedArtworkData {
@@ -445,6 +451,7 @@ final class MediaManager {
         // 切歌或封面变化时递增版本号，强制 SwiftUI 刷新
         if trackChanged || self.currentArtworkData != oldArtworkData {
             self.artworkVersion += 1
+            self.refreshArtworkPalette()
         }
 
         if let dur = info["duration"] as? TimeInterval, dur.isFinite, dur >= 0 {
@@ -539,9 +546,39 @@ final class MediaManager {
             if let data, !data.isEmpty {
                 self.currentArtworkData = data
                 self.artworkVersion += 1
+                self.refreshArtworkPalette()
             } else {
                 self.nextArtworkRetry = self.clock().addingTimeInterval(30)
             }
+        }
+    }
+
+    // MARK: - 封面取色
+
+    /// 按当前封面重新提取强调色。
+    ///
+    /// 取色要解码图像并跑一遍 CoreImage，放在 1s 轮询路径上会周期性卡顿，
+    /// 因此丢到后台任务里算，只把结果带回主线程。请求号保证旧封面的
+    /// 迟到结果不会覆盖新封面。
+    private func refreshArtworkPalette() {
+        paletteRequestID += 1
+        let requestID = paletteRequestID
+        paletteTask?.cancel()
+        paletteTask = nil
+
+        guard let data = currentArtworkData, !data.isEmpty else {
+            artworkPalette = nil
+            return
+        }
+
+        paletteTask = Task { [weak self] in
+            let palette = await Task.detached(priority: .utility) { () -> AlbumArtworkPalette? in
+                guard let image = NSImage(data: data) else { return nil }
+                return AlbumArtworkColorExtractor.palette(from: image)
+            }.value
+            guard !Task.isCancelled, let self, self.paletteRequestID == requestID else { return }
+            self.paletteTask = nil
+            self.artworkPalette = palette
         }
     }
 

@@ -160,7 +160,20 @@ final class GifResourceTests: XCTestCase {
         let url = directory.appendingPathComponent("bookmark.gif")
         let valid = makeBudgetGIF()
         try valid.write(to: url)
-        let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+
+        // 创建 security-scoped bookmark 需要 com.apple.security.files.bookmarks.app-scope。
+        // 该 entitlement 已声明在 XNook.entitlements，但 swift test 的宿主进程未经签名，
+        // 拿不到就会抛 NSCocoaErrorDomain 256。此时跳过而不是让整个套件报红——
+        // 打包产物由 build-app.sh 用该 entitlement 签名，实际运行不受影响。
+        let bookmark: Data
+        do {
+            bookmark = try url.bookmarkData(options: .withSecurityScope,
+                                            includingResourceValuesForKeys: nil,
+                                            relativeTo: nil)
+        } catch {
+            throw XCTSkip("测试宿主缺少 bookmarks.app-scope entitlement：\(error)")
+        }
+
         XCTAssertEqual(try GifResource.selectedData(selectedName: nil, appSupport: nil, bookmarkData: bookmark), valid)
         try makeBudgetGIF(frameCount: 501).write(to: url)
         assertRejection(.frameCount) {

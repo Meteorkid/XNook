@@ -4,6 +4,16 @@ import SwiftUI
 struct MediaWidgetView: View {
     var mediaManager: MediaManager
     var isDetail = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
+
+    private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
+
+    /// 由封面提取的强调色；取不到时退回默认强调色。
+    private var accent: Color {
+        (mediaManager.artworkPalette?.primary.nsColor).map(Color.init(nsColor:))
+            ?? Color.accentColor
+    }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -30,13 +40,9 @@ struct MediaWidgetView: View {
                     .foregroundColor(.secondary)
             }
 
-            // 控制按钮
+            // 控制按钮 — 悬停时按封面强调色提亮
             HStack(spacing: 16) {
-                Button(action: { mediaManager.previousTrack() }) {
-                    Image(systemName: "backward.fill")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.plain)
+                controlButton(icon: "backward.fill", size: 11) { mediaManager.previousTrack() }
 
                 Button(action: {
                     mediaManager.isPlaying ? mediaManager.pause() : mediaManager.play()
@@ -45,17 +51,25 @@ struct MediaWidgetView: View {
                         .font(.system(size: 16))
                 }
                 .buttonStyle(.plain)
+                .foregroundColor(accent)
 
-                Button(action: { mediaManager.nextTrack() }) {
-                    Image(systemName: "forward.fill")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.plain)
+                controlButton(icon: "forward.fill", size: 11) { mediaManager.nextTrack() }
             }
             .foregroundColor(.primary)
 
             if isDetail { Spacer() }
         }
+    }
+
+    private func controlButton(
+        icon: String,
+        size: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            MotionIcon(systemName: icon, fontSize: size, reduceMotion: shouldReduceMotion)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -66,7 +80,8 @@ struct MediaWidgetView: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 56, height: 56)
                 .cornerRadius(8)
-                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                // 阴影取封面主色，让封面与面板产生关联而不是浮在表面
+                .shadow(color: accent.opacity(0.35), radius: 6, y: 2)
                 .id(mediaManager.artworkVersion)
         } else {
             RoundedRectangle(cornerRadius: 8)

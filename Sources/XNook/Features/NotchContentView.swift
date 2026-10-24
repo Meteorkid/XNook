@@ -37,9 +37,8 @@ struct NotchContentView: View {
         enabledWidgetsOverride ?? panelLayoutStore.configuration.visibleItems.compactMap { WidgetType(rawValue: $0.id.rawValue) }
     }
     private var panelMeasurementSignature: String {
-        PanelGridGeometry.measurementSignature(for: panelLayoutStore.configuration,
-            fitsContent: panelLayoutStore.shouldFitDefaultContent(automaticallyFit: panelAutoSize,
-                isEditing: isEditingPanelLayout, isOverview: selectedWidget == nil))
+        Self.normalPanelMeasurementSignature(layoutStore: panelLayoutStore,
+            automaticallyFit: panelAutoSize, selectedWidget: selectedWidget)
     }
     @State private var expandedMeasurement: ExpandedPanelMeasurement?
     @State private var expandedResizeScheduled = false
@@ -1183,6 +1182,26 @@ struct NotchContentView: View {
 
     // MARK: - 展开面板
 
+    /// 缓存只接收正常内容测量；子视图退出编辑的测量可能早于父级编辑状态回调。
+    @MainActor
+    static func normalPanelMeasurementSignature(
+        layoutStore: PanelLayoutStore, automaticallyFit: Bool, selectedWidget: WidgetType?
+    ) -> String {
+        PanelGridGeometry.measurementSignature(for: layoutStore.configuration,
+            fitsContent: layoutStore.shouldFitDefaultContent(automaticallyFit: automaticallyFit,
+                isEditing: false, isOverview: selectedWidget == nil))
+    }
+
+    static func acceptedPanelMeasurement(
+        _ measurement: ExpandedPanelMeasurement?, width: CGFloat, selectedWidget: WidgetType?,
+        enabledWidgets: [WidgetType], layoutSignature: String
+    ) -> ExpandedPanelMeasurement? {
+        guard let measurement,
+              measurement.matches(width: width, selectedWidget: selectedWidget,
+                  enabledWidgets: enabledWidgets, layoutSignature: layoutSignature) else { return nil }
+        return measurement
+    }
+
     /// 面板顶部的物理刘海死区。窗口不在刘海正下方时为空，不影响无刘海屏幕。
     private var panelDeadZone: NotchDeadZone {
         guard isExpanded, let window = notchWindow else { return .none }
@@ -1217,10 +1236,11 @@ struct NotchContentView: View {
             onSettings: openSettingsWindow,
             onClose: { collapse(force: true) },
             onMeasurement: { measurement in
-                guard !measurement.isEditingLayout,
-                      measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature),
-                      measurement.differs(from: expandedMeasurement) else { return }
-                expandedMeasurement = measurement
+                guard let accepted = Self.acceptedPanelMeasurement(measurement,
+                    width: effectivePanelWidth, selectedWidget: selectedWidget,
+                    enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature),
+                    accepted.differs(from: expandedMeasurement) else { return }
+                expandedMeasurement = accepted
             },
             deadZone: panelDeadZone,
             layoutStore: panelLayoutStore,
@@ -1238,7 +1258,9 @@ struct NotchContentView: View {
                 else {
                     editingViewportHeight = nil
                     // 结束编辑的测量可能先于这个回调到达，不能清掉已收到的正常布局高度。
-                    if expandedMeasurement?.layoutSignature != panelMeasurementSignature { expandedMeasurement = nil }
+                    expandedMeasurement = Self.acceptedPanelMeasurement(expandedMeasurement,
+                        width: effectivePanelWidth, selectedWidget: selectedWidget,
+                        enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature)
                     if isExpanded { scheduleExpandedAutoHide() }
                 }
             }

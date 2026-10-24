@@ -328,11 +328,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openPreferences() {
-        if let w = settingsWindow, w.isVisible {
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
+        let window = settingsWindowForPresentation()
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func makeSettingsContent() -> some View {
+        SettingsView()
+            .environment(themeManager)
+            .environment(updateManager)
+    }
+
+    func registerSettingsWindow(_ window: NSWindow) {
+        window.minSize = NSSize(width: 560, height: 400)
+        window.maxSize = NSSize(width: 560, height: 700)
+        let frame = window.frame
+        let height = min(max(frame.height, window.minSize.height), window.maxSize.height)
+        if frame.width != 560 || frame.height != height {
+            // 恢复旧窗口时也沿用尺寸约束，保留原来的顶部位置。
+            window.setFrame(NSRect(x: frame.minX, y: frame.maxY - height, width: 560, height: height), display: false)
         }
+        guard settingsWindow !== window else { return }
+        let previousWindow = settingsWindow
+        settingsWindow = window
+        window.title = L10n.xnookSettings
+        window.isReleasedWhenClosed = false
+        updateWindowAppearance(window)
+        // 系统 scene 接管设置入口后，移除此前创建的备用面板。
+        previousWindow?.close()
+    }
+
+    func settingsWindowForPresentation() -> NSWindow {
+        if let settingsWindow { return settingsWindow }
 
         let w = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 550),
@@ -340,22 +368,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        w.minSize = NSSize(width: 560, height: 400)
-        w.maxSize = NSSize(width: 560, height: 700)
         w.isFloatingPanel = true
         w.hidesOnDeactivate = false
-        w.title = L10n.xnookSettings
         w.center()
-        w.isReleasedWhenClosed = false
-        w.contentView = NSHostingView(
-            rootView: SettingsView()
-                .environment(themeManager)
-                .environment(updateManager)
-        )
-        settingsWindow = w
-        updateWindowAppearance(w)
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        w.contentView = NSHostingView(rootView: makeSettingsContent())
+        registerSettingsWindow(w)
+        return w
     }
 
     @objc private func openPreferencesFromNotification() {

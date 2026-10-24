@@ -74,26 +74,47 @@ enum IslandCapabilities {
     /// 已实现完整的两段式触发与超时兜底。
     static var useNativeSymbolDraw: Bool { false }
 
-    /// 是否在面板背景使用玻璃材质。
-    ///
-    /// 与图标动效不同，玻璃材质没有"内容消失"类风险：效果不可用时视觉回退到
-    /// 纯色填充，最坏情况只是不好看。因此默认开启。
-    ///
-    /// 注意：这里只控制「是否尝试」，实际是否生效还取决于配色方案——
-    /// `IslandGlassBackground` 限定深色模式才用玻璃，因为浅色模式下玻璃
-    /// 无法保证文字对比度（实测即便加 92% 白色背衬也只有 3.11:1）。
-    /// 关闭这里会走回纯色填充，与 macOS 14/15 视觉一致。
+    /// 玻璃实现的能力开关；用户仍需在显示设置中选择玻璃。
+    /// 实际启用还受配色方案与系统「减少透明度」设置约束。
     static var useLiquidGlassBackground: Bool { true }
 
     // MARK: - 诊断
 
     /// 供设置界面「关于」页展示的版本能力摘要。
     static var diagnosticsSummary: String {
+        diagnosticsSummary(
+            backgroundStyle: IslandBackgroundStyle.resolved(
+                from: UserDefaults.standard.string(forKey: "islandBackgroundStyle")
+            ),
+            supportsGlass: supportsLiquidGlass,
+            reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        )
+    }
+
+    static func diagnosticsSummary(backgroundStyle: IslandBackgroundStyle, supportsGlass: Bool,
+                                   reduceTransparency: Bool = false) -> String {
         var lines: [String] = []
         lines.append("系统档位：\(currentTier.rawValue)")
-        let glassState = supportsLiquidGlass
-            ? (useLiquidGlassBackground ? "启用（仅深色模式）" : "可用但已关闭")
-            : "不可用（纯色回退）"
+        let selection: String
+        switch backgroundStyle {
+        case .solid: selection = "跟随外观"
+        case .black: selection = "纯黑"
+        case .light: selection = "浅色"
+        case .glass: selection = "液态玻璃"
+        }
+        lines.append("背景选择：\(selection)")
+        let glassState: String
+        if !supportsGlass {
+            glassState = "不可用（纯色回退）"
+        } else if !useLiquidGlassBackground {
+            glassState = "可用但已关闭（纯色回退）"
+        } else if backgroundStyle != .glass {
+            glassState = "可用（当前使用纯色）"
+        } else if reduceTransparency {
+            glassState = "未启用（系统减少透明度，纯黑回退）"
+        } else {
+            glassState = "已启用（岛使用深色配色）"
+        }
         lines.append("玻璃材质：\(glassState)")
         let drawState = supportsNativeSymbolDraw
             ? (useNativeSymbolDraw ? "启用" : "可用但已关闭（遮罩扫出）")

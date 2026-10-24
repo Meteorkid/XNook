@@ -160,13 +160,13 @@ enum L10n {
 
     static var panelWidth: String { localized(zh: "面板宽度", en: "Panel width") }
     static var panelWidthDesc: String { localized(
-        zh: "展开面板的宽度（单位：点）。",
-        en: "Width of the expanded panel in points.") }
+        zh: "展开面板的宽度（单位：点）；开启自动适配时作为宽度上限。",
+        en: "Expanded panel width in points; used as the maximum when automatic sizing is on.") }
 
-    static var panelAutoSize: String { localized(zh: "自动适配高度", en: "Fit height to content") }
+    static var panelAutoSize: String { localized(zh: "自动适配窗口", en: "Fit window to content") }
     static var panelAutoSizeDesc: String { localized(
-        zh: "根据组件和最近任务自动调整高度；超出屏幕时可滚动查看。",
-        en: "Fit widgets and recent tasks automatically; scroll when content exceeds the screen.") }
+        zh: "按内容调整高度，少量组件和媒体详情自动收窄；超出屏幕时可滚动查看。",
+        en: "Fit content height and narrow the window for fewer widgets or media details; scroll beyond the screen limit.") }
 
     static var panelBaseHeight: String { localized(zh: "手动高度上限", en: "Manual height limit") }
     static var panelBaseHeightDesc: String { localized(
@@ -187,12 +187,43 @@ enum L10n {
 
     static var reduceMotion: String { localized(zh: "减弱动画", en: "Reduce motion") }
     static var reduceMotionDesc: String { localized(
-        zh: "禁用展开/收起过渡的弹簧动画。",
-        en: "Disable spring animations for the expand/collapse transitions.") }
+        zh: "禁用展开/收起的弹簧动画与两个岛之间的淡入淡出。",
+        en: "Disable expand/collapse springs and fades when switching between islands.") }
 
     static var appearanceDark: String { localized(zh: "深色", en: "Dark") }
     static var appearanceLight: String { localized(zh: "浅色", en: "Light") }
     static var appearanceSystem: String { localized(zh: "系统", en: "System") }
+
+    static var applicationAppearance: String { localized(zh: "应用外观", en: "App appearance") }
+    static var islandBackgroundStyle: String { localized(zh: "岛的背景", en: "Island background") }
+    static var islandBackgroundStyleDesc: String { localized(
+        zh: "可独立选择纯黑、浅色或液态玻璃；不会改变设置窗口的外观。",
+        en: "Choose black, light or Liquid Glass independently of the settings window.") }
+    static var backgroundSolid: String { localized(zh: "跟随外观", en: "Follow appearance") }
+    static var backgroundBlack: String { localized(zh: "纯黑", en: "Pure black") }
+    static var backgroundGlass: String { localized(zh: "液态玻璃", en: "Liquid Glass") }
+    static var backgroundFollowDescription: String { localized(
+        zh: "跟随应用外观：深色时使用纯黑底色，浅色时使用浅色底色。",
+        en: "Follows app appearance: a black surface in dark mode and a light surface in light mode.") }
+    static var backgroundBlackDescription: String { localized(
+        zh: "固定纯黑底色，模块使用深灰区分层次；不受应用外观影响。",
+        en: "A fixed black surface with dark gray modules, independent of app appearance.") }
+    static var backgroundLightDescription: String { localized(
+        zh: "固定浅色底色与深色文字，不受应用外观影响。",
+        en: "A fixed light surface with dark text, independent of app appearance.") }
+    static var glassEnabled: String { localized(
+        zh: "液态玻璃已启用，搭配清晰的浅色文字；下方可调节深浅。",
+        en: "Liquid Glass is enabled with light text. Adjust its darkness below.") }
+    static var glassUnsupported: String { localized(
+        zh: "当前环境不支持液态玻璃（需要 macOS 26 或更新版本），暂用纯黑背景。",
+        en: "Liquid Glass is unavailable here (macOS 26 or later is required). Using a black surface.") }
+    static var glassReducedTransparency: String { localized(
+        zh: "系统已开启“减少透明度”，当前使用纯黑背景；关闭后自动恢复液态玻璃。",
+        en: "Reduce Transparency is on, so a black surface is used. Liquid Glass returns when it is turned off.") }
+    static var islandGlassDepth: String { localized(zh: "玻璃深浅", en: "Glass darkness") }
+    static var islandGlassDepthDesc: String { localized(
+        zh: "数值越大，黑色背衬越深；范围 50–100%，兼顾文字清晰度。",
+        en: "Higher values darken the black backing. The 50–100% range keeps text readable.") }
 
     static var jellyIntensity: String { localized(zh: "果冻动画强度", en: "Jelly animation intensity") }
     static var jellyIntensityDesc: String { localized(

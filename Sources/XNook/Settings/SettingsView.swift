@@ -311,10 +311,13 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             section(L10n.sectionAppearance) {
                 card {
-                    row(L10n.sectionAppearance) {
+                    row(L10n.applicationAppearance) {
                         ThemePickerView()
                             .frame(width: 180)
                     }
+                    dividerLine
+                    IslandBackgroundSettingsView()
+                        .padding(.vertical, 8)
                 }
             }
 

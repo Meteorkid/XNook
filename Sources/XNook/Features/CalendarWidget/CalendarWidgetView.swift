@@ -19,14 +19,20 @@ struct CalendarWidgetView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(monthString(for: centeredDate))
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                Text(L10n.monthSuffix)
-                    .font(.system(size: 12, weight: .medium))
+        VStack(alignment: .leading, spacing: isDetail ? 12 : 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
                     .foregroundStyle(.secondary)
+                Text(L10n.widgetCalendar)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 4)
+                Text(L10n.panelCalendarMonth(centeredDate))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .font(.system(size: 13))
+            .frame(minHeight: 24)
 
             CalendarScroller(
                 selectedDate: selectedDate,
@@ -37,6 +43,7 @@ struct CalendarWidgetView: View {
                 reduceMotion: shouldReduceMotion
             )
             .frame(height: 48)
+            .expandedPanelDebugFrame(id: "expandedPanelCalendarDates")
 
             if !calendarManager.hasAccess {
                 accessPrompt
@@ -56,7 +63,7 @@ struct CalendarWidgetView: View {
                 Text(L10n.calendarOpenFailed).font(.system(size: 11)).foregroundStyle(.orange)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             calendarManager.ensureAccess()
             centeredDate = calendarManager.displayedDate
@@ -64,32 +71,49 @@ struct CalendarWidgetView: View {
     }
 
     private var accessPrompt: some View {
-        VStack(spacing: 8) {
-            Label(calendarManager.authorizationStatus == .restricted ? L10n.calendarAccessRestricted : L10n.calendarAccessRequired,
-                  systemImage: "lock.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly {
-                Button(L10n.calendarEnableAccess) {
-                    Task { await calendarManager.requestAccess() }
-                }
-                .disabled(calendarManager.isRequestingAccess)
+        VStack(alignment: .leading, spacing: 8) {
+            if isDetail {
+                Label(calendarManager.authorizationStatus == .restricted ? L10n.calendarAccessRestricted : L10n.calendarAccessRequired,
+                      systemImage: "lock.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(accessActionTitle, action: handleAccessAction)
+                    .buttonStyle(.bordered)
             } else {
-                Button(L10n.calendarOpenSettings) { SystemPrivacySettings.openCalendars() }
+                Button(action: handleAccessAction) {
+                    Label(accessActionTitle, systemImage: "lock.fill")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
             if let error = calendarManager.accessError {
                 Text(error).font(.system(size: 11)).foregroundStyle(.orange)
             }
         }
-        .buttonStyle(.bordered)
         .font(.system(size: 12))
+        .disabled(calendarManager.isRequestingAccess)
+    }
+
+    private var accessActionTitle: String {
+        calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly
+            ? L10n.calendarEnableAccess : L10n.calendarOpenSettings
+    }
+
+    private func handleAccessAction() {
+        if calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly {
+            Task { await calendarManager.requestAccess() }
+        } else {
+            SystemPrivacySettings.openCalendars()
+        }
     }
 
     @ViewBuilder
     private func eventContent(now: Date) -> some View {
         let overview = CalendarManager.overviewEvents(calendarManager.upcomingEvents, date: calendarManager.displayedDate, now: now)
-        let events = isDetail ? calendarManager.upcomingEvents : Array(overview.prefix(2))
+        let events = isDetail ? calendarManager.upcomingEvents : Array(overview.prefix(1))
         VStack(alignment: .leading, spacing: 8) {
             if events.isEmpty {
                 Label(emptyMessage, systemImage: "calendar.badge.checkmark")
@@ -97,11 +121,12 @@ struct CalendarWidgetView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                ForEach(Array(events.enumerated()), id: \.offset) { index, event in
                     eventRow(event, now: now)
+                        .expandedPanelDebugFrame(id: "expandedPanelCalendarEvent-\(index)")
                 }
             }
-            if !isDetail {
+            if !isDetail, !calendarManager.upcomingEvents.isEmpty {
                 let hiddenCount = calendarManager.upcomingEvents.count - events.count
                 Button {
                     if let onShowAll { onShowAll() } else { openCalendar() }
@@ -112,7 +137,7 @@ struct CalendarWidgetView: View {
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,16 +156,16 @@ struct CalendarWidgetView: View {
                 .frame(width: 3, height: isDetail ? 34 : 28)
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.title ?? L10n.untitled)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: isDetail ? 13 : 12, weight: .medium))
                     .lineLimit(isDetail ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(event.isAllDay ? L10n.calendarAllDay : timeString(from: event.startDate) + " – " + timeString(from: event.endDate))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 if event.startDate <= now && event.endDate > now {
-                    Text(L10n.calendarInProgress).font(.system(size: 10)).foregroundStyle(Color.accentColor)
+                    Text(L10n.calendarInProgress).font(.system(size: 11)).foregroundStyle(Color.accentColor)
                 } else if isDetail && event.endDate <= now {
-                    Text(L10n.calendarEnded).font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(L10n.calendarEnded).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 0)
@@ -176,7 +201,6 @@ struct CalendarWidgetView: View {
     private var dateRange: [Date] {
         CalendarManager.visibleDates(today: today, selectedDate: calendarManager.displayedDate)
     }
-    private func monthString(for date: Date) -> String { String(Calendar.current.component(.month, from: date)) }
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
@@ -353,6 +377,7 @@ private class DateCell: NSButton {
     private let weekdayLabel = NSTextField(labelWithString: "")
     private let dayLabel = NSTextField(labelWithString: "")
     private let highlightLayer = CALayer()
+    private var isCentered = false
 
     init(date: Date, isToday: Bool, index: Int) {
         self.date = date
@@ -372,14 +397,14 @@ private class DateCell: NSButton {
         layer?.addSublayer(highlightLayer)
 
         // 星期标签
-        weekdayLabel.font = .systemFont(ofSize: 8, weight: .medium)
+        weekdayLabel.font = .systemFont(ofSize: 11, weight: .medium)
         weekdayLabel.alignment = .center
         weekdayLabel.textColor = isToday ? .systemBlue : .secondaryLabelColor
         weekdayLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(weekdayLabel)
 
         // 日期数字
-        dayLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        dayLabel.font = .systemFont(ofSize: 13, weight: .medium)
         dayLabel.alignment = .center
         dayLabel.textColor = isToday ? .systemBlue : .labelColor
         dayLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -387,22 +412,25 @@ private class DateCell: NSButton {
 
         // 设置文字
         let formatter = DateFormatter()
-        formatter.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
+        formatter.locale = Locale(identifier: L10n.isChinese ? "zh_CN" : "en_US")
         formatter.dateFormat = "E"
         weekdayLabel.stringValue = formatter.string(from: date)
         dayLabel.stringValue = "\(Calendar.current.component(.day, from: date))"
         formatter.dateStyle = .full
         setAccessibilityLabel(formatter.string(from: date))
 
-        // 约束
+        // NSTextField 的 frame 还包含对齐外沿，限制其宽度时需一并扣除。
+        let weekdayInsets = weekdayLabel.alignmentRectInsets
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: 30),
             heightAnchor.constraint(equalToConstant: 40),
 
-            weekdayLabel.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            weekdayLabel.topAnchor.constraint(equalTo: topAnchor, constant: 1),
             weekdayLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            weekdayLabel.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor,
+                constant: -weekdayInsets.left - weekdayInsets.right),
 
-            dayLabel.topAnchor.constraint(equalTo: weekdayLabel.bottomAnchor, constant: 2),
+            dayLabel.topAnchor.constraint(equalTo: weekdayLabel.bottomAnchor),
             dayLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             dayLabel.widthAnchor.constraint(equalToConstant: 24),
             dayLabel.heightAnchor.constraint(equalToConstant: 24),
@@ -410,6 +438,11 @@ private class DateCell: NSButton {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
 
     override func layout() {
         super.layout()
@@ -429,11 +462,11 @@ private class DateCell: NSButton {
         let scale: CGFloat
         let yOffset: CGFloat
         switch dist {
-        case 0:  scale = 1.3;  yOffset = 4
-        case 1:  scale = 1.15; yOffset = 2
-        case 2:  scale = 1.05; yOffset = 1
+        case 0:  scale = 1.08; yOffset = 1
+        case 1:  scale = 1.04; yOffset = 0
+        case 2:  scale = 1.0;  yOffset = 0
         case 3:  scale = 1.0;  yOffset = 0
-        default: scale = 0.92; yOffset = 0
+        default: scale = 1.0; yOffset = 0
         }
 
         // 缩放 + 位移全部在 layer transform 中完成，不修改 frame
@@ -457,17 +490,24 @@ private class DateCell: NSButton {
             CATransaction.commit()
         }
 
-        // 高亮状态：今天=蓝色文字，中心=白色文字+背景
-        let isCenter = dist == 0
-        weekdayLabel.textColor = isToday ? .systemBlue : (isCenter ? .white : .secondaryLabelColor)
-        dayLabel.textColor = isToday ? .systemBlue : (isCenter ? .labelColor : .secondaryLabelColor)
-        highlightLayer.backgroundColor = isCenter && !isToday
-            ? NSColor.white.withAlphaComponent(0.15).cgColor
-            : NSColor.clear.cgColor
+        isCentered = dist == 0
+        updateColors()
 
         // 字体始终更新，确保离开中心时字号正确重置
-        dayLabel.font = .systemFont(ofSize: isCenter ? 13 : 11, weight: isCenter ? .bold : .medium)
-        weekdayLabel.font = .systemFont(ofSize: isCenter ? 9 : 8, weight: isCenter ? .semibold : .medium)
+        dayLabel.font = .systemFont(ofSize: 13, weight: isCentered ? .bold : .medium)
+        weekdayLabel.font = .systemFont(ofSize: 11, weight: isCentered ? .semibold : .medium)
+    }
+
+    private func updateColors() {
+        let textColor: NSColor = isToday ? .systemBlue : (isCentered ? .labelColor : .secondaryLabelColor)
+        weekdayLabel.textColor = textColor
+        dayLabel.textColor = textColor
+        // CALayer 保存的是解析后的 CGColor，切换外观时需要重新取语义颜色。
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            highlightLayer.backgroundColor = isCentered && !isToday
+                ? NSColor.labelColor.withAlphaComponent(0.12).cgColor
+                : NSColor.clear.cgColor
+        }
     }
 }
 

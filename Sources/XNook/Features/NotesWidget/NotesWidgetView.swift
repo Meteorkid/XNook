@@ -20,7 +20,7 @@ struct NotesWidgetView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: isDetail ? 12 : 6) {
+        VStack(alignment: .leading, spacing: isDetail ? 12 : 8) {
             header
 
             if notesManager.canUndoDelete {
@@ -44,11 +44,14 @@ struct NotesWidgetView: View {
                 Button(L10n.notesShowAll(notesManager.notes.count), action: onShowAll)
                     .font(.system(size: 11, weight: .medium))
                     .buttonStyle(.plain)
-                    .foregroundStyle(noteAccent)
-                    .padding(.vertical, 4)
-                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .expandedPanelDebugFrame(id: "expandedPanelNotesShowAll")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: notesManager.currentNote?.id, initial: true) { _, id in
             guard id != nil, !notesManager.isStorageReadOnly else { return }
             focusedField = notesManager.currentNote?.content.isEmpty == true ? .title : .content
@@ -101,7 +104,8 @@ struct NotesWidgetView: View {
             .help(L10n.notesNew)
             .accessibilityLabel(L10n.notesNew)
         }
-        .font(.system(size: isDetail ? 13 : 11))
+        .font(.system(size: 13))
+        .frame(minHeight: 24)
     }
 
     private var undoDeleteBar: some View {
@@ -113,7 +117,7 @@ struct NotesWidgetView: View {
             }
             undoDeleteButton
         }
-        .font(.system(size: isDetail ? 12 : 10))
+        .font(.system(size: isDetail ? 12 : 11))
     }
 
     private var undoDeleteButton: some View {
@@ -151,25 +155,24 @@ struct NotesWidgetView: View {
     }
 
     private var visibleNotes: [NotesManager.Note] {
-        isDetail ? notesManager.filteredNotes(matching: searchQuery) : Array(notesManager.notes.prefix(4))
+        isDetail ? notesManager.filteredNotes(matching: searchQuery) : Array(notesManager.notes.prefix(3))
     }
 
     private var noteList: some View {
         LazyVStack(alignment: .leading, spacing: isDetail ? 6 : 4) {
             if visibleNotes.isEmpty {
-                VStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Image(systemName: "note.text")
                         .font(.system(size: 20))
                     Text(notesManager.notes.isEmpty ? L10n.noNotes : L10n.notesNoMatches)
-                    if isDetail {
-                        Text(notesManager.notes.isEmpty ? L10n.notesEmptyHint : L10n.notesSearchHint)
-                            .font(.system(size: 12))
-                    }
+                    Text(notesManager.notes.isEmpty ? L10n.notesEmptyHint : L10n.notesSearchHint)
+                        .font(.system(size: 11))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.system(size: isDetail ? 13 : 11))
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
             } else {
                 if isDetail {
                     Text(L10n.notesCount(visibleNotes.count))
@@ -191,15 +194,15 @@ struct NotesWidgetView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: note.isMarkdown ? "doc.text" : "note.text")
-                    .font(.system(size: isDetail ? 14 : 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(note.isMarkdown ? noteAccent : .blue)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(note.title.isEmpty ? L10n.notesUntitled : note.title)
-                        .font(.system(size: isDetail ? 13 : 11, weight: .medium))
+                        .font(.system(size: isDetail ? 13 : 12, weight: .medium))
                         .foregroundStyle(.primary)
                     Text(note.content.isEmpty ? L10n.notesNoContent : note.content.prefix(120).replacingOccurrences(of: "\n", with: " "))
-                        .font(.system(size: isDetail ? 12 : 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
                 .lineLimit(1)
@@ -208,11 +211,13 @@ struct NotesWidgetView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(isDetail ? 10 : 6)
-            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, isDetail ? 10 : 0)
+            .padding(.vertical, isDetail ? 10 : 4)
+            .background(Color.secondary.opacity(isDetail ? 0.05 : 0), in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .expandedPanelDebugFrame(id: "expandedPanelNote-\(note.id.uuidString)")
         .contextMenu {
             Button(L10n.notesDelete, role: .destructive) { notesManager.deleteNote(note) }
                 .disabled(notesManager.isStorageReadOnly)
@@ -252,7 +257,7 @@ struct NotesWidgetView: View {
                 .help(L10n.notesDelete)
                 .accessibilityLabel(L10n.notesDelete)
             }
-            .font(.system(size: isDetail ? 12 : 10))
+            .font(.system(size: isDetail ? 12 : 11))
 
             TextField(L10n.notesTitle, text: Binding(
                 get: { notesManager.currentNote?.title ?? "" },
@@ -261,7 +266,7 @@ struct NotesWidgetView: View {
                     notesManager.updateCurrentNoteTitle($0)
                 }
             ))
-            .font(.system(size: isDetail ? 15 : 12, weight: .semibold))
+            .font(.system(size: isDetail ? 15 : 13, weight: .semibold))
             .textFieldStyle(.plain)
             .focused($focusedField, equals: .title)
             .disabled(notesManager.isStorageReadOnly)
@@ -274,7 +279,7 @@ struct NotesWidgetView: View {
                     notesManager.updateCurrentNoteContent($0)
                 }
             ))
-            .font(.system(size: isDetail ? 13 : 11, design: note.isMarkdown ? .monospaced : .default))
+            .font(.system(size: isDetail ? 13 : 12, design: note.isMarkdown ? .monospaced : .default))
             .scrollContentBackground(.hidden)
             .padding(4)
             .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
@@ -285,7 +290,7 @@ struct NotesWidgetView: View {
 
             HStack {
                 Text(note.isMarkdown ? L10n.markdown : L10n.plainText)
-                    .font(.system(size: isDetail ? 12 : 10))
+                    .font(.system(size: isDetail ? 12 : 11))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 Button(L10n.notesDone, action: closeEditor)

@@ -22,6 +22,7 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
                 try render(fixture, widgets: widgets, width: width, maximumHeight: 2000,
                     name: "widget-matrix-\(Int(width))-mask-\(mask)") { result in
                     try assertPackedWidgetGrid(result)
+                    try assertSingleLineTaskEntry(result)
                     try assertFixedControls(result)
                     try assertTasksFollowWidgets(result)
                     try assertContentFits(result)
@@ -51,18 +52,49 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         }
     }
 
+    func testAutomaticWidthsAndMediaDetailReturnReflowTheSameHost() throws {
+        try requireRendering()
+        let fixture = try WorkflowPreviewFixture(historyCount: 3)
+        defer { fixture.cleanUp() }
+        let allWidgets: [Widget] = [.media, .calendar, .notes, .tray]
+        try render(fixture, widgets: allWidgets, name: "horizontal-auto-start") { result in
+            for count in [1, 2, 3, 4, 3] {
+                result.model.widgets = count == 3 ? [.media, .calendar, .tray] : Array(allWidgets.prefix(count))
+                result.model.width = ExpandedPanelLayout.width(preferred: 800, available: 1200,
+                    automaticallyFit: true, widgetCount: count, selectedWidget: nil)
+                result.window.setContentSize(result.model.size)
+                try resizeToMeasurement(result)
+                try assertPackedWidgetGrid(result)
+                try assertFixedControls(result)
+                try assertContentFits(result)
+                try writeEvidence(result, name: "horizontal-auto-\(count)-widgets")
+            }
+            result.model.selected = .media
+            result.model.width = ExpandedPanelLayout.width(preferred: 800, available: 1200,
+                automaticallyFit: true, widgetCount: 3, selectedWidget: .media)
+            result.window.setContentSize(result.model.size)
+            try resizeToMeasurement(result)
+            XCTAssertEqual(result.model.width, 460)
+            XCTAssertNil(result.record.frames["expandedPanelRecentTasks"])
+            try assertFixedControls(result)
+            try assertContentFits(result)
+            try writeEvidence(result, name: "horizontal-auto-media-detail")
+            result.model.selected = nil
+            result.model.width = 800
+            result.window.setContentSize(result.model.size)
+            try resizeToMeasurement(result)
+            try assertThreeColumns(result)
+            try assertContentFits(result)
+            try writeEvidence(result, name: "horizontal-auto-return")
+        }
+    }
+
     func testEqualHeightWidgetConfigurationChangeRefreshesMeasurement() throws {
         try requireRendering()
-        let fixture = try WorkflowPreviewFixture(historyCount: 3, trayFileCount: 0)
-        fixture.media.currentTitle = ""
-        fixture.media.currentArtist = ""
+        let fixture = try WorkflowPreviewFixture(historyCount: 3, trayFileCount: 0,
+            mediaHasContent: false, calendarEventTitles: [])
         defer { fixture.cleanUp() }
-        try render(fixture, widgets: [.media, .calendar, .tray], name: "widget-measurement-initial") { result in
-            // onAppear 会刷新夹具日历，待视图挂载后再固定空态输入。
-            fixture.calendar.upcomingEvents = []
-            try resizeToMeasurement(result)
-            XCTAssertTrue(fixture.calendar.upcomingEvents.isEmpty)
-            try writeEvidence(result, name: "widget-measurement-before")
+        try render(fixture, widgets: [.media, .calendar, .tray], name: "widget-measurement-before") { result in
             let previous = try XCTUnwrap(result.record.latest)
             let previousCount = result.record.measurements.count
             result.model.widgets = [.media, .calendar]
@@ -82,6 +114,140 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         }
     }
 
+    func testEmptyThreeWidgetsStayCompactWithAndWithoutHistory() throws {
+        try requireRendering()
+        for historyCount in [0, 3] {
+            for language in ["zh", "en"] {
+                for scheme in [ColorScheme.light, .dark] {
+                    let fixture = try WorkflowPreviewFixture(historyCount: historyCount, trayFileCount: 0,
+                        mediaHasContent: false, calendarEventTitles: [])
+                    defer { fixture.cleanUp() }
+                    XCTAssertNil(fixture.focus.activeSession)
+                    XCTAssertTrue(fixture.calendar.upcomingEvents.isEmpty)
+                    XCTAssertTrue(fixture.tray.files.isEmpty)
+                    try withLanguage(language) {
+                        let name = "compact-empty-three-history-\(historyCount)-\(language)-\(scheme == .dark ? "dark" : "light")"
+                        try render(fixture, widgets: [.media, .calendar, .tray], scheme: scheme, name: name) { result in
+                            try assertThreeColumns(result)
+                            // 100pt封面空态、24pt模块标题与12pt内边距是已选方案的明确空间预算。
+                            XCTAssertLessThanOrEqual(result.model.height, historyCount == 0 ? 280 : 390,
+                                "空组件按内容收拢，同时保留新方案的封面和清楚的空态入口")
+                            XCTAssertEqual(result.record.frames.keys.filter { $0.hasPrefix("expandedPanelHistoryRow-") }.count,
+                                historyCount)
+                            try assertSingleLineTaskEntry(result)
+                            try assertFixedControls(result)
+                            try assertTasksFollowWidgets(result)
+                            try assertContentFits(result)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testNextCalendarEventFitsOverviewAndAllLongEventsRemainInDetail() throws {
+        try requireRendering()
+        for language in ["zh", "en"] {
+            for scheme in [ColorScheme.light, .dark] {
+                let titles = language == "zh"
+                    ? ["产品与工程协作评审：逐项核对完整发布计划与后续验收安排", "下一阶段项目复盘：确认复杂工作流中的设计决策与任务资料"]
+                    : ["Product and engineering review: verify the complete release plan and acceptance schedule",
+                       "Project retrospective: confirm design decisions and resources for the next workflow"]
+                let fixture = try WorkflowPreviewFixture(historyCount: 3, calendarEventTitles: titles, calendarDayOffset: 1)
+                defer { fixture.cleanUp() }
+                try withLanguage(language) {
+                    let name = "compact-two-long-events-\(language)-\(scheme == .dark ? "dark" : "light")"
+                    try render(fixture, widgets: [.media, .calendar, .tray], scheme: scheme, name: name) { result in
+                        try assertThreeColumns(result)
+                        let card = try XCTUnwrap(widgetFrames(result)[.calendar])
+                        let rows = [try frame("expandedPanelCalendarEvent-0", in: result)]
+                        XCTAssertEqual(result.record.frames.keys.filter { $0.hasPrefix("expandedPanelCalendarEvent-") }.count, 1)
+                        for row in rows {
+                            XCTAssertGreaterThan(row.height, 40, "两行长标题及时间应获得自然高度")
+                            XCTAssertGreaterThanOrEqual(row.minY, card.minY)
+                            XCTAssertLessThanOrEqual(row.maxY, card.maxY)
+                        }
+                        try assertSingleLineTaskEntry(result)
+                        try assertFixedControls(result)
+                        try assertTasksFollowWidgets(result)
+                        try assertContentFits(result)
+                        result.model.selected = .calendar
+                        try resizeToMeasurement(result)
+                        let first = try frame("expandedPanelCalendarEvent-0", in: result)
+                        let second = try frame("expandedPanelCalendarEvent-1", in: result)
+                        XCTAssertGreaterThan(second.minY, first.maxY)
+                        XCTAssertEqual(result.record.frames.keys.filter { $0.hasPrefix("expandedPanelCalendarEvent-") }.count, 2)
+                        try assertContentFits(result)
+                    }
+                }
+            }
+        }
+    }
+
+    func testEmptyDetailsDoNotRetainTheOldMinimumHeight() throws {
+        try requireRendering()
+        let fixture = try WorkflowPreviewFixture(historyCount: 0, trayFileCount: 0,
+            mediaHasContent: false, calendarEventTitles: [])
+        defer { fixture.cleanUp() }
+        try render(fixture, widgets: [.media, .calendar, .tray], name: "compact-empty-detail-overview") { result in
+            for selected in [Widget.media, .calendar, .tray] {
+                result.model.selected = selected
+                try resizeToMeasurement(result)
+                XCTAssertEqual(try XCTUnwrap(result.record.latest).selectedWidget, selected)
+                XCTAssertLessThan(result.model.height, 260, "空详情应按内容收拢，不能强制260pt正文")
+                XCTAssertNil(result.record.frames["expandedPanelRecentTasks"])
+                try assertFixedControls(result)
+                try assertContentFits(result)
+                try writeEvidence(result, name: "compact-empty-detail-" + selected.rawValue)
+            }
+        }
+    }
+
+    func testToolbarAvoidsCenteredNotchAtWideAndNarrowWidths() throws {
+        try requireRendering()
+        let deadZone = NotchDeadZone(width: 200, height: 32)
+        for width in [CGFloat(800), CGFloat(320)] {
+            let fixture = try WorkflowPreviewFixture(historyCount: 0, trayFileCount: 0,
+                mediaHasContent: false, calendarEventTitles: [])
+            defer { fixture.cleanUp() }
+            let headerHeight: CGFloat = width == 800 ? 41 : 73
+            try render(fixture, widgets: [.media, .calendar, .tray], width: width,
+                deadZone: deadZone, expectedHeaderHeight: headerHeight, name: "compact-notch-\(Int(width))") { result in
+                let obstruction = CGRect(x: (width - deadZone.width) / 2, y: 0,
+                    width: deadZone.width, height: deadZone.height)
+                for identifier in ["expandedPanelNavigation", "expandedPanelSettings", "expandedPanelClose"] {
+                    let control = try frame(identifier, in: result)
+                    XCTAssertTrue(control.intersection(obstruction).isEmpty, "\(identifier)不得进入真实刘海遮挡区")
+                    XCTAssertGreaterThan(control.width, 0)
+                    XCTAssertGreaterThan(control.height, 0)
+                }
+                try assertFixedControls(result)
+                try assertTasksFollowWidgets(result)
+                try assertContentFits(result)
+            }
+        }
+    }
+
+    func testToolbarMovesBelowNotchAfterHorizontalWindowOffset() throws {
+        try requireRendering()
+        let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        for (width, offset) in [(CGFloat(400), CGFloat(120)), (CGFloat(800), CGFloat(300))] {
+            let window = CGRect(x: screen.midX + offset - width / 2, y: 582, width: width, height: 400)
+            let deadZone = NotchDeadZone.resolve(screenFrame: screen, windowFrame: window,
+                screenZone: NotchDeadZone(width: 200, height: 32))
+            let fixture = try WorkflowPreviewFixture(historyCount: 0, mediaHasContent: false)
+            defer { fixture.cleanUp() }
+            try render(fixture, widgets: [.media], width: width, deadZone: deadZone,
+                expectedHeaderHeight: 73, name: "horizontal-offset-notch-\(Int(width))") { result in
+                for identifier in ["expandedPanelNavigation", "expandedPanelSettings", "expandedPanelClose"] {
+                    XCTAssertGreaterThanOrEqual(try frame(identifier, in: result).minY, 32)
+                }
+                try assertFixedControls(result)
+                try assertContentFits(result)
+            }
+        }
+    }
+
     func testThreeWidgetsAndThreeHistoryRowsFitInBothLanguagesAndAppearances() throws {
         try requireRendering()
         for language in ["zh", "en"] {
@@ -91,11 +257,9 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
                 try withLanguage(language) {
                     try render(fixture, widgets: [.media, .calendar, .tray], scheme: scheme,
                         name: "adaptive-three-history-\(language)-\(scheme == .dark ? "dark" : "light")") { result in
-                        let cards = try widgetFrames(result)
-                        XCTAssertEqual(cards.count, 3)
-                        XCTAssertEqual(try XCTUnwrap(cards[.media]).minY, try XCTUnwrap(cards[.tray]).minY, accuracy: 1)
-                        XCTAssertLessThan(try XCTUnwrap(cards[.media]).maxX, try XCTUnwrap(cards[.calendar]).minX)
-                        XCTAssertLessThan(try XCTUnwrap(cards[.calendar]).maxX, try XCTUnwrap(cards[.tray]).minX)
+                        try assertThreeColumns(result)
+                        XCTAssertLessThan(result.model.height, 438, "自然高度应低于旧版800×438参考；输入日期可能不同，非配对性能基准")
+                        try assertSingleLineTaskEntry(result)
                         XCTAssertEqual(result.record.frames.keys.filter { $0.hasPrefix("expandedPanelHistoryRow-") }.count, 3)
                         try assertFixedControls(result)
                         try assertTasksFollowWidgets(result)
@@ -129,7 +293,7 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
             let tasks = try frame("expandedPanelRecentTasks", in: result)
             for session in fixture.focus.history {
                 let row = try frame("expandedPanelHistoryRow-" + session.id.uuidString, in: result)
-                XCTAssertGreaterThanOrEqual(row.height, 28)
+                XCTAssertGreaterThanOrEqual(row.height, 24)
                 XCTAssertGreaterThanOrEqual(row.minY, tasks.minY)
                 XCTAssertLessThanOrEqual(row.maxY, tasks.maxY)
             }
@@ -172,8 +336,8 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         defer { fixture.cleanUp() }
         try render(fixture, widgets: [.media, .calendar, .tray], name: "adaptive-tray-overview") { result in
             let overviewHeight = try XCTUnwrap(result.record.latest).height
-            XCTAssertEqual(result.record.frames.keys.filter { $0.hasPrefix("expandedPanelTrayFile-") }.count, 4)
-            XCTAssertGreaterThan(try frame("expandedPanelTrayFile-" + fixture.tray.files[3].id.uuidString, in: result).height, 0)
+            XCTAssertEqual(result.record.frames.keys.filter { $0.hasPrefix("expandedPanelTrayFile-") }.count, 2)
+            XCTAssertGreaterThan(try frame("expandedPanelTrayFile-" + fixture.tray.files[1].id.uuidString, in: result).height, 0)
             XCTAssertNil(result.record.frames["expandedPanelTrayFile-" + fixture.tray.files[5].id.uuidString])
             XCTAssertGreaterThan(try frame("expandedPanelTrayShowAll", in: result).height, 0)
 
@@ -308,17 +472,18 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
 
     private func render(_ fixture: WorkflowPreviewFixture, widgets: [Widget], width: CGFloat = 800,
                         maximumHeight: CGFloat = 1200, historyLimit: Int = 3, scheme: ColorScheme = .dark,
+                        deadZone: NotchDeadZone = .none, expectedHeaderHeight: CGFloat = 41,
                         name: String, verify: (WorkflowRenderResult) throws -> Void) throws {
         let model = WorkflowRenderModel(width: width, height: min(400, maximumHeight), widgets: widgets)
         let record = WorkflowMeasurementRecord()
         let host = NSHostingView(rootView: WorkflowPanelPreview(fixture: fixture,
-            historyLimit: historyLimit, model: model, record: record, scheme: scheme))
+            historyLimit: historyLimit, model: model, record: record, scheme: scheme, deadZone: deadZone))
         host.frame = NSRect(origin: .zero, size: model.size)
         let window = makeWindow(size: model.size, scheme: scheme)
         window.contentView = host
         defer { window.contentView = nil; window.close() }
         let result = WorkflowRenderResult(model: model, record: record, host: host, window: window,
-            maximumHeight: maximumHeight)
+            maximumHeight: maximumHeight, deadZone: deadZone, expectedHeaderHeight: expectedHeaderHeight)
         try resizeToMeasurement(result)
         XCTAssertFalse(window.isVisible)
         XCTAssertEqual(host.bounds.size, model.size)
@@ -362,13 +527,28 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         let body = viewFrame(try outerScrollView(result), in: result.host)
         let reportedBody = try frame("expandedPanelBody", in: result)
         XCTAssertEqual(header.minY, 0, accuracy: 1)
-        XCTAssertEqual(header.height, IslandTokens.Layout.headerHeight, accuracy: 1)
-        XCTAssertEqual(navigation.minY, header.maxY, accuracy: 1)
-        XCTAssertEqual(navigation.height, IslandTokens.Layout.navigationHeight, accuracy: 1)
-        XCTAssertEqual(body.minY, ExpandedPanelLayout.headerHeight, accuracy: 1)
+        XCTAssertEqual(header.height, result.expectedHeaderHeight - 1, accuracy: 1)
+        XCTAssertGreaterThan(navigation.width, 0)
+        XCTAssertGreaterThan(navigation.height, 0)
+        XCTAssertLessThanOrEqual(navigation.height, 40)
+        XCTAssertGreaterThanOrEqual(navigation.minY, header.minY)
+        XCTAssertLessThanOrEqual(navigation.maxY, header.maxY)
+        XCTAssertGreaterThanOrEqual(navigation.minX, header.minX)
+        XCTAssertLessThanOrEqual(navigation.maxX, header.maxX)
+        XCTAssertEqual(body.minY, result.expectedHeaderHeight, accuracy: 1)
         XCTAssertEqual(body.maxY, result.model.height, accuracy: 1)
         XCTAssertEqual(reportedBody.minY, body.minY, accuracy: 1)
         XCTAssertEqual(reportedBody.height, body.height, accuracy: 1)
+        let controls = try ["expandedPanelSettings", "expandedPanelClose"].map { try frame($0, in: result) }
+        for control in controls {
+            XCTAssertGreaterThanOrEqual(control.width, 26)
+            XCTAssertGreaterThanOrEqual(control.height, 26)
+            XCTAssertGreaterThanOrEqual(control.minX, header.minX)
+            XCTAssertLessThanOrEqual(control.maxX, header.maxX)
+            XCTAssertGreaterThanOrEqual(control.minY, header.minY)
+            XCTAssertLessThanOrEqual(control.maxY, header.maxY)
+        }
+        XCTAssertTrue(controls[0].intersection(controls[1]).isEmpty)
     }
 
     private func assertTasksFollowWidgets(_ result: WorkflowRenderResult) throws {
@@ -376,7 +556,23 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         for card in try widgetFrames(result).values {
             XCTAssertGreaterThan(tasks.minY, card.maxY)
         }
-        XCTAssertGreaterThan(tasks.height, 40)
+        XCTAssertGreaterThanOrEqual(tasks.height, 28)
+    }
+
+    private func assertThreeColumns(_ result: WorkflowRenderResult) throws {
+        let cards = try widgetFrames(result)
+        XCTAssertEqual(cards.count, 3)
+        let media = try XCTUnwrap(cards[.media])
+        let calendar = try XCTUnwrap(cards[.calendar])
+        let tray = try XCTUnwrap(cards[.tray])
+        XCTAssertEqual(media.minY, calendar.minY, accuracy: 1)
+        XCTAssertEqual(media.minY, tray.minY, accuracy: 1)
+        XCTAssertEqual(media.maxY, calendar.maxY, accuracy: 1)
+        XCTAssertEqual(media.maxY, tray.maxY, accuracy: 1)
+        XCTAssertGreaterThan(media.width, calendar.width)
+        XCTAssertEqual(calendar.width, tray.width, accuracy: 1)
+        XCTAssertLessThan(media.maxX, calendar.minX)
+        XCTAssertLessThan(calendar.maxX, tray.minX)
     }
 
     private func assertPackedWidgetGrid(_ result: WorkflowRenderResult) throws {
@@ -386,27 +582,29 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         let tasks = try frame("expandedPanelRecentTasks", in: result)
         guard !result.widgets.isEmpty else {
             XCTAssertNil(result.record.frames["expandedPanelWidgets"])
-            let emptyStateMaximumHeight = ExpandedPanelLayout.outerPadding
-                + IslandTokens.Spacing.group * 2 + IslandTokens.Spacing.section + 24
-            XCTAssertLessThanOrEqual(tasks.minY - ExpandedPanelLayout.headerHeight, emptyStateMaximumHeight,
-                "全部关闭时只保留原有间距和单行空状态提示，不能继续占用组件网格高度")
+            XCTAssertLessThanOrEqual(tasks.minY - result.expectedHeaderHeight, 80,
+                "全部关闭时只保留空状态提示，不能继续占用组件网格高度")
             return
         }
         let grid = try frame("expandedPanelWidgets", in: result)
         let cards = try result.widgets.map { try frame("expandedPanelWidget-" + $0.rawValue, in: result) }
-        let columns = result.model.width == 800 ? [0, 1, 2, 3, 2][cards.count] : 1
-        let spacing = ExpandedPanelLayout.columnSpacing
-        let cellWidth = (grid.width - CGFloat(columns - 1) * spacing) / CGFloat(columns)
+        let columns = result.model.width >= 704 ? [0, 1, 2, 3, 2][cards.count]
+            : (result.model.width >= 472 ? min(2, cards.count) : 1)
+        let spacing: CGFloat = 8
         var expectedY = grid.minY
         for rowStart in stride(from: 0, to: cards.count, by: columns) {
             let row = Array(cards[rowStart..<min(rowStart + columns, cards.count)])
             XCTAssertEqual(row.count, columns, "本轮0–4组件配置不应产生空白占位列")
-            for (column, card) in row.enumerated() {
-                XCTAssertEqual(card.minX, grid.minX + CGFloat(column) * (cellWidth + spacing), accuracy: 1)
+            var expectedX = grid.minX
+            for card in row {
+                XCTAssertEqual(card.minX, expectedX, accuracy: 1)
                 XCTAssertEqual(card.minY, expectedY, accuracy: 1)
-                XCTAssertEqual(card.width, cellWidth, accuracy: 1)
+                XCTAssertGreaterThan(card.width, 0)
                 XCTAssertGreaterThan(card.height, 0)
+                XCTAssertEqual(card.maxY, row[0].maxY, accuracy: 1, "同一行独立模块底边应对齐")
+                expectedX = card.maxX + spacing
             }
+            XCTAssertEqual(row.last?.maxX ?? 0, grid.maxX, accuracy: 1)
             expectedY = try XCTUnwrap(row.map(\.maxY).max()) + spacing
         }
         XCTAssertEqual(grid.maxY, expectedY - spacing, accuracy: 1,
@@ -417,6 +615,28 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
             for right in cards.indices where right > left {
                 XCTAssertTrue(cards[left].intersection(cards[right]).isEmpty, "组件卡片不得重叠")
             }
+        }
+    }
+
+    private func assertSingleLineTaskEntry(_ result: WorkflowRenderResult) throws {
+        let entry = try frame("expandedPanelTaskEntry", in: result)
+        let title = try frame("expandedPanelTaskTitle", in: result)
+        let start = try frame("expandedPanelTaskStart", in: result)
+        let tasks = try frame("expandedPanelRecentTasks", in: result)
+        XCTAssertGreaterThanOrEqual(entry.height, 28)
+        XCTAssertLessThanOrEqual(entry.height, 32, "手动任务入口必须保持一行，而不是堆叠标题、输入与按钮")
+        XCTAssertEqual(title.midY, start.midY, accuracy: 1)
+        XCTAssertLessThan(title.maxX, start.minX)
+        for control in [title, start] {
+            XCTAssertGreaterThan(control.width, 0)
+            XCTAssertGreaterThanOrEqual(control.minY, entry.minY)
+            XCTAssertLessThanOrEqual(control.maxY, entry.maxY)
+        }
+        XCTAssertGreaterThanOrEqual(entry.minY, tasks.minY)
+        XCTAssertLessThanOrEqual(entry.maxY, tasks.maxY)
+        for (identifier, row) in result.record.frames where identifier.hasPrefix("expandedPanelHistoryRow-") {
+            XCTAssertGreaterThan(row.minY, entry.maxY, "历史记录必须在单行入口之后：\(identifier)")
+            XCTAssertGreaterThanOrEqual(row.height, 24)
         }
     }
 
@@ -448,7 +668,7 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         try XCTUnwrap(descendants(of: result.host).compactMap { $0 as? NSScrollView }.first {
             let rectangle = viewFrame($0, in: result.host)
             return abs(rectangle.width - result.model.width) < 2
-                && abs(rectangle.minY - ExpandedPanelLayout.headerHeight) < 2
+                && abs(rectangle.minY - result.expectedHeaderHeight) < 2
         }, "未找到标题和导航下方的真实正文滚动视口")
     }
 
@@ -467,11 +687,7 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
     }
 
     private var outputDirectory: URL {
-        if let override = ProcessInfo.processInfo.environment["XNOOK_UI_EVIDENCE_DIR"], !override.isEmpty {
-            return URL(fileURLWithPath: override, isDirectory: true)
-        }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            .appendingPathComponent(".build/reliability-adaptive-evidence/ui", isDirectory: true)
+        WorkflowPreviewEvidence.directory
     }
 
     private func writeJSON(_ object: [String: Any], name: String) throws {
@@ -496,6 +712,9 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
             "view": "ExpandedPanelView", "width": result.model.width, "height": result.model.height,
             "maximumHeight": result.maximumHeight, "windowVisible": result.window.isVisible,
             "acceptanceScope": "isolated-offscreen-production-view", "realWindowAcceptance": false,
+            "expectedHeaderHeight": result.expectedHeaderHeight,
+            "notchDeadZone": ["width": result.deadZone.width, "height": result.deadZone.height],
+            "historicalReference": ["width": 800, "height": 438, "pairedComparison": false],
             "selectedWidget": result.model.selected?.rawValue ?? "overview",
             "enabledWidgets": result.widgets.map(\.rawValue),
             "measurementHeight": result.record.latest?.height ?? 0,
@@ -504,6 +723,10 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
             "measurementWidgets": result.record.latest?.enabledWidgets.map(\.rawValue) ?? [],
             "framesSource": "ExpandedPanelDebugGeometryKey",
             "frames": result.record.frames.mapValues(rectJSON), "scrollViews": scrolls,
+            "nativeTextFields": descendants(of: result.host).compactMap { $0 as? NSTextField }
+                .filter(\.isEditable).map { field -> [String: Any] in
+                    ["frame": rectJSON(viewFrame(field, in: result.host)), "editable": field.isEditable]
+                },
             "nativeTextEditors": descendants(of: result.host).compactMap { $0 as? NSTextView }
                 .compactMap { $0.enclosingScrollView }.map { rectJSON(viewFrame($0, in: result.host)) }
         ]
@@ -517,7 +740,7 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
 
 @MainActor
 private final class WorkflowRenderModel: ObservableObject {
-    let width: CGFloat
+    @Published var width: CGFloat
     @Published var height: CGFloat
     @Published var selected: NotchContentView.WidgetType?
     @Published var widgets: [NotchContentView.WidgetType]
@@ -541,6 +764,8 @@ private struct WorkflowRenderResult {
     let window: NSWindow
     var widgets: [NotchContentView.WidgetType] { model.widgets }
     let maximumHeight: CGFloat
+    let deadZone: NotchDeadZone
+    let expectedHeaderHeight: CGFloat
 }
 
 @MainActor
@@ -550,6 +775,7 @@ private struct WorkflowPanelPreview: View {
     @ObservedObject var model: WorkflowRenderModel
     let record: WorkflowMeasurementRecord
     let scheme: ColorScheme
+    let deadZone: NotchDeadZone
 
     var body: some View {
         ExpandedPanelView(selectedWidget: $model.selected, calendarRecenterTrigger: .constant(0),
@@ -563,7 +789,7 @@ private struct WorkflowPanelPreview: View {
             onStartFocus: { _ in XCTFail("渲染不得从日历启动任务") },
             onInteractionChanged: { _ in }, onLinksPresentationChanged: { _ in },
             onSettings: { XCTFail("渲染不得打开设置") }, onClose: {},
-            onMeasurement: { record.latest = $0; record.measurements.append($0) })
+            onMeasurement: { record.latest = $0; record.measurements.append($0) }, deadZone: deadZone)
             .frame(width: model.width, height: model.height)
             .background(IslandStyle.surface(for: scheme))
             .environment(\.colorScheme, scheme)

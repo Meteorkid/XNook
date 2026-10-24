@@ -22,11 +22,47 @@ struct ExpandedPanelMeasurement: Equatable {
 }
 
 enum ExpandedPanelLayout {
-    static let headerHeight: CGFloat = 77
-    static let minimumWidgetContentWidth: CGFloat = 224
-    static let outerPadding: CGFloat = 12
+    static let headerHeight: CGFloat = 41
+    static let minimumWidgetContentWidth: CGFloat = 200
+    static let outerPadding: CGFloat = 8
     static let cardPadding: CGFloat = 12
-    static let columnSpacing: CGFloat = 12
+    static let columnSpacing: CGFloat = 8
+
+    /// 自动模式将设置宽度视为上限，少量组件与媒体详情不再撑满整条面板。
+    static func width(preferred: CGFloat, available: CGFloat, automaticallyFit: Bool,
+                      widgetCount: Int, selectedWidget: NotchContentView.WidgetType?) -> CGFloat {
+        let preferred = preferred.isFinite && preferred > 0 ? max(160, preferred) : 800
+        let available = available.isFinite && available > 0 ? available : 800
+        var target = preferred
+        if automaticallyFit {
+            if selectedWidget == .media {
+                target = min(target, 460)
+            } else if selectedWidget == nil {
+                if widgetCount <= 1 { target = min(target, 400) }
+                else if widgetCount == 2 { target = min(target, 640) }
+            }
+        }
+        return min(target, available)
+    }
+
+    /// 单行概览优先把余量给封面；其余模块仍保有完整的最小内容宽度。
+    static func columnWidths(contentWidth: CGFloat, columns: Int, emphasizedColumn: Int?) -> [CGFloat] {
+        guard columns > 0 else { return [] }
+        let usable = max(0, contentWidth - CGFloat(columns - 1) * columnSpacing)
+        let minimum = minimumWidgetContentWidth + cardPadding * 2
+        let emphasis = emphasizedColumn.map { (0..<columns).contains($0) } == true && columns > 1
+        let extra = emphasis ? min(88, max(0, usable - minimum * CGFloat(columns))) : 0
+        let base = (usable - extra) / CGFloat(columns)
+        return (0..<columns).map { base + ($0 == emphasizedColumn ? extra : 0) }
+    }
+
+    /// 两侧放不下导航与操作时，整条工具栏移到物理刘海下方。
+    static func headerTopInset(width: CGFloat, deadZoneWidth: CGFloat, deadZoneHeight: CGFloat) -> CGFloat {
+        guard deadZoneWidth.isFinite, deadZoneWidth > 0,
+              deadZoneHeight.isFinite, deadZoneHeight > 0 else { return 0 }
+        // 60pt 操作组与外边距需要完整落在刘海的一侧。
+        return (width - deadZoneWidth) / 2 >= 72 ? 0 : deadZoneHeight
+    }
 
     static func columnCount(width: CGFloat, widgetCount: Int) -> Int {
         guard widgetCount > 0 else { return 0 }

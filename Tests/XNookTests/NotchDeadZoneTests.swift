@@ -2,6 +2,8 @@ import XCTest
 @testable import XNook
 
 final class NotchDeadZoneTests: XCTestCase {
+    private let screenFrame = CGRect(x: 0, y: 0, width: 2000, height: 1200)
+    private let screenZone = NotchDeadZone(width: 200, height: 32)
 
     func testNoneHasNoPresence() {
         XCTAssertFalse(NotchDeadZone.none.isPresent)
@@ -38,5 +40,52 @@ final class NotchDeadZoneTests: XCTestCase {
     func testWidthFollowsHeightRatio() {
         let height: CGFloat = 32
         XCTAssertEqual(height * NotchDeadZone.widthPerHeight, 200, accuracy: 0.001)
+    }
+
+    func testCenteredWindowKeepsPhysicalNotchDimensions() {
+        let windowFrame = CGRect(x: 800, y: 900, width: 400, height: 304)
+        let zone = NotchDeadZone.resolve(screenFrame: screenFrame, windowFrame: windowFrame, screenZone: screenZone)
+
+        XCTAssertEqual(zone, screenZone)
+    }
+
+    func testRightShiftedWindowReservesTheFullNotch() {
+        let windowFrame = CGRect(x: 920, y: 900, width: 400, height: 304)
+        let zone = NotchDeadZone.resolve(screenFrame: screenFrame, windowFrame: windowFrame, screenZone: screenZone)
+
+        XCTAssertEqual(zone.width, 440)
+        XCTAssertEqual(zone.height, screenZone.height)
+        XCTAssertLessThanOrEqual(windowFrame.midX - zone.width / 2, screenFrame.midX - screenZone.width / 2)
+        XCTAssertGreaterThanOrEqual(windowFrame.midX + zone.width / 2, screenFrame.midX + screenZone.width / 2)
+    }
+
+    func testLeftShiftedWindowReservesTheFullNotch() {
+        let windowFrame = CGRect(x: 680, y: 900, width: 400, height: 304)
+        let zone = NotchDeadZone.resolve(screenFrame: screenFrame, windowFrame: windowFrame, screenZone: screenZone)
+
+        XCTAssertEqual(zone.width, 440)
+        XCTAssertEqual(zone.height, screenZone.height)
+        XCTAssertLessThanOrEqual(windowFrame.midX - zone.width / 2, screenFrame.midX - screenZone.width / 2)
+        XCTAssertGreaterThanOrEqual(windowFrame.midX + zone.width / 2, screenFrame.midX + screenZone.width / 2)
+    }
+
+    func testWideWindowStillAvoidsNotchBeyondLegacyCenterThreshold() {
+        let windowFrame = CGRect(x: 800, y: 900, width: 1000, height: 304)
+        let zone = NotchDeadZone.resolve(screenFrame: screenFrame, windowFrame: windowFrame, screenZone: screenZone)
+
+        XCTAssertEqual(zone.width, 800)
+        XCTAssertEqual(zone.height, screenZone.height)
+    }
+
+    func testWindowBelowNotchHasNoDeadZone() {
+        let windowFrame = CGRect(x: 800, y: 600, width: 400, height: 300)
+
+        XCTAssertEqual(NotchDeadZone.resolve(screenFrame: screenFrame, windowFrame: windowFrame, screenZone: screenZone), .none)
+    }
+
+    func testWindowBesideNotchHasNoDeadZone() {
+        let windowFrame = CGRect(x: 1200, y: 900, width: 400, height: 304)
+
+        XCTAssertEqual(NotchDeadZone.resolve(screenFrame: screenFrame, windowFrame: windowFrame, screenZone: screenZone), .none)
     }
 }

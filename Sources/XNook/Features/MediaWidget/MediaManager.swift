@@ -619,9 +619,11 @@ final class MediaManager {
         }
     }
 
-    func openCurrentPlayer() {
-        guard let currentSource else { return }
-        ScriptingBridgeHelper.activate(currentSource)
+    func openCurrentPlayer(
+        activate: @MainActor (ScriptingBridgeHelper.SupportedApp) -> Void = { ScriptingBridgeHelper.activate($0) }
+    ) {
+        // 尚无播放来源时，空态入口仍应能启动系统自带播放器。
+        activate(currentSource ?? .music)
     }
 
     private func sendPlaybackCommand(
@@ -662,9 +664,10 @@ final class MediaManager {
 
     /// 格式化时间 mm:ss
     func formatTime(_ time: TimeInterval) -> String {
-        let mins = Int(time) / 60
-        let secs = Int(time) % 60
-        return String(format: "%d:%02d", mins, secs)
+        // 播放器时间属于外部输入；直接转 Int 会在无效或超界值上触发运行时陷阱。
+        guard time.isFinite, time >= 0, time < Double(Int.max) else { return "--:--" }
+        let seconds = Int(time)
+        return "\(seconds / 60):" + String(format: "%02d", seconds % 60)
     }
 
     /// 从 Now Playing 信息中提取封面 Data

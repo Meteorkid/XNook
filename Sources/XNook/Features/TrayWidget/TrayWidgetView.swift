@@ -10,16 +10,17 @@ struct TrayWidgetView: View {
     @AppStorage("reduceMotion") private var reduceMotion = false
     @State private var showAllFiles = false
     private var motion: Animation? { reduceMotion || systemReduceMotion ? nil : .easeInOut(duration: 0.2) }
+    private let overviewFileLimit = 2
 
     /// 当前显示的文件列表
     private var displayFiles: ArraySlice<TrayManager.TrayFile> {
-        let maxVisible = (isDetail || showAllFiles) ? trayManager.files.count : min(trayManager.files.count, 4)
+        let maxVisible = (isDetail || showAllFiles) ? trayManager.files.count : overviewFileLimit
         return trayManager.files.prefix(maxVisible)
     }
 
     /// 是否有更多文件未显示
     private var hasMoreFiles: Bool {
-        trayManager.files.count > 4 && !showAllFiles && !isDetail
+        trayManager.files.count > overviewFileLimit && !showAllFiles && !isDetail
     }
 
     private var statusMessage: String? {
@@ -36,19 +37,20 @@ struct TrayWidgetView: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             // 标题
-            HStack {
+            HStack(spacing: 6) {
                 Image(systemName: "tray.full.fill")
-                    .font(.system(size: 10))
+                    .font(.system(size: 13))
                     .foregroundColor(.green)
                 Text(L10n.widgetTray)
-                    .font(.system(size: 10, weight: .semibold))
-                Spacer()
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 4)
                 Text(L10n.fileCount(trayManager.files.count + trayManager.unavailableFileCount))
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
+            .frame(minHeight: 24)
 
             if let statusMessage {
                 HStack(spacing: 4) {
@@ -57,86 +59,86 @@ struct TrayWidgetView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button { trayManager.loadFiles() } label: {
                         Image(systemName: "arrow.clockwise")
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(L10n.reloadTray)
                     .accessibilityLabel(L10n.reloadTray)
                 }
-                .font(.system(size: 9))
+                .font(.system(size: 11))
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
             }
 
             if trayManager.files.isEmpty {
-                // 空状态
-                VStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.green.opacity(0.1))
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "tray")
-                            .font(.system(size: 18))
-                            .foregroundColor(.green)
-                    }
+                VStack(alignment: .leading, spacing: 6) {
+                    Image(systemName: "tray.and.arrow.down")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
                     Text(L10n.dropFilesHere)
-                        .font(.system(size: 9))
+                        .font(.system(size: 12, weight: .medium))
+                    Text(L10n.trayDropHint)
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 8)
+                .expandedPanelDebugFrame(id: "expandedPanelTrayDropZone")
             } else {
                 fileList
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .onDrop(of: [.fileURL], isTargeted: $trayManager.isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(trayManager.isDropTargeted ? Color.green.opacity(0.6) : Color.clear, lineWidth: 2)
+                .allowsHitTesting(false)
         )
     }
 
     private var fileList: some View {
-                    VStack(spacing: 4) {
-                        ForEach(displayFiles) { file in
-                            fileRow(file: file)
-                                .expandedPanelDebugFrame(id: "expandedPanelTrayFile-\(file.id.uuidString)")
-                        }
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(displayFiles) { file in
+                fileRow(file: file)
+                    .expandedPanelDebugFrame(id: "expandedPanelTrayFile-\(file.id.uuidString)")
+            }
 
-                        // 显示更多 / 收起按钮
-                        if hasMoreFiles {
-                            Button {
-                                if let onShowAll { onShowAll() }
-                                else { withAnimation(motion) { showAllFiles = true } }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    Text(L10n.showAllFiles(trayManager.files.count - 4))
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .expandedPanelDebugFrame(id: "expandedPanelTrayShowAll")
-                        }
+            if !isDetail && !showAllFiles && (onShowAll != nil || hasMoreFiles) {
+                Button {
+                    if let onShowAll { onShowAll() }
+                    else { withAnimation(motion) { showAllFiles = true } }
+                } label: {
+                    Text(onShowAll != nil ? L10n.panelOpenAllFiles : L10n.showAllFiles(trayManager.files.count - overviewFileLimit))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .expandedPanelDebugFrame(id: "expandedPanelTrayShowAll")
+            }
 
-                        if showAllFiles && !isDetail && trayManager.files.count > 4 {
-                            Button {
-                                withAnimation(motion) { showAllFiles = false }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    Text(L10n.collapseFiles)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+            if showAllFiles && !isDetail && trayManager.files.count > overviewFileLimit {
+                Button {
+                    withAnimation(motion) { showAllFiles = false }
+                } label: {
+                    Text(L10n.collapseFiles)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     // MARK: - 文件行
@@ -153,40 +155,47 @@ struct TrayWidgetView: View {
                     .foregroundColor(.green)
             }
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(file.name)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .foregroundColor(.primary)
 
                 Text(TrayManager.formatFileSize(file.size))
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // 删除按钮
             Button(action: { withAnimation(motion) { trayManager.removeFile(file) } }) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
+                    .frame(width: 24, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(L10n.removeFile)
             .accessibilityLabel(L10n.removeFile)
+            .expandedPanelDebugFrame(id: "expandedPanelTrayRemove-\(file.id.uuidString)")
 
             // 打开按钮
             Button(action: { trayManager.openFile(file) }) {
                 Image(systemName: "arrow.up.right.circle.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+                    .frame(width: 24, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(L10n.openFile)
             .accessibilityLabel(L10n.openFile)
+            .expandedPanelDebugFrame(id: "expandedPanelTrayOpen-\(file.id.uuidString)")
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, isDetail ? 6 : 0)
         .padding(.vertical, 4)
-        .background(Color.secondary.opacity(0.05))
+        .background(Color.secondary.opacity(isDetail ? 0.05 : 0))
         .cornerRadius(6)
         .contentShape(Rectangle())
         .contextMenu { fileContextMenu(file: file) }

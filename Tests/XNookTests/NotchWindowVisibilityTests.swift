@@ -147,7 +147,7 @@ final class NotchWindowVisibilityTests: XCTestCase {
             await fulfillment(of: [started], timeout: 1)
 
             if hideForSwitch {
-                fixture.window.hideWindowForIslandSwitch()
+                fixture.window.hideWindowForIslandSwitch(animated: false)
                 fixture.window.isSwitchingApps = false
             } else {
                 fixture.window.hideWindow()

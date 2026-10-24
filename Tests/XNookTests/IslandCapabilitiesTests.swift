@@ -40,22 +40,48 @@ final class IslandCapabilitiesTests: XCTestCase {
         XCTAssertFalse(IslandCapabilities.useNativeSymbolDraw)
     }
 
-    func testLiquidGlassBackgroundIsEnabled() {
+    func testLiquidGlassCapabilityIsEnabled() {
         XCTAssertTrue(IslandCapabilities.useLiquidGlassBackground)
+    }
+
+    func testBackgroundDefaultsToSolid() {
+        XCTAssertEqual(SettingsDefaults.string(for: "islandBackgroundStyle"), "solid")
     }
 
     // MARK: - 诊断
 
     func testDiagnosticsSummaryMentionsGlassScope() {
-        let summary = IslandCapabilities.diagnosticsSummary
+        let summary = IslandCapabilities.diagnosticsSummary(backgroundStyle: .glass, supportsGlass: true)
         XCTAssertTrue(summary.contains("系统档位"))
         XCTAssertTrue(summary.contains("玻璃材质"))
         XCTAssertTrue(summary.contains("图标绘制"))
-        // 玻璃仅在深色模式生效，摘要里必须体现，避免用户以为浅色模式也用上了
-        if IslandCapabilities.supportsLiquidGlass && IslandCapabilities.useLiquidGlassBackground {
-            XCTAssertTrue(summary.contains("深色模式"),
-                          "诊断摘要应说明玻璃材质仅在深色模式生效")
-        }
+        XCTAssertTrue(summary.contains("背景选择：液态玻璃"))
+        XCTAssertTrue(summary.contains("已启用（岛使用深色配色）"))
+    }
+
+    func testDiagnosticsSummaryReportsSolidSelection() {
+        let summary = IslandCapabilities.diagnosticsSummary(backgroundStyle: .solid, supportsGlass: true)
+        XCTAssertTrue(summary.contains("背景选择：跟随外观"))
+        XCTAssertTrue(summary.contains("当前使用纯色"))
+    }
+
+    func testDiagnosticsSummaryReportsGlassFallbackOnOlderSystems() {
+        let summary = IslandCapabilities.diagnosticsSummary(backgroundStyle: .glass, supportsGlass: false)
+        XCTAssertTrue(summary.contains("背景选择：液态玻璃"))
+        XCTAssertTrue(summary.contains("不可用（纯色回退）"))
+    }
+
+    func testDiagnosticsReportsReducedTransparencyFallback() {
+        let summary = IslandCapabilities.diagnosticsSummary(backgroundStyle: .glass, supportsGlass: true,
+            reduceTransparency: true)
+        XCTAssertTrue(summary.contains("未启用（系统减少透明度，纯黑回退）"))
+    }
+
+    func testDiagnosticsNamesExplicitBlackAndLight() {
+        XCTAssertTrue(IslandCapabilities.diagnosticsSummary(backgroundStyle: .black, supportsGlass: true)
+            .contains("背景选择：纯黑"))
+        XCTAssertTrue(IslandCapabilities.diagnosticsSummary(backgroundStyle: .light, supportsGlass: true)
+            .contains("背景选择：浅色"))
     }
 
     // MARK: - 玻璃调参
@@ -66,15 +92,8 @@ final class IslandCapabilitiesTests: XCTestCase {
     /// 无背衬时文字对比度只有 1.11:1（不可读），0.45 背衬可达 8.62:1。
     /// 任何低于 0.45 的取值都会让文字在浅色壁纸上失去对比度。
     func testGlassBackingMeetsContrastThreshold() {
-        XCTAssertGreaterThanOrEqual(IslandGlassTuning.backingCollapsed, 0.45,
-                                    "背衬低于 0.45 会让深色模式下的白字失去对比度")
-        XCTAssertGreaterThanOrEqual(IslandGlassTuning.backingExpanded, 0.45)
-    }
-
-    /// 展开态背衬不应低于收起态——展开面积大、文字多，需要压得更实。
-    func testExpandedBackingIsAtLeastCollapsed() {
-        XCTAssertGreaterThanOrEqual(IslandGlassTuning.backingExpanded,
-                                    IslandGlassTuning.backingCollapsed)
+        XCTAssertGreaterThanOrEqual(IslandBackgroundPolicy.glassDepthRange.lowerBound, 0.50,
+                                    "最浅背衬仍需给文字对比度留出余量")
     }
 
     /// 高光层取值必须极低：它叠在玻璃之上，取高了会反向抬亮面板，
@@ -86,8 +105,7 @@ final class IslandCapabilitiesTests: XCTestCase {
 
     func testOpacityValuesAreValidFractions() {
         let values = [
-            IslandGlassTuning.backingCollapsed,
-            IslandGlassTuning.backingExpanded,
+            IslandBackgroundPolicy.defaultGlassDepth,
             IslandGlassTuning.highlightCollapsed,
             IslandGlassTuning.highlightExpanded
         ]
@@ -102,30 +120,43 @@ final class IslandCapabilitiesTests: XCTestCase {
     /// 两种配色方案都必须能渲染，且不因版本分支崩溃。
     /// 部署目标是 macOS 14，玻璃路径里的 `#available` 分支必须编译通过。
     @MainActor
-    func testGlassBackgroundRendersInBothSchemes() {
+    func testGlassBackgroundRendersInBothSchemes() throws {
+        let suiteName = "XNook.BackgroundRendering.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        SettingsDefaults.register(on: defaults)
         let shape = UnevenRoundedRectangle(
             topLeadingRadius: 10, bottomLeadingRadius: 18,
             bottomTrailingRadius: 18, topTrailingRadius: 10,
             style: .continuous
         )
-        for scheme in [ColorScheme.dark, ColorScheme.light] {
-            let view = IslandGlassBackground(shape: shape, scheme: scheme, isExpanded: false)
-            let host = NSHostingView(rootView: view)
-            host.frame = NSRect(x: 0, y: 0, width: 260, height: 44)
-            host.layoutSubtreeIfNeeded()
-            XCTAssertGreaterThan(host.fittingSize.width, 0, "\(scheme) 下背景层应正常布局")
+        for style in [IslandBackgroundStyle.solid, .black, .light, .glass] {
+            defaults.set(style.rawValue, forKey: "islandBackgroundStyle")
+            for scheme in [ColorScheme.dark, ColorScheme.light] {
+                let view = IslandGlassBackground(shape: shape, scheme: scheme, isExpanded: false)
+                    .defaultAppStorage(defaults)
+                let host = NSHostingView(rootView: view)
+                host.frame = NSRect(x: 0, y: 0, width: 260, height: 44)
+                host.layoutSubtreeIfNeeded()
+                XCTAssertGreaterThan(host.fittingSize.width, 0, "\(style) / \(scheme) 下背景层应正常布局")
+            }
         }
     }
 
     /// 展开态与收起态都要能渲染。
     @MainActor
-    func testGlassBackgroundRendersExpanded() {
+    func testGlassBackgroundRendersExpanded() throws {
+        let suiteName = "XNook.BackgroundRendering.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        SettingsDefaults.register(on: defaults)
         let shape = UnevenRoundedRectangle(
             topLeadingRadius: 10, bottomLeadingRadius: 18,
             bottomTrailingRadius: 18, topTrailingRadius: 10,
             style: .continuous
         )
         let view = IslandGlassBackground(shape: shape, scheme: .dark, isExpanded: true)
+            .defaultAppStorage(defaults)
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 640, height: 400)
         host.layoutSubtreeIfNeeded()

@@ -3,10 +3,21 @@ import XCTest
 
 final class ExpandedPanelLayoutTests: XCTestCase {
     private let enabledWidgets = NotchContentView.WidgetType.allCases
+    func testHeaderAndNavigationShareCompactToolbar() {
+        XCTAssertLessThanOrEqual(ExpandedPanelLayout.headerHeight, 45)
+    }
+
+    func testToolbarMovesBelowNotchOnlyWhenSideControlsCannotFit() {
+        XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 800, deadZoneWidth: 200, deadZoneHeight: 32), 0)
+        XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 344, deadZoneWidth: 200, deadZoneHeight: 32), 0)
+        XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 320, deadZoneWidth: 200, deadZoneHeight: 32), 32)
+        XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 160, deadZoneWidth: 200, deadZoneHeight: 32), 32)
+        XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 160, deadZoneWidth: 0, deadZoneHeight: 0), 0)
+    }
 
     func testNarrowPanelsUseOneColumnAndFourWidgetsUseTwoBalancedColumns() {
         XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 160, widgetCount: 4), 1)
-        XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 480, widgetCount: 4), 1)
+        XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 460, widgetCount: 4), 1)
         XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 800, widgetCount: 4), 2)
         XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 1600, widgetCount: 2), 2)
     }
@@ -24,9 +35,44 @@ final class ExpandedPanelLayoutTests: XCTestCase {
     }
 
     func testThreeColumnsIncludeOuterPaddingCardPaddingAndColumnSpacing() {
-        // 24pt 外边距 + 3 × (224pt 内容 + 24pt 卡片内边距) + 2 × 12pt 列间距。
-        XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 792, widgetCount: 3), 3)
-        XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 791.5, widgetCount: 3), 2)
+        // 16pt 外边距 + 3 × (200pt 内容 + 24pt 组件内边距) + 2 × 8pt 列间距。
+        XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 704, widgetCount: 3), 3)
+        XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 703.5, widgetCount: 3), 2)
+    }
+
+    func testAutomaticWidthFitsWidgetCountsAndMediaDetailWithoutOverridingManualWidth() {
+        for (count, expected) in [(0, 400.0), (1, 400.0), (2, 640.0), (3, 800.0), (4, 800.0)] {
+            XCTAssertEqual(ExpandedPanelLayout.width(preferred: 800, available: 1200,
+                automaticallyFit: true, widgetCount: count, selectedWidget: nil), expected)
+            XCTAssertEqual(ExpandedPanelLayout.width(preferred: 800, available: 1200,
+                automaticallyFit: false, widgetCount: count, selectedWidget: nil), 800)
+        }
+        XCTAssertEqual(ExpandedPanelLayout.width(preferred: 800, available: 1200,
+            automaticallyFit: true, widgetCount: 3, selectedWidget: .media), 460)
+        XCTAssertEqual(ExpandedPanelLayout.width(preferred: 800, available: 1200,
+            automaticallyFit: false, widgetCount: 3, selectedWidget: .media), 800)
+        XCTAssertEqual(ExpandedPanelLayout.width(preferred: 320, available: 1200,
+            automaticallyFit: true, widgetCount: 3, selectedWidget: .media), 320)
+        XCTAssertEqual(ExpandedPanelLayout.width(preferred: 800, available: 120,
+            automaticallyFit: true, widgetCount: 3, selectedWidget: nil), 120)
+        XCTAssertEqual(ExpandedPanelLayout.width(preferred: .nan, available: .infinity,
+            automaticallyFit: true, widgetCount: 3, selectedWidget: nil), 800)
+    }
+
+    func testMediaReceivesExtraSpaceWithoutSqueezingOtherColumns() {
+        for mediaColumn in 0..<3 {
+            let widths = ExpandedPanelLayout.columnWidths(contentWidth: 784, columns: 3,
+                emphasizedColumn: mediaColumn)
+            XCTAssertEqual(widths.reduce(0, +) + 16, 784, accuracy: 0.01)
+            XCTAssertGreaterThanOrEqual(widths[mediaColumn], 310)
+            for column in 0..<3 where column != mediaColumn {
+                XCTAssertGreaterThanOrEqual(widths[column], 224)
+            }
+        }
+        XCTAssertEqual(ExpandedPanelLayout.columnWidths(contentWidth: 688, columns: 3,
+            emphasizedColumn: 0), [224, 224, 224])
+        XCTAssertEqual(ExpandedPanelLayout.columnWidths(contentWidth: 784, columns: 2,
+            emphasizedColumn: nil), [388, 388])
     }
 
     func testNaturalHeightFitsContentAndCapsOverflow() {
@@ -68,7 +114,7 @@ final class ExpandedPanelLayoutTests: XCTestCase {
     }
 
     func testTinyManualLimitRetainsViewportUnlessScreenIsSmaller() {
-        XCTAssertEqual(ExpandedPanelLayout.maximumHeight(availableHeight: 900, automaticallyFit: false, manualMaxHeight: 1), 78)
+        XCTAssertEqual(ExpandedPanelLayout.maximumHeight(availableHeight: 900, automaticallyFit: false, manualMaxHeight: 1), 42)
         XCTAssertEqual(ExpandedPanelLayout.maximumHeight(availableHeight: 20, automaticallyFit: false, manualMaxHeight: 1), 20)
     }
 

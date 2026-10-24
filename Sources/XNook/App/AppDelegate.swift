@@ -5,6 +5,7 @@ extension Notification.Name {
     static let xnookShowAboutPane = Notification.Name("xnookShowAboutPane")
     static let xnookScrollDown = Notification.Name("xnookScrollDown")
     static let xnookCollapse = Notification.Name("xnookCollapse")
+    static let xnookWindowDidPresent = Notification.Name("xnookWindowDidPresent")
     static let islandDidCollapse = Notification.Name("islandDidCollapse")
 }
 
@@ -143,28 +144,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingIslandShowURL = nil
         AppSwitcher.shared.cancelSwitch()
 
-        // 立即设置切换标志（同步），防止 activeSpaceDidChange 重新显示窗口
-        window.isHiddenByIslandSwitch = false
-        window.isSwitchingApps = true
-        window.swipeRecognizer.suppress(for: 0.8)
-        scheduleClearSwitchingApps(window: window, delay: 1.5)
-
-        // 先收起并显示自身，确认接管后再请求来源岛隐藏
-        NotificationCenter.default.post(name: .xnookCollapse, object: nil)
-
-        // 同步缩小窗口 frame 到收起态尺寸，避免 showAtMouseScreen 时以展开态闪现
-        let collapsedW = IslandSizeCalculator.collapsedPillWidth
-        let collapsedH = IslandSizeCalculator.collapsedShapeHeight + 4 // 留一点余量
-        window.resizeToFitCollapse(contentWidth: collapsedW, contentHeight: collapsedH)
-        window.islandState = .collapsed
-
-        window.showAtMouseScreen()
-
-        // 发送跨进程通知让其他所有岛隐藏
-        for islandName in AppSwitcher.shared.otherIslandNames {
-            guard isValidNotificationAppName(islandName) else { continue }
-            let hideNotification = "\(hideNotificationPrefix)\(islandName)"
-            postHideNotification(hideNotification)
+        clearSwitchingAppsWorkItem?.cancel()
+        // 准备请求保存在窗口上，冷启动视图注册后仍能消费，不能依赖一次性通知。
+        window.beginInboundHandoff { [weak self, weak window] generation in
+            guard let self, let window else { return }
+            window.showPreparedHandoff(generation: generation)
+            self.scheduleClearSwitchingApps(window: window, delay: 1.5)
+            self.requestOtherIslandsToHide()
         }
     }
 
@@ -174,17 +160,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               (switcher ?? .shared).acceptPeerHideRequest(from: peer, shownAt: shownAt, after: window.lastExplicitShowTime)
         else { return }
         hasExplicitIslandVisibilityRequest = true
-        window.isHiddenByIslandSwitch = true
-        window.isSwitchingApps = true
-        window.orderOut(nil)
-        scheduleClearSwitchingApps(window: window, delay: 1.0)
+        clearSwitchingAppsWorkItem?.cancel()
+        window.hideWindowForIslandSwitch()
     }
 
     /// 统一调度 isSwitchingApps 清除，取消之前的计时器避免竞争
     func scheduleClearSwitchingApps(window: NotchWindow?, delay: TimeInterval) {
         clearSwitchingAppsWorkItem?.cancel()
+        let handoffGeneration = window?.handoffState.generation
         let workItem = DispatchWorkItem { [weak self, weak window] in
-            guard let window else { return }
+            guard let window, handoffGeneration == window.handoffState.generation else { return }
             self?.clearSwitchingProtection(window: window)
         }
         clearSwitchingAppsWorkItem = workItem
@@ -192,7 +177,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func clearSwitchingProtection(window: NotchWindow, using switcher: AppSwitcher? = nil) {
-        guard !(switcher ?? .shared).isSwitchInProgress else { return }
+        guard !(switcher ?? .shared).isSwitchInProgress,
+              window.handoffState.pendingPreparation == nil,
+              !window.handoffState.isFadingOut else { return }
         window.isSwitchingApps = false
     }
 
@@ -264,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupNotchWindow() {
         let window = NotchWindow()
+        notchWindow = window
         let hostView = NotchHostingView(
             rootView: NotchContentView(onSizeChange: { [weak window] w, h in
                 window?.resizeToFit(contentWidth: w, contentHeight: h)
@@ -275,7 +263,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hostView.sizingOptions = []
         }
         window.contentView?.addSubview(hostView)
-        notchWindow = window
         themeManager.onSchemeChange = { [weak self] in
             guard let self else { return }
             if let notchWindow = self.notchWindow {
@@ -450,10 +437,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateWindowAppearance(_ window: NSWindow) {
-        let scheme = themeManager.resolvedScheme
-        window.appearance = scheme == .dark
-            ? NSAppearance(named: .darkAqua)
-            : NSAppearance(named: .aqua)
+        let applicationIsDark = themeManager.resolvedScheme == .dark
+        let isDark = window is NotchWindow
+            ? IslandBackgroundPolicy.isDark(
+                style: IslandBackgroundStyle.resolved(from: UserDefaults.standard.string(forKey: "islandBackgroundStyle")),
+                applicationIsDark: applicationIsDark)
+            : applicationIsDark
+        let name: NSAppearance.Name = isDark ? .darkAqua : .aqua
+        guard window.appearance?.name != name else { return }
+        window.appearance = NSAppearance(named: name)
     }
 
     private func scheduleInitialVisibilityResolution() {

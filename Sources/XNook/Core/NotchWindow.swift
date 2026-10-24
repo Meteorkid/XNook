@@ -71,6 +71,17 @@ final class NotchWindow: NSPanel {
     private let markVisible: @MainActor () -> Void
     private let onExplicitShow: @MainActor () -> Void
     private let fullscreenProbe: (@Sendable () async -> Bool)?
+    struct HandoffEnvironment {
+        var reduceMotion: () -> Bool
+        var schedule: (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void
+        var orderFront: (NotchWindow) -> Void
+        var orderOut: (NotchWindow) -> Void
+    }
+    private let handoffEnvironment: HandoffEnvironment
+    private(set) var handoffState = IslandHandoffState()
+    private var handoffPreparationHandler: (@MainActor (UInt64) -> Void)?
+    private var handoffPrepared: (@MainActor (UInt64) -> Void)?
+    private var cancelHandoffFrames: [() -> Void] = []
     private var visibilityGeneration: UInt64 = 0
     private var mouseTrackingTimer: Timer?
     private var lastActiveScreenID: CGDirectDisplayID?
@@ -107,13 +118,26 @@ final class NotchWindow: NSPanel {
             }
         },
         onExplicitShow: @escaping @MainActor () -> Void = { AppSwitcher.shared.cancelSwitch() },
-        fullscreenProbe: (@Sendable () async -> Bool)? = nil
+        fullscreenProbe: (@Sendable () async -> Bool)? = nil,
+        handoffEnvironment: HandoffEnvironment? = nil
     ) {
         self.pointerLocation = pointerLocation
         self.defaults = defaults
         self.markVisible = markVisible
         self.onExplicitShow = onExplicitShow
         self.fullscreenProbe = fullscreenProbe
+        self.handoffEnvironment = handoffEnvironment ?? HandoffEnvironment(
+            reduceMotion: {
+                defaults.bool(forKey: "reduceMotion") || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            },
+            schedule: { delay, action in
+                let work = DispatchWorkItem { action() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+                return { work.cancel() }
+            },
+            orderFront: { $0.orderFrontRegardless() },
+            orderOut: { $0.orderOut(nil) }
+        )
         let width = Self.defaultWidth
         let height = Self.defaultHeight
         let initialFrame: NSRect
@@ -183,42 +207,154 @@ final class NotchWindow: NSPanel {
     // MARK: - Window Visibility
 
     func showWindow() {
+        cancelHandoffPresentation()
         lastExplicitShowTime = Date().timeIntervalSince1970
         onExplicitShow()
         visibilityGeneration &+= 1
         isHiddenByIslandSwitch = false
         isHiddenByUser = false
         markVisible()
-        orderFrontRegardless()
+        orderFrontForPresentation()
     }
     func hideWindow() {
+        cancelHandoffPresentation()
         visibilityGeneration &+= 1
         isHiddenByUser = true
-        orderOut(nil)
+        handoffEnvironment.orderOut(self)
     }
-    func hideWindowForIslandSwitch() {
+    func hideWindowForIslandSwitch(animated: Bool = true) {
+        guard !isHiddenByIslandSwitch || handoffState.isFadingOut else { return }
+        guard let generation = handoffState.beginFadeOut() else { return }
+        cancelScheduledHandoffFrames()
+        handoffPrepared = nil
         visibilityGeneration &+= 1
         isHiddenByIslandSwitch = true
         isSwitchingApps = true
-        orderOut(nil)
+        let duration = IslandHandoffState.outboundDuration(
+            reduceMotion: !animated || handoffEnvironment.reduceMotion()
+        )
+        guard duration > 0 else {
+            finishHandoffFade(generation: generation)
+            return
+        }
+        let initialAlpha = alphaValue
+        // 每帧检查代数，显式重新显示后迟到的动画既不能改 alpha，也不能 orderOut。
+        for step in 1...8 {
+            let progress = Double(step) / 8
+            let cancel = handoffEnvironment.schedule(duration * progress) { [weak self] in
+                guard let self, self.isCurrentHandoff(generation), self.handoffState.isFadingOut else { return }
+                self.alphaValue = initialAlpha * (1 - progress)
+                if step == 8 { self.finishHandoffFade(generation: generation) }
+            }
+            cancelHandoffFrames.append(cancel)
+        }
     }
     func toggleVisibility() { isVisible ? hideWindow() : showWindow() }
 
     /// 在鼠标所在屏幕显示窗口（URL Scheme 唤醒时调用）
     func showAtMouseScreen() {
+        cancelHandoffPresentation()
+        presentAtMouseScreen()
+    }
+
+    private func presentAtMouseScreen(reposition: Bool = true) {
+        alphaValue = 1
         lastExplicitShowTime = Date().timeIntervalSince1970
         onExplicitShow()
         visibilityGeneration &+= 1
         isHiddenByIslandSwitch = false
         isHiddenByUser = false
         markVisible()
-        let mouseLocation = NSEvent.mouseLocation
-        guard let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) else {
-            orderFrontRegardless()
-            return
+        if reposition { positionAtMouseScreen() }
+        orderFrontForPresentation()
+    }
+
+    private func orderFrontForPresentation() {
+        handoffEnvironment.orderFront(self)
+        NotificationCenter.default.post(name: .xnookWindowDidPresent, object: self)
+    }
+
+    private func positionAtMouseScreen() {
+        let mouseLocation = pointerLocation()
+        if let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
+            repositionOnScreen(mouseScreen)
         }
-        repositionOnScreen(mouseScreen)
-        orderFrontRegardless()
+    }
+
+    @discardableResult
+    func beginInboundHandoff(onPrepared: @escaping @MainActor (UInt64) -> Void) -> UInt64 {
+        cancelScheduledHandoffFrames()
+        let generation = handoffState.beginInbound()
+        handoffPrepared = onPrepared
+        visibilityGeneration &+= 1
+        isHiddenByIslandSwitch = false
+        isSwitchingApps = true
+        swipeRecognizer.suppress(for: 0.8)
+        handoffPreparationHandler?(generation)
+        // 冷启动窗口尚未显示；强制建立 SwiftUI 树以安装准备处理器。
+        contentView?.layoutSubtreeIfNeeded()
+        return generation
+    }
+
+    func installHandoffPreparationHandler(_ handler: @escaping @MainActor (UInt64) -> Void) {
+        handoffPreparationHandler = handler
+        if let generation = handoffState.pendingPreparation { handler(generation) }
+    }
+
+    func removeHandoffPreparationHandler() { handoffPreparationHandler = nil }
+
+    @discardableResult
+    func completeInboundHandoffPreparation(generation: UInt64) -> Bool {
+        guard isCurrentHandoff(generation), handoffState.pendingPreparation == generation else { return false }
+        // 最终屏幕位置也属于准备阶段，布局期间的旧坐标不能解除 hover 门控。
+        positionAtMouseScreen()
+        contentView?.layoutSubtreeIfNeeded()
+        guard handoffState.consumePreparation(generation) else { return false }
+        let prepared = handoffPrepared
+        handoffPrepared = nil
+        prepared?(generation)
+        return true
+    }
+
+    func showPreparedHandoff(generation: UInt64) {
+        guard isCurrentHandoff(generation), handoffState.pendingPreparation == nil else { return }
+        presentAtMouseScreen(reposition: false)
+    }
+
+    func isCurrentHandoff(_ generation: UInt64) -> Bool { handoffState.generation == generation }
+
+    /// 取消准备后的内容只由普通重新显示恢复，不能覆盖新入站淡入或出站淡出。
+    func canRestoreHandoffContent(after cancelledGeneration: UInt64) -> Bool {
+        !isCurrentHandoff(cancelledGeneration)
+            && handoffState.pendingPreparation == nil
+            && !handoffState.isFadingOut
+            && !isHiddenByIslandSwitch
+            && !isHiddenByUser
+    }
+
+    func observeHandoffPointer(isInside: Bool) -> Bool {
+        handoffState.observePointer(isInside: isInside)
+    }
+
+    private func cancelScheduledHandoffFrames() {
+        cancelHandoffFrames.forEach { $0() }
+        cancelHandoffFrames.removeAll()
+    }
+
+    private func cancelHandoffPresentation() {
+        cancelScheduledHandoffFrames()
+        handoffState.cancelPresentation()
+        handoffPrepared = nil
+        alphaValue = 1
+        isSwitchingApps = false
+    }
+
+    private func finishHandoffFade(generation: UInt64) {
+        guard handoffState.finishFadeOut(generation) else { return }
+        cancelScheduledHandoffFrames()
+        handoffEnvironment.orderOut(self)
+        alphaValue = 1
+        isSwitchingApps = false
     }
 
     func isFrontmostIslandWindow() -> Bool {

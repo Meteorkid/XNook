@@ -7,6 +7,7 @@ struct ExpandedPanelView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Binding var selectedWidget: Widget?
     @Binding var calendarRecenterTrigger: Int
     let enabledWidgets: [Widget]
@@ -33,8 +34,16 @@ struct ExpandedPanelView: View {
     /// 面板顶部被物理刘海遮挡的死区，由窗口层按当前屏幕推导
     var deadZone: NotchDeadZone = .none
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
+    @AppStorage("islandBackgroundStyle") private var backgroundStyle = SettingsDefaults.string(for: "islandBackgroundStyle")
 
     private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
+    private var headerTopInset: CGFloat {
+        ExpandedPanelLayout.headerTopInset(
+            width: panelWidth,
+            deadZoneWidth: deadZone.width,
+            deadZoneHeight: deadZone.height
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,13 +51,10 @@ struct ExpandedPanelView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("expandedPanelHeader")
                 .expandedPanelDebugFrame(id: "expandedPanelHeader")
-            navigation
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("expandedPanelNavigation")
-                .expandedPanelDebugFrame(id: "expandedPanelNavigation")
             Divider()
+                .frame(height: 1)
             ScrollView {
-                VStack(alignment: .leading, spacing: IslandTokens.Spacing.section) {
+                VStack(alignment: .leading, spacing: IslandTokens.Spacing.compact) {
                     if selectedWidget == nil {
                         if enabledWidgets.isEmpty {
                             Text(L10n.panelNoWidgets)
@@ -62,17 +68,18 @@ struct ExpandedPanelView: View {
                         focusContent
                     } else if let selectedWidget {
                         widgetView(for: selectedWidget, isDetail: true)
+                            .padding(ExpandedPanelLayout.cardPadding)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .frame(minHeight: 260)
+                            .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
                     }
                 }
-                .padding(IslandTokens.Spacing.standard)
+                .padding(ExpandedPanelLayout.outerPadding)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .background {
                     GeometryReader { geometry in
                         Color.clear.preference(key: PanelContentHeightKey.self, value: ExpandedPanelMeasurement(
                             width: geometry.size.width,
-                            height: geometry.size.height + ExpandedPanelLayout.headerHeight,
+                            height: geometry.size.height + ExpandedPanelLayout.headerHeight + headerTopInset,
                             selectedWidget: selectedWidget,
                             enabledWidgets: enabledWidgets
                         ))
@@ -94,19 +101,42 @@ struct ExpandedPanelView: View {
     }
 
     private var header: some View {
-        HStack(spacing: IslandTokens.Spacing.compact) {
-            Label("Nook", systemImage: "square.grid.2x2")
-                .font(.system(size: IslandTokens.Font.title, weight: .semibold, design: .rounded))
-                .labelStyle(.titleAndIcon)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            // 头部右侧是刘海最可能覆盖的区域，把按钮整体推到死区之外。
-            NotchDeadZoneSpacer(zone: deadZone)
-            headerButton(icon: "gearshape", help: L10n.preferences, action: onSettings)
-            headerButton(icon: "xmark", help: L10n.panelClose, action: onClose)
+        VStack(spacing: 0) {
+            if headerTopInset > 0 {
+                Color.clear
+                    .frame(height: headerTopInset)
+                    .allowsHitTesting(false)
+            }
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    if deadZone.isPresent && headerTopInset == 0 {
+                        let sideWidth = max(0, (geometry.size.width - ExpandedPanelLayout.outerPadding * 2 - deadZone.width) / 2)
+                        navigation.frame(width: sideWidth, alignment: .leading)
+                        NotchDeadZoneSpacer(zone: deadZone)
+                        toolbarActions.frame(width: sideWidth, alignment: .trailing)
+                    } else {
+                        HStack(spacing: IslandTokens.Spacing.compact) {
+                            navigation
+                            toolbarActions
+                        }
+                    }
+                }
+                .padding(.horizontal, ExpandedPanelLayout.outerPadding)
+                .frame(height: IslandTokens.Layout.headerHeight)
+            }
+            .frame(height: IslandTokens.Layout.headerHeight)
         }
-        .padding(.horizontal, IslandTokens.Spacing.standard)
-        .frame(height: IslandTokens.Layout.headerHeight)
+        .frame(height: IslandTokens.Layout.headerHeight + headerTopInset)
+    }
+
+    private var toolbarActions: some View {
+        HStack(spacing: IslandTokens.Spacing.compact) {
+            headerButton(icon: "gearshape", help: L10n.preferences, action: onSettings)
+                .expandedPanelDebugFrame(id: "expandedPanelSettings")
+            headerButton(icon: "xmark", help: L10n.panelClose, action: onClose)
+                .expandedPanelDebugFrame(id: "expandedPanelClose")
+        }
+        .fixedSize()
     }
 
     private func headerButton(icon: String, help: String, action: @escaping () -> Void) -> some View {
@@ -120,31 +150,57 @@ struct ExpandedPanelView: View {
         .accessibilityLabel(help)
     }
 
-    @ViewBuilder
     private var navigation: some View {
-        if panelWidth < 480 {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: IslandTokens.Spacing.compact) {
+                Text("Nook")
+                    .font(.system(size: IslandTokens.Font.title, weight: .semibold, design: .rounded))
+                navigationButtons(showsTitles: true)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            navigationButtons(showsTitles: true)
+                .fixedSize(horizontal: true, vertical: false)
+            navigationButtons(showsTitles: false)
+                .fixedSize(horizontal: true, vertical: false)
+            navigationMenu
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("expandedPanelNavigation")
+        .expandedPanelDebugFrame(id: "expandedPanelNavigation")
+    }
+
+    private func navigationButtons(showsTitles: Bool) -> some View {
+        HStack(spacing: IslandTokens.Spacing.tight) {
+            navigationButton(title: L10n.panelOverview, icon: "square.grid.2x2", widget: nil, showsTitle: showsTitles)
+            ForEach(navigationWidgets, id: \.self) { widget in
+                navigationButton(title: widget.localizedName, icon: widget.icon, widget: widget, showsTitle: showsTitles)
+            }
+        }
+    }
+
+    private var navigationMenu: some View {
+        Menu {
             Picker(L10n.panelNavigation, selection: $selectedWidget) {
                 Label(L10n.panelOverview, systemImage: "square.grid.2x2").tag(nil as Widget?)
                 ForEach(navigationWidgets, id: \.self) { widget in
                     Label(widget.localizedName, systemImage: widget.icon).tag(Optional(widget))
                 }
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .font(.system(size: IslandTokens.Font.body, weight: .medium))
-            .padding(.horizontal, IslandTokens.Spacing.standard)
-            .frame(height: IslandTokens.Layout.navigationHeight)
-        } else {
-            HStack(spacing: IslandTokens.Spacing.tight) {
-                navigationButton(title: L10n.panelOverview, icon: "square.grid.2x2", widget: nil)
-                ForEach(navigationWidgets, id: \.self) { widget in
-                    navigationButton(title: widget.localizedName, icon: widget.icon, widget: widget)
-                }
-                Spacer(minLength: 0)
+        } label: {
+            HStack(spacing: IslandTokens.Spacing.inline) {
+                Image(systemName: selectedWidget?.icon ?? "square.grid.2x2")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: IslandTokens.Font.micro, weight: .semibold))
             }
-            .padding(.horizontal, IslandTokens.Spacing.standard)
-            .frame(height: IslandTokens.Layout.navigationHeight)
+            .font(.system(size: IslandTokens.Font.body, weight: .medium))
+            .frame(width: 36, height: 28)
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L10n.panelNavigation)
+        .accessibilityLabel(L10n.panelNavigation)
     }
 
     /// 隐藏的工具仍可从任务记录打开；进入详情后临时保留其导航入口。
@@ -153,18 +209,23 @@ struct ExpandedPanelView: View {
         return enabledWidgets + [selectedWidget]
     }
 
-    private func navigationButton(title: String, icon: String, widget: Widget?) -> some View {
+    private func navigationButton(title: String, icon: String, widget: Widget?, showsTitle: Bool) -> some View {
         let isSelected = selectedWidget == widget
         return Button { selectedWidget = widget } label: {
-            Label(title, systemImage: icon)
-                .font(.system(size: IslandTokens.Font.body, weight: .medium))
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(isSelected ? IslandStyle.insetFill(for: colorScheme) : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.control))
-                .fixedSize()
+            HStack(spacing: IslandTokens.Spacing.inline) {
+                Image(systemName: icon)
+                if showsTitle { Text(title) }
+            }
+            .font(.system(size: IslandTokens.Font.body, weight: .medium))
+            .padding(.horizontal, showsTitle ? 8 : 0)
+            .frame(minWidth: 28, minHeight: 28)
+            .background(isSelected ? IslandStyle.insetFill(for: colorScheme) : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.control))
+            .fixedSize()
         }
         .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
@@ -182,8 +243,8 @@ struct ExpandedPanelView: View {
             onInteractionChanged: onInteractionChanged,
             onLinksPresentationChanged: onLinksPresentationChanged
         )
-        .background(IslandStyle.cardRest(for: colorScheme))
-        .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.card))
+        .padding(ExpandedPanelLayout.cardPadding)
+        .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("expandedPanelRecentTasks")
         .expandedPanelDebugFrame(id: "expandedPanelRecentTasks")
@@ -191,13 +252,13 @@ struct ExpandedPanelView: View {
 
     private var overview: some View {
         let count = ExpandedPanelLayout.columnCount(width: panelWidth, widgetCount: enabledWidgets.count)
-        return PanelWidgetGrid(columns: count, spacing: IslandTokens.Spacing.standard) {
+        let mediaColumn = count == enabledWidgets.count ? enabledWidgets.firstIndex(of: .media) : nil
+        return PanelWidgetGrid(columns: count, emphasizedColumn: mediaColumn) {
             ForEach(enabledWidgets, id: \.self) { widget in
                 widgetView(for: widget, isDetail: false)
-                    .padding(IslandTokens.Spacing.standard)
-                    .frame(maxWidth: .infinity)
-                    .background(IslandStyle.cardRest(for: colorScheme))
-                    .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.card))
+                    .padding(ExpandedPanelLayout.cardPadding)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("expandedPanelWidget-\(widget.rawValue)")
                     .expandedPanelDebugFrame(id: "expandedPanelWidget-\(widget.rawValue)")
@@ -208,11 +269,20 @@ struct ExpandedPanelView: View {
         .expandedPanelDebugFrame(id: "expandedPanelWidgets")
     }
 
+    private var moduleFill: Color {
+        let style = IslandBackgroundStyle.resolved(from: backgroundStyle)
+        let glass = IslandBackgroundPolicy.usesGlass(style: style,
+            supportsGlass: IslandCapabilities.supportsLiquidGlass && IslandCapabilities.useLiquidGlassBackground,
+            isDark: colorScheme == .dark, reduceTransparency: reduceTransparency)
+        return glass ? Color.black.opacity(0.18)
+            : (colorScheme == .dark ? Color(white: 17.0 / 255.0) : Color(white: 0.92))
+    }
+
     @ViewBuilder
     private func widgetView(for widget: Widget, isDetail: Bool) -> some View {
         switch widget {
         case .media:
-            MediaWidgetView(mediaManager: mediaManager, isDetail: isDetail)
+            MediaWidgetView(mediaManager: mediaManager, isDetail: isDetail, onShowAll: { selectedWidget = .media })
         case .calendar:
             CalendarWidgetView(
                 calendarManager: calendarManager,
@@ -300,7 +370,8 @@ private struct PanelContentHeightKey: PreferenceKey {
 /// 同一层级的组件保留视图身份，每行以自然高度最高的卡片为准。
 struct PanelWidgetGrid: Layout {
     var columns: Int
-    var spacing: CGFloat = 12
+    var emphasizedColumn: Int? = nil
+    private var spacing: CGFloat { ExpandedPanelLayout.columnSpacing }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = resolvedWidth(proposal.width, subviews: subviews)
@@ -310,7 +381,8 @@ struct PanelWidgetGrid: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let count = max(1, columns)
-        let cellWidth = max(0, (bounds.width - CGFloat(count - 1) * spacing) / CGFloat(count))
+        let widths = ExpandedPanelLayout.columnWidths(contentWidth: bounds.width,
+            columns: count, emphasizedColumn: emphasizedColumn)
         let heights = rowHeights(width: bounds.width, subviews: subviews)
         var y = bounds.minY
         for index in subviews.indices {
@@ -318,9 +390,9 @@ struct PanelWidgetGrid: Layout {
             let column = index % count
             if column == 0, row > 0 { y += heights[row - 1] + spacing }
             subviews[index].place(
-                at: CGPoint(x: bounds.minX + CGFloat(column) * (cellWidth + spacing), y: y),
+                at: CGPoint(x: bounds.minX + widths.prefix(column).reduce(0, +) + CGFloat(column) * spacing, y: y),
                 anchor: .topLeading,
-                proposal: ProposedViewSize(width: cellWidth, height: heights[row])
+                proposal: ProposedViewSize(width: widths[column], height: heights[row])
             )
         }
     }
@@ -333,10 +405,11 @@ struct PanelWidgetGrid: Layout {
 
     private func rowHeights(width: CGFloat, subviews: Subviews) -> [CGFloat] {
         let count = max(1, columns)
-        let cellWidth = max(0, (width - CGFloat(count - 1) * spacing) / CGFloat(count))
+        let widths = ExpandedPanelLayout.columnWidths(contentWidth: width,
+            columns: count, emphasizedColumn: emphasizedColumn)
         var heights: [CGFloat] = []
         for index in subviews.indices {
-            let height = subviews[index].sizeThatFits(ProposedViewSize(width: cellWidth, height: nil)).height
+            let height = subviews[index].sizeThatFits(ProposedViewSize(width: widths[index % count], height: nil)).height
             if index % count == 0 { heights.append(0) }
             heights[index / count] = max(heights[index / count], height.isFinite ? max(0, height) : 0)
         }

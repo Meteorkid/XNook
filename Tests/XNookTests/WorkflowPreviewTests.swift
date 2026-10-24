@@ -15,8 +15,7 @@ final class WorkflowPreviewTests: XCTestCase {
         _ = NSApplication.shared
         let fixture = try WorkflowPreviewFixture()
         defer { fixture.cleanUp() }
-        let outputDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            .appendingPathComponent(".build/reliability-adaptive-evidence/ui/workflow", isDirectory: true)
+        let outputDirectory = WorkflowPreviewEvidence.directory.appendingPathComponent("workflow", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
         try render(fixture, selected: nil, size: NSSize(width: 800, height: 400), scheme: .dark,
@@ -135,15 +134,30 @@ final class WorkflowPreviewFixture {
     let calendar: CalendarManager
     let sampleNotes: [NotesManager.Note]
 
-    init(historyCount: Int = 4, trayFileCount: Int = 2) throws {
+    init(historyCount: Int = 4, trayFileCount: Int = 2, mediaHasContent: Bool = true,
+         calendarEventTitles: [String]? = nil, calendarDayOffset: Int = 1) throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("XNookWorkflowPreview-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         suiteName = "XNook.WorkflowPreview.\(UUID().uuidString)"
         defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.set(true, forKey: "reduceMotion")
         media = MediaManager(startMonitoring: false, defaults: defaults)
-        media.currentTitle = "Quiet Working Session"
-        media.currentArtist = "Local Preview"
+        media.currentTitle = mediaHasContent ? "Quiet Working Session" : ""
+        media.currentArtist = mediaHasContent ? "Local Preview" : ""
+        if mediaHasContent {
+            media.currentAlbum = "Everyday Moments"
+            // 仅用于隔离渲染的几何封面，不使用参考软件或用户的封面文件。
+            let artwork = NSImage(size: NSSize(width: 100, height: 100), flipped: false) { bounds in
+                NSColor(calibratedRed: 0.25, green: 0.30, blue: 0.42, alpha: 1).setFill()
+                bounds.fill()
+                NSColor(calibratedRed: 0.68, green: 0.76, blue: 0.82, alpha: 1).setFill()
+                NSBezierPath(ovalIn: NSRect(x: 15, y: 15, width: 70, height: 70)).fill()
+                NSColor(calibratedRed: 0.37, green: 0.46, blue: 0.59, alpha: 1).setFill()
+                NSBezierPath(ovalIn: NSRect(x: 35, y: 35, width: 30, height: 30)).fill()
+                return true
+            }
+            media.currentArtworkData = artwork.tiffRepresentation
+        }
 
         sampleNotes = (0..<8).map { index in
             NotesManager.Note(
@@ -175,11 +189,15 @@ final class WorkflowPreviewFixture {
         eventCalendar.title = "预览日历"
         eventCalendar.cgColor = NSColor.systemTeal.cgColor
         let now = Date()
-        let dayStart = Calendar.current.startOfDay(for: now)
-        let events = (0..<6).map { index in
+        let displayedDate = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: calendarDayOffset, to: now))
+        let dayStart = Calendar.current.startOfDay(for: displayedDate)
+        let eventTitles = calendarEventTitles ?? (0..<6).map { index in
+            index == 0 ? "产品与工程协作评审：一个需要换行的完整日程标题" : "项目日程 \(index + 1)"
+        }
+        let events = eventTitles.enumerated().map { index, title in
             let event = EKEvent(eventStore: eventStore)
             event.calendar = eventCalendar
-            event.title = index == 0 ? "产品与工程协作评审：一个需要换行的完整日程标题" : "项目日程 \(index + 1)"
+            event.title = title
             event.startDate = dayStart.addingTimeInterval(TimeInterval(8 + index * 2) * 3600)
             event.endDate = event.startDate.addingTimeInterval(3600)
             return event
@@ -197,6 +215,7 @@ final class WorkflowPreviewFixture {
             didRefreshAuthorization: {}
         )
         calendar.refresh()
+        if calendarDayOffset != 0 { calendar.loadEvents(for: displayedDate) }
     }
 
     func cleanUp() {
@@ -206,5 +225,16 @@ final class WorkflowPreviewFixture {
         } catch {
             XCTFail("Failed to remove isolated preview data: \(error)")
         }
+    }
+}
+
+/// 所有本轮预览写到独立目录，保留已冻结的上一轮验收证据。
+enum WorkflowPreviewEvidence {
+    static var directory: URL {
+        if let override = ProcessInfo.processInfo.environment["XNOOK_UI_EVIDENCE_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent(".build/compact-panel-evidence/ui", isDirectory: true)
     }
 }

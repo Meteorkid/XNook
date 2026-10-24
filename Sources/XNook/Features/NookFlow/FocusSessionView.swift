@@ -85,8 +85,8 @@ struct FocusSessionView: View {
         }
         .font(.system(size: 12))
         .foregroundStyle(IslandStyle.primaryText)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .onChange(of: isInteracting) { _, interacting in
             onInteractionChanged(interacting)
         }
@@ -132,22 +132,12 @@ struct FocusSessionView: View {
 
     @ViewBuilder
     private var taskAndHistory: some View {
-        if showHistory, !manager.history.isEmpty {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 16) {
-                    taskContent
-                        .frame(minWidth: 220, idealWidth: 220, maxWidth: .infinity, alignment: .topLeading)
-                    historyList
-                        .frame(minWidth: 250, idealWidth: 250, maxWidth: .infinity, alignment: .topLeading)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    taskContent
-                    Divider()
-                    historyList
-                }
-            }
-        } else {
+        VStack(alignment: .leading, spacing: 6) {
             taskContent
+            if showHistory, !manager.history.isEmpty {
+                Divider()
+                historyList
+            }
         }
     }
 
@@ -161,21 +151,32 @@ struct FocusSessionView: View {
     }
 
     private var manualTaskEntry: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.sectionNookFlow)
-                .font(.system(size: 13, weight: .semibold))
+        HStack(spacing: 8) {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IslandStyle.secondaryText)
+                .accessibilityHidden(true)
             TextField(L10n.flowTaskPlaceholder, text: $taskTitle)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .focused($titleFocused)
                 .onSubmit(startManualTask)
                 .disabled(manager.storageError != nil)
+                .frame(maxWidth: .infinity, minHeight: 28)
+                .expandedPanelDebugFrame(id: "expandedPanelTaskTitle")
             Button(action: startManualTask) {
-                Label(L10n.flowStartTask, systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
+                Image(systemName: "play.fill")
+                    .frame(minWidth: 28, minHeight: 28)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .help(L10n.flowStartTask)
+            .accessibilityLabel(L10n.flowStartTask)
             .disabled(manager.storageError != nil)
+            .expandedPanelDebugFrame(id: "expandedPanelTaskStart")
         }
+        .padding(.horizontal, 8)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: IslandTokens.Radius.control))
+        .expandedPanelDebugFrame(id: "expandedPanelTaskEntry")
     }
 
     private func startManualTask() {
@@ -187,13 +188,14 @@ struct FocusSessionView: View {
 
     private func activeCard(for session: FocusSession) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(L10n.flowActive, systemImage: "circle.fill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.green)
-            Text(session.title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Label(L10n.flowActive, systemImage: "circle.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.green)
+                Text(session.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ViewThatFits(in: .horizontal) {
                 HStack {
                     Text(L10n.flowStarted(session.startedAt.formatted(date: .omitted, time: .shortened)))
@@ -208,21 +210,27 @@ struct FocusSessionView: View {
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(IslandStyle.secondaryText)
 
-            noteButton(for: session)
-            webLinkButton(for: session)
-            if !session.linkedFiles.isEmpty {
-                Button {
-                    resourceError = nil
-                    isFilesPresented = true
-                } label: {
-                    Label(L10n.flowFileCount(session.linkedFiles.count), systemImage: "folder")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 8) {
+                    noteButton(for: session)
+                    webLinkButton(for: session)
+                    if !session.linkedFiles.isEmpty {
+                        filesButton(for: session)
+                    }
                 }
-                .buttonStyle(.bordered)
+                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 8) {
+                    noteButton(for: session)
+                    webLinkButton(for: session)
+                    if !session.linkedFiles.isEmpty {
+                        filesButton(for: session)
+                    }
+                }
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     linkTrayButton
+                    Spacer(minLength: 8)
                     endSessionButton
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -231,6 +239,19 @@ struct FocusSessionView: View {
                 }
             }
         }
+        .controlSize(.small)
+        .tint(IslandStyle.primaryText)
+    }
+
+    private func filesButton(for session: FocusSession) -> some View {
+        Button {
+            resourceError = nil
+            isFilesPresented = true
+        } label: {
+            Label(L10n.flowFileCount(session.linkedFiles.count), systemImage: "folder")
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
     }
 
     private func elapsedTime(for session: FocusSession) -> some View {
@@ -294,40 +315,47 @@ struct FocusSessionView: View {
     }
 
     private var historyList: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L10n.flowRecentTasks)
-                .font(.system(size: 12, weight: .semibold))
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(L10n.flowRecentTasks)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(IslandStyle.secondaryText)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Button(L10n.flowViewAll(manager.history.count)) {
+                    selectedHistoryID = nil
+                    resourceError = nil
+                    isHistoryPresented = true
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
                 .foregroundStyle(IslandStyle.secondaryText)
+                .fixedSize()
+            }
             ForEach(manager.history.prefix(Self.sanitizedHistoryDisplayLimit(historyDisplayLimit))) { record in
                 Button {
                     selectedHistoryID = record.id
                     resourceError = nil
                     isHistoryPresented = true
                 } label: {
-                    historyRow(record)
+                    historyRow(record, compact: true)
                 }
                 .buttonStyle(.plain)
                 .expandedPanelDebugFrame(id: "expandedPanelHistoryRow-\(record.id.uuidString)")
             }
-            Button(L10n.flowViewAll(manager.history.count)) {
-                selectedHistoryID = nil
-                resourceError = nil
-                isHistoryPresented = true
-            }
-            .buttonStyle(.bordered)
         }
     }
 
-    private func historyRow(_ record: FocusSession) -> some View {
+    private func historyRow(_ record: FocusSession, compact: Bool = false) -> some View {
         HStack(spacing: 8) {
             Text(record.title)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(IslandStyle.secondaryText)
         }
-        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: compact ? 24 : 28, alignment: .leading)
         .contentShape(Rectangle())
     }
 

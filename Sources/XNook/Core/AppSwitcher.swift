@@ -81,9 +81,7 @@ final class AppSwitcher {
             },
             setSwitching: { AppDelegate.shared?.notchWindow?.isSwitchingApps = $0 },
             hideSource: {
-                guard let window = AppDelegate.shared?.notchWindow else { return }
-                window.isHiddenByIslandSwitch = true
-                window.orderOut(nil)
+                AppDelegate.shared?.notchWindow?.hideWindowForIslandSwitch()
             },
             restoreSource: { AppDelegate.shared?.notchWindow?.showWindow() },
             schedule: { delay, action in

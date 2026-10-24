@@ -1,5 +1,6 @@
 import SwiftUI
 import EventKit
+import AppKit
 
 /// 纯内容面板，窗口与悬停逻辑由 NotchContentView 管理。
 struct ExpandedPanelView: View {
@@ -32,6 +33,24 @@ struct ExpandedPanelView: View {
     let onMeasurement: (ExpandedPanelMeasurement) -> Void
     /// 面板顶部被物理刘海遮挡的死区，由窗口层按当前屏幕推导
     var deadZone: NotchDeadZone = .none
+    var layoutStore: PanelLayoutStore? = nil
+    var editRequest: Int = 0
+    var onEditRequestHandled: () -> Void = {}
+    var onEditingChanged: (Bool) -> Void = { _ in }
+    @State private var layoutEditor = PanelLayoutEditingSession()
+    @State private var layoutSelection: PanelModuleID = .media
+    @State private var interactingModules: Set<PanelModuleID> = []
+    @State private var linkingModules: Set<PanelModuleID> = []
+    @State private var confirmsLayoutRecovery = false
+    @State private var layoutRecoveryError: String?
+    @State private var layoutEntryError: String?
+
+    private var dashboardConfiguration: PanelLayoutConfiguration {
+        layoutEditor.isEditing ? layoutEditor.draft : layoutStore?.configuration
+            ?? .legacy(enabledWidgetIDs: Set(enabledWidgets.map(\.rawValue)), showHistory: showHistory)
+    }
+    private var layoutSignature: String { layoutStore == nil ? "" : dashboardConfiguration.signature }
+
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
 
     private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
@@ -49,7 +68,23 @@ struct ExpandedPanelView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: IslandTokens.Spacing.section) {
-                    if selectedWidget == nil {
+                    if selectedWidget == nil, let layoutStore {
+                        if let layoutEntryError { Text(layoutEntryError).font(.caption).foregroundStyle(.secondary) }
+                        if layoutEditor.isEditing {
+                            PanelLayoutEditorToolbar(editor: layoutEditor, selection: $layoutSelection,
+                                onSave: { _ = layoutEditor.save(to: layoutStore) }, onCancel: layoutEditor.cancel)
+                        } else if let issue = layoutRecoveryError ?? layoutStore.loadError {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(issue).font(.caption).foregroundStyle(.secondary)
+                                Button(L10n.localized(zh: "恢复默认布局…", en: "Restore Default Layout…")) { confirmsLayoutRecovery = true }
+                            }
+                        }
+                        PanelDashboardGrid(
+                            configuration: Binding(get: { dashboardConfiguration }, set: { if layoutEditor.isEditing { layoutEditor.draft = $0 } }),
+                            selection: $layoutSelection, width: max(1, panelWidth - ExpandedPanelLayout.outerPadding * 2),
+                            isEditing: layoutEditor.isEditing, summary: moduleSummary
+                        ) { item, size in moduleView(item.id, size: size) }
+                    } else if selectedWidget == nil {
                         if enabledWidgets.isEmpty {
                             Text(L10n.panelNoWidgets)
                                 .font(.system(size: IslandTokens.Font.body))
@@ -74,7 +109,9 @@ struct ExpandedPanelView: View {
                             width: geometry.size.width,
                             height: geometry.size.height + ExpandedPanelLayout.headerHeight,
                             selectedWidget: selectedWidget,
-                            enabledWidgets: enabledWidgets
+                            enabledWidgets: enabledWidgets,
+                            layoutSignature: layoutSignature,
+                            isEditingLayout: layoutEditor.isEditing
                         ))
                     }
                 }
@@ -87,8 +124,30 @@ struct ExpandedPanelView: View {
             }
         }
         .expandedPanelDebugCoordinateSpace()
+        .onAppear { handleEditRequest() }
+        .onChange(of: editRequest) { _, _ in handleEditRequest() }
+        .onChange(of: layoutEditor.isEditing) { _, editing in
+            onEditingChanged(editing)
+            reportInteractions()
+        }
+        .onChange(of: confirmsLayoutRecovery) { _, _ in reportInteractions() }
+        .onChange(of: dashboardConfiguration.signature) { _, _ in
+            reportInteractions()
+            onLinksPresentationChanged(!linkingModules.intersection(visibleModuleIDs).isEmpty)
+        }
+        .onDisappear { onEditingChanged(false); onInteractionChanged(false); onLinksPresentationChanged(false) }
+        .alert(L10n.localized(zh: "恢复默认布局？", en: "Restore Default Layout?"), isPresented: $confirmsLayoutRecovery) {
+            Button(L10n.localized(zh: "取消", en: "Cancel"), role: .cancel) {}
+            Button(L10n.localized(zh: "恢复默认", en: "Restore")) {
+                do { try layoutStore?.reset(); layoutRecoveryError = nil }
+                catch { layoutRecoveryError = error.localizedDescription }
+            }
+        } message: {
+            Text(L10n.localized(zh: "只重置组件排列，原布局会留作备份；笔记、文件和任务不受影响。", en: "Only the layout is reset and backed up. Notes, files and tasks are retained."))
+        }
         .onExitCommand {
-            if selectedWidget != nil { selectedWidget = nil }
+            if layoutEditor.isEditing { layoutEditor.cancel() }
+            else if selectedWidget != nil { selectedWidget = nil }
             else { onClose() }
         }
     }
@@ -103,7 +162,7 @@ struct ExpandedPanelView: View {
             // 头部右侧是刘海最可能覆盖的区域，把按钮整体推到死区之外。
             NotchDeadZoneSpacer(zone: deadZone)
             headerButton(icon: "gearshape", help: L10n.preferences, action: onSettings)
-            headerButton(icon: "xmark", help: L10n.panelClose, action: onClose)
+            headerButton(icon: "xmark", help: L10n.panelClose, action: { layoutEditor.cancel(); onClose() })
         }
         .padding(.horizontal, IslandTokens.Spacing.standard)
         .frame(height: IslandTokens.Layout.headerHeight)
@@ -120,31 +179,37 @@ struct ExpandedPanelView: View {
         .accessibilityLabel(help)
     }
 
-    @ViewBuilder
     private var navigation: some View {
-        if panelWidth < 480 {
-            Picker(L10n.panelNavigation, selection: $selectedWidget) {
-                Label(L10n.panelOverview, systemImage: "square.grid.2x2").tag(nil as Widget?)
-                ForEach(navigationWidgets, id: \.self) { widget in
-                    Label(widget.localizedName, systemImage: widget.icon).tag(Optional(widget))
-                }
+        HStack(spacing: 8) {
+            if panelWidth < 640 {
+                Picker(L10n.panelNavigation, selection: $selectedWidget) {
+                    Label(L10n.panelOverview, systemImage: "square.grid.2x2").tag(nil as Widget?)
+                    ForEach(navigationWidgets, id: \.self) { widget in
+                        Label(widget.localizedName, systemImage: widget.icon).tag(Optional(widget))
+                    }
+                }.pickerStyle(.menu).labelsHidden().disabled(layoutEditor.isEditing)
+            } else {
+                HStack(spacing: IslandTokens.Spacing.tight) {
+                    navigationButton(title: L10n.panelOverview, icon: "square.grid.2x2", widget: nil)
+                    ForEach(navigationWidgets, id: \.self) { widget in
+                        navigationButton(title: widget.localizedName, icon: widget.icon, widget: widget)
+                    }
+                }.disabled(layoutEditor.isEditing)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .font(.system(size: IslandTokens.Font.body, weight: .medium))
-            .padding(.horizontal, IslandTokens.Spacing.standard)
-            .frame(height: IslandTokens.Layout.navigationHeight)
-        } else {
-            HStack(spacing: IslandTokens.Spacing.tight) {
-                navigationButton(title: L10n.panelOverview, icon: "square.grid.2x2", widget: nil)
-                ForEach(navigationWidgets, id: \.self) { widget in
-                    navigationButton(title: widget.localizedName, icon: widget.icon, widget: widget)
+            Spacer(minLength: 0)
+            if layoutStore != nil, !layoutEditor.isEditing, selectedWidget == nil {
+                Button(action: beginLayoutEditing) {
+                    Image(systemName: "rectangle.3.group").frame(width: 28, height: 28).contentShape(Rectangle())
                 }
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .help(L10n.localized(zh: "编辑布局", en: "Edit Layout"))
+                .accessibilityLabel(L10n.localized(zh: "编辑布局", en: "Edit Layout"))
+                .accessibilityIdentifier("panelLayoutBegin")
+                .disabled(layoutStore?.canEdit != true)
             }
-            .padding(.horizontal, IslandTokens.Spacing.standard)
-            .frame(height: IslandTokens.Layout.navigationHeight)
         }
+        .padding(.horizontal, ExpandedPanelLayout.outerPadding)
+        .frame(height: IslandTokens.Layout.navigationHeight)
     }
 
     /// 隐藏的工具仍可从任务记录打开；进入详情后临时保留其导航入口。
@@ -179,8 +244,8 @@ struct ExpandedPanelView: View {
             showHistory: showHistory,
             onOpenNote: onOpenNote,
             onOpenFile: onOpenFile,
-            onInteractionChanged: onInteractionChanged,
-            onLinksPresentationChanged: onLinksPresentationChanged
+            onInteractionChanged: { reportModuleInteraction(.currentTask, active: $0) },
+            onLinksPresentationChanged: { reportModuleLinks(.currentTask, active: $0) }
         )
         .background(IslandStyle.cardRest(for: colorScheme))
         .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.card))
@@ -222,11 +287,79 @@ struct ExpandedPanelView: View {
                 onShowAll: { selectedWidget = .calendar }
             )
         case .notes:
-            NotesWidgetView(notesManager: notesManager, isDetail: isDetail, onShowAll: { selectedWidget = .notes }, onInteractionChanged: onInteractionChanged)
+            NotesWidgetView(notesManager: notesManager, isDetail: isDetail, onShowAll: { selectedWidget = .notes }, onInteractionChanged: { reportModuleInteraction(.notes, active: $0) })
         case .tray:
             TrayWidgetView(trayManager: trayManager, isDetail: isDetail, onShowAll: { selectedWidget = .tray })
         }
     }
+    private func beginLayoutEditing() {
+        guard let layoutStore else { return }
+        guard linkingModules.isEmpty else {
+            layoutEntryError = L10n.localized(zh: "请先完成网页链接编辑，再调整布局。", en: "Finish editing the task links before changing the layout.")
+            return
+        }
+        guard !notesManager.isEditing || notesManager.closeEditor() else { return }
+        layoutEntryError = nil
+        selectedWidget = nil
+        layoutEditor.begin(from: layoutStore)
+        if layoutEditor.isEditing { NSApp.keyWindow?.makeFirstResponder(nil) }
+    }
+
+    private func handleEditRequest() {
+        guard editRequest > 0 else { return }
+        beginLayoutEditing()
+        onEditRequestHandled()
+    }
+
+    private var visibleModuleIDs: Set<PanelModuleID> { Set(dashboardConfiguration.visibleItems.map(\.id)) }
+
+    private func reportModuleInteraction(_ id: PanelModuleID, active: Bool) {
+        if active { interactingModules.insert(id) } else { interactingModules.remove(id) }
+        reportInteractions()
+    }
+    private func reportModuleLinks(_ id: PanelModuleID, active: Bool) {
+        if active { linkingModules.insert(id) } else { linkingModules.remove(id) }
+        onLinksPresentationChanged(!linkingModules.intersection(visibleModuleIDs).isEmpty)
+    }
+    private func reportInteractions() {
+        onInteractionChanged(layoutEditor.isEditing || confirmsLayoutRecovery || !interactingModules.intersection(visibleModuleIDs).isEmpty)
+    }
+
+    private func moduleSummary(_ id: PanelModuleID) -> String {
+        switch id {
+        case .media: return mediaManager.currentTitle.isEmpty ? L10n.localized(zh: "播放与歌词", en: "Playback and lyrics") : mediaManager.currentTitle
+        case .calendar: return calendarManager.displayedDate.formatted(date: .abbreviated, time: .omitted)
+        case .notes: return "\(notesManager.notes.count) " + L10n.localized(zh: "条笔记", en: "notes")
+        case .tray: return "\(trayManager.files.count) " + L10n.localized(zh: "个文件", en: "files")
+        case .currentTask: return focusSessionManager.activeSession?.title ?? L10n.flowTaskPlaceholder
+        case .recentTasks: return "\(focusSessionManager.history.count) " + L10n.localized(zh: "条任务记录", en: "tasks")
+        }
+    }
+
+    @ViewBuilder
+    private func moduleView(_ id: PanelModuleID, size: CGSize) -> some View {
+        switch id {
+        case .media:
+            MediaWidgetView(mediaManager: mediaManager, isDetail: false, onShowAll: { selectedWidget = .media }, availableHeight: size.height)
+        case .calendar:
+            CalendarWidgetView(calendarManager: calendarManager, recenterTrigger: $calendarRecenterTrigger,
+                onStartFocus: onStartFocus, isDetail: false, onShowAll: { selectedWidget = .calendar }, availableHeight: size.height)
+        case .notes:
+            NotesWidgetView(notesManager: notesManager, isDetail: false, onShowAll: { selectedWidget = .notes },
+                onInteractionChanged: { reportModuleInteraction(.notes, active: $0) }, availableHeight: size.height)
+        case .tray:
+            TrayWidgetView(trayManager: trayManager, isDetail: false, onShowAll: { selectedWidget = .tray }, availableHeight: size.height)
+        case .currentTask, .recentTasks:
+            FocusSessionView(manager: focusSessionManager, historyDisplayLimit: historyDisplayLimit,
+                trayFileCount: trayManager.files.count, onCreateLinkedNote: onCreateLinkedNote,
+                onLinkTrayFiles: onLinkTrayFiles, onEndSession: onEndSession, showHistory: true,
+                onOpenNote: onOpenNote, onOpenFile: onOpenFile,
+                onInteractionChanged: { reportModuleInteraction(id, active: $0) },
+                onLinksPresentationChanged: { reportModuleLinks(id, active: $0) },
+                section: id == .currentTask ? .currentTask : .recentTasks, availableHeight: size.height)
+        }
+    }
+
 }
 
 struct ExpandedPanelDebugGeometryKey: PreferenceKey {
@@ -291,7 +424,7 @@ private struct ExpandedPanelDebugGeometryModifier: ViewModifier {
 private struct PanelContentHeightKey: PreferenceKey {
     static var defaultValue: ExpandedPanelMeasurement? = nil
     static func reduce(value: inout ExpandedPanelMeasurement?, nextValue: () -> ExpandedPanelMeasurement?) {
-        if let next = nextValue(), next.matches(width: next.width, selectedWidget: next.selectedWidget, enabledWidgets: next.enabledWidgets) {
+        if let next = nextValue(), next.matches(width: next.width, selectedWidget: next.selectedWidget, enabledWidgets: next.enabledWidgets, layoutSignature: next.layoutSignature, isEditingLayout: next.isEditingLayout) {
             value = next
         }
     }

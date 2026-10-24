@@ -8,6 +8,7 @@ struct CalendarWidgetView: View {
     var onStartFocus: ((EKEvent) -> Void)?
     var isDetail: Bool = false
     var onShowAll: (() -> Void)? = nil
+    var availableHeight: CGFloat? = nil
     @AppStorage("reduceMotion") private var reduceMotion = false
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var centeredDate = Date()
@@ -19,24 +20,38 @@ struct CalendarWidgetView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: isDetail ? 10 : 6) {
+            if !isDetail, availableHeight != nil {
+                HStack {
+                    Label(L10n.widgetCalendar, systemImage: "calendar")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 4)
+                    Text(monthString(for: calendarManager.displayedDate) + L10n.monthSuffix)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                }
+            } else {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(monthString(for: centeredDate))
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                Text(monthString(for: isDetail ? centeredDate : calendarManager.displayedDate))
+                    .font(.system(size: isDetail ? 26 : 20, weight: .bold, design: .rounded))
                 Text(L10n.monthSuffix)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
+            }
 
-            CalendarScroller(
-                selectedDate: selectedDate,
-                centeredDate: $centeredDate,
-                recenterTrigger: $recenterTrigger,
-                today: today,
-                dateRange: dateRange,
-                reduceMotion: shouldReduceMotion
-            )
-            .frame(height: 48)
+            if isDetail {
+                CalendarScroller(
+                    selectedDate: selectedDate,
+                    centeredDate: $centeredDate,
+                    recenterTrigger: $recenterTrigger,
+                    today: today,
+                    dateRange: dateRange,
+                    reduceMotion: shouldReduceMotion
+                )
+                .frame(height: 48)
+            } else {
+                overviewDates
+            }
 
             if !calendarManager.hasAccess {
                 accessPrompt
@@ -61,14 +76,67 @@ struct CalendarWidgetView: View {
             calendarManager.ensureAccess()
             centeredDate = calendarManager.displayedDate
         }
+        .onChange(of: recenterTrigger) { _, _ in
+            if !isDetail { calendarManager.loadEvents(for: today) }
+        }
+    }
+
+    private var overviewDates: some View {
+        GeometryReader { geometry in
+            let dates = GridWidgetContentLayout.calendarDates(selected: calendarManager.displayedDate, width: geometry.size.width)
+            HStack(spacing: 4) {
+                dateNavigationButton(offset: -dates.count, label: L10n.gridCalendarPreviousDays, icon: "chevron.left")
+                ForEach(dates, id: \.self) { date in
+                    let isSelected = Calendar.current.isDate(date, inSameDayAs: calendarManager.displayedDate)
+                    Button { calendarManager.loadEvents(for: date) } label: {
+                        VStack(spacing: 3) {
+                            Text(date, format: .dateTime.weekday(.narrow))
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(String(Calendar.current.component(.day, from: date)))
+                                .font(.system(size: 13, weight: isSelected ? .bold : .medium, design: .rounded))
+                                .foregroundStyle(isSelected || Calendar.current.isDate(date, inSameDayAs: today) ? Color.accentColor : .primary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(isSelected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .expandedPanelDebugFrame(id: "gridWidgetCalendarDay-\(Calendar.current.startOfDay(for: date).timeIntervalSince1970)")
+                }
+                dateNavigationButton(offset: dates.count, label: L10n.gridCalendarNextDays, icon: "chevron.right")
+            }
+        }
+        .frame(height: 40)
+    }
+
+    private func dateNavigationButton(offset: Int, label: String, icon: String) -> some View {
+        Button {
+            if let date = Calendar.current.date(byAdding: .day, value: offset, to: calendarManager.displayedDate) {
+                calendarManager.loadEvents(for: date)
+            }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     private var accessPrompt: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: isDetail ? 8 : 6) {
             Label(calendarManager.authorizationStatus == .restricted ? L10n.calendarAccessRestricted : L10n.calendarAccessRequired,
                   systemImage: "lock.fill")
-                .font(.system(size: 12))
+                .font(.system(size: isDetail ? 12 : 10))
                 .foregroundStyle(.secondary)
+                .lineLimit(isDetail ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
             if calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly {
                 Button(L10n.calendarEnableAccess) {
@@ -79,22 +147,26 @@ struct CalendarWidgetView: View {
                 Button(L10n.calendarOpenSettings) { SystemPrivacySettings.openCalendars() }
             }
             if let error = calendarManager.accessError {
-                Text(error).font(.system(size: 11)).foregroundStyle(.orange)
+                Text(error).font(.system(size: isDetail ? 11 : 10)).foregroundStyle(.orange)
+                    .lineLimit(isDetail ? nil : 2)
+                    .help(error)
             }
         }
         .buttonStyle(.bordered)
-        .font(.system(size: 12))
+        .font(.system(size: isDetail ? 12 : 11))
     }
 
     @ViewBuilder
     private func eventContent(now: Date) -> some View {
         let overview = CalendarManager.overviewEvents(calendarManager.upcomingEvents, date: calendarManager.displayedDate, now: now)
-        let events = isDetail ? calendarManager.upcomingEvents : Array(overview.prefix(2))
-        VStack(alignment: .leading, spacing: 8) {
+        let limit = GridWidgetContentLayout.rowLimit(height: availableHeight, reserved: 100, rowHeight: 36, maximum: 2)
+        let events = isDetail ? calendarManager.upcomingEvents : Array(overview.prefix(limit))
+        VStack(alignment: .leading, spacing: isDetail ? 8 : 6) {
             if events.isEmpty {
                 Label(emptyMessage, systemImage: "calendar.badge.checkmark")
-                    .font(.system(size: 12))
+                    .font(.system(size: isDetail ? 12 : 11))
                     .foregroundStyle(.secondary)
+                    .lineLimit(isDetail ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(Array(events.enumerated()), id: \.offset) { _, event in
@@ -108,11 +180,12 @@ struct CalendarWidgetView: View {
                 } label: {
                     Text(hiddenCount > 0 ? L10n.calendarMoreEvents(hiddenCount) : L10n.calendarAllEvents)
                         .font(.system(size: 11, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.accentColor)
+                .expandedPanelDebugFrame(id: "gridWidgetCalendarShowAll")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,12 +205,14 @@ struct CalendarWidgetView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.title ?? L10n.untitled)
                     .font(.system(size: 12, weight: .medium))
-                    .lineLimit(isDetail ? nil : 2)
+                    .lineLimit(isDetail ? nil : 1)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(event.isAllDay ? L10n.calendarAllDay : timeString(from: event.startDate) + " – " + timeString(from: event.endDate))
+                Text((event.isAllDay ? L10n.calendarAllDay : timeString(from: event.startDate) + " – " + timeString(from: event.endDate))
+                     + (!isDetail && event.startDate <= now && event.endDate > now ? " · " + L10n.calendarInProgress : ""))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
-                if event.startDate <= now && event.endDate > now {
+                    .lineLimit(isDetail ? nil : 1)
+                if isDetail && event.startDate <= now && event.endDate > now {
                     Text(L10n.calendarInProgress).font(.system(size: 10)).foregroundStyle(Color.accentColor)
                 } else if isDetail && event.endDate <= now {
                     Text(L10n.calendarEnded).font(.system(size: 10)).foregroundStyle(.secondary)
@@ -157,6 +232,7 @@ struct CalendarWidgetView: View {
                 .accessibilityLabel(L10n.calendarStartTask + ": " + (event.title ?? L10n.untitled))
             }
         }
+        .expandedPanelDebugFrame(id: "gridWidgetCalendarEvent-\(event.eventIdentifier ?? event.title ?? "untitled")")
     }
 
     private func eventColor(_ event: EKEvent) -> Color {
@@ -205,9 +281,15 @@ private struct CalendarScroller: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         context.coordinator.rebuildDates(scrollView)
         scrollView.contentView.postsBoundsChangedNotifications = true
+        // 缩窄时 AppKit 可能只发 frame 通知，不能等第一次用户滚动才发现宽度变化。
+        scrollView.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
             context.coordinator, selector: #selector(Coordinator.boundsChanged(_:)),
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            context.coordinator, selector: #selector(Coordinator.boundsChanged(_:)),
+            name: NSView.frameDidChangeNotification, object: scrollView.contentView
         )
         DispatchQueue.main.async { [weak coordinator = context.coordinator, weak scrollView] in
             guard let coordinator, let scrollView else { return }
@@ -244,6 +326,7 @@ private struct CalendarScroller: NSViewRepresentable {
         private var programmaticScrollID = 0
         private var isProgrammaticScroll = true
         private var isInvalidated = false
+        private var scrollState = GridWidgetCalendarScrollState()
 
         init(_ parent: CalendarScroller) {
             self.parent = parent
@@ -310,13 +393,25 @@ private struct CalendarScroller: NSViewRepresentable {
                 scrollView.reflectScrolledClipView(scrollView.contentView)
                 isProgrammaticScroll = false
             }
+            _ = scrollState.update(scrollView.contentView.bounds)
         }
 
         @objc func boundsChanged(_ notification: Notification) {
-            guard !isInvalidated, !isProgrammaticScroll,
+            guard !isInvalidated,
                   let clipView = notification.object as? NSClipView,
                   let scrollView = clipView.enclosingScrollView,
                   let stack = scrollView.documentView as? DateStackView else { return }
+            let change = scrollState.update(clipView.bounds)
+            if change == .layout {
+                // 同一轮布局还可能修正 origin；在重居中完成前，它也不是用户滚动。
+                isProgrammaticScroll = true
+                DispatchQueue.main.async { [weak self, weak scrollView] in
+                    guard let self, let scrollView, !self.isInvalidated else { return }
+                    self.scrollToDate(scrollView, date: self.parent.selectedDate, animated: false)
+                }
+                return
+            }
+            guard !isProgrammaticScroll, change == .scroll else { return }
             let center = clipView.bounds.midX
             guard let index = stack.arrangedSubviews.enumerated().min(by: {
                 abs($0.element.frame.midX - center) < abs($1.element.frame.midX - center)

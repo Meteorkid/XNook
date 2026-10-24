@@ -6,6 +6,7 @@ struct TrayWidgetView: View {
     @Bindable var trayManager: TrayManager
     var isDetail = false
     var onShowAll: (() -> Void)?
+    var availableHeight: CGFloat? = nil
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @AppStorage("reduceMotion") private var reduceMotion = false
     @State private var showAllFiles = false
@@ -13,13 +14,18 @@ struct TrayWidgetView: View {
 
     /// 当前显示的文件列表
     private var displayFiles: ArraySlice<TrayManager.TrayFile> {
-        let maxVisible = (isDetail || showAllFiles) ? trayManager.files.count : min(trayManager.files.count, 4)
+        let maxVisible = (isDetail || showAllFiles) ? trayManager.files.count : overviewLimit
         return trayManager.files.prefix(maxVisible)
+    }
+
+    private var overviewLimit: Int {
+        GridWidgetContentLayout.rowLimit(height: availableHeight,
+            reserved: 36 + (statusMessage == nil ? 0 : 22), rowHeight: 44, maximum: 4)
     }
 
     /// 是否有更多文件未显示
     private var hasMoreFiles: Bool {
-        trayManager.files.count > 4 && !showAllFiles && !isDetail
+        trayManager.files.count > overviewLimit && !showAllFiles && !isDetail
     }
 
     private var statusMessage: String? {
@@ -43,10 +49,10 @@ struct TrayWidgetView: View {
                     .font(.system(size: 10))
                     .foregroundColor(.green)
                 Text(L10n.widgetTray)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: !isDetail && availableHeight != nil ? 12 : 10, weight: .semibold))
                 Spacer()
                 Text(L10n.fileCount(trayManager.files.count + trayManager.unavailableFileCount))
-                    .font(.system(size: 9))
+                    .font(.system(size: !isDetail && availableHeight != nil ? 11 : 9))
                     .foregroundColor(.secondary)
             }
 
@@ -54,7 +60,9 @@ struct TrayWidgetView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.circle")
                     Text(statusMessage)
+                        .lineLimit(isDetail || availableHeight == nil ? nil : 1)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(statusMessage)
                     Button { trayManager.loadFiles() } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -62,25 +70,32 @@ struct TrayWidgetView: View {
                     .help(L10n.reloadTray)
                     .accessibilityLabel(L10n.reloadTray)
                 }
-                .font(.system(size: 9))
+                .font(.system(size: !isDetail && availableHeight != nil ? 11 : 9))
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
             }
 
             if trayManager.files.isEmpty {
-                // 空状态
-                VStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.green.opacity(0.1))
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "tray")
-                            .font(.system(size: 18))
-                            .foregroundColor(.green)
+                Group {
+                    if isDetail || availableHeight == nil {
+                        VStack(spacing: 6) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.green.opacity(0.1))
+                                    .frame(width: 40, height: 40)
+                                Image(systemName: "tray")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.green)
+                            }
+                            Text(L10n.dropFilesHere)
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Label(L10n.dropFilesHere, systemImage: "tray")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                     }
-                    Text(L10n.dropFilesHere)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
@@ -105,15 +120,16 @@ struct TrayWidgetView: View {
                         }
 
                         // 显示更多 / 收起按钮
-                        if hasMoreFiles {
+                        if hasMoreFiles || (!isDetail && onShowAll != nil) {
                             Button {
                                 if let onShowAll { onShowAll() }
                                 else { withAnimation(motion) { showAllFiles = true } }
                             } label: {
                                 HStack {
                                     Spacer()
-                                    Text(L10n.showAllFiles(trayManager.files.count - 4))
-                                        .font(.system(size: 10))
+                                    Text(hasMoreFiles ? L10n.showAllFiles(trayManager.files.count - displayFiles.count) : L10n.gridTrayAllFiles)
+                                        .font(.system(size: !isDetail && availableHeight != nil ? 11 : 10))
+                                        .lineLimit(1)
                                         .foregroundColor(.secondary)
                                     Spacer()
                                 }
@@ -122,7 +138,7 @@ struct TrayWidgetView: View {
                             .expandedPanelDebugFrame(id: "expandedPanelTrayShowAll")
                         }
 
-                        if showAllFiles && !isDetail && trayManager.files.count > 4 {
+                        if showAllFiles && !isDetail && trayManager.files.count > overviewLimit {
                             Button {
                                 withAnimation(motion) { showAllFiles = false }
                             } label: {
@@ -160,7 +176,7 @@ struct TrayWidgetView: View {
                     .foregroundColor(.primary)
 
                 Text(TrayManager.formatFileSize(file.size))
-                    .font(.system(size: 10))
+                    .font(.system(size: !isDetail && availableHeight != nil ? 11 : 10))
                     .foregroundColor(.secondary)
             }
 

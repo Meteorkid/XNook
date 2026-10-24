@@ -175,8 +175,8 @@ enum L10n {
 
     static var nookFlowHistoryDisplayLimit: String { localized(zh: "最近任务显示条数", en: "Recent tasks shown") }
     static var nookFlowHistoryDisplayLimitDesc: String { localized(
-        zh: "控制展开面板中最近任务的显示数量（1–5 条）。",
-        en: "Choose how many recent tasks appear in the expanded panel (1–5).") }
+        zh: "设置最近任务的显示上限（1–5 条）；较小组件会减少条数，完整记录可在“查看全部”中打开。",
+        en: "Set the recent-task limit (1–5). Smaller modules show fewer rows; all records remain available in View All.") }
     static var showNookFlowHistory: String { localized(zh: "显示最近任务", en: "Show recent tasks") }
     static var showNookFlowHistoryDesc: String { localized(
         zh: "在展开面板中显示已完成的最近任务。",

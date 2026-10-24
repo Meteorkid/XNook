@@ -36,6 +36,13 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @Environment(UpdateManager.self) private var updateManager
     @State private var selection: SettingsPane = .general
+    @State private var panelLayoutStore: PanelLayoutStore
+    @State private var layoutSaveError: String?
+    @AppStorage("panelLayout.v1") private var panelLayoutData = Data()
+
+    init(layoutDefaults: UserDefaults = .standard) {
+        _panelLayoutStore = State(initialValue: PanelLayoutStore(defaults: layoutDefaults))
+    }
     @AppStorage("quietHoursEnabled") private var quietHoursEnabled = SettingsDefaults.bool(for: "quietHoursEnabled")
     @AppStorage("quietHoursStart") private var quietHoursStart = SettingsDefaults.string(for: "quietHoursStart", fallback: "22:00")
     @AppStorage("quietHoursEnd") private var quietHoursEnd = SettingsDefaults.string(for: "quietHoursEnd", fallback: "07:00")
@@ -78,7 +85,11 @@ struct SettingsView: View {
         .frame(width: 560)
         .frame(minHeight: 400, maxHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear(perform: clampPanelHeightToVisibleRange)
+        .onAppear { clampPanelHeightToVisibleRange(); panelLayoutStore.reload() }
+        .onChange(of: panelLayoutData) { _, _ in panelLayoutStore.reload() }
+        .onChange(of: enabledWidgetsData) { _, _ in panelLayoutStore.reload() }
+        .onChange(of: showNookFlowHistory) { _, _ in panelLayoutStore.reload() }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in panelLayoutStore.reload() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             clampPanelHeightToVisibleRange()
         }
@@ -293,11 +304,14 @@ struct SettingsView: View {
     // MARK: - Display 面板
 
     /// 直接观察持久化数据，让同一设置页的开关随组件组合变化更新。
-    private var enabledWidgets: Set<String> {
-        if let widgets = try? JSONDecoder().decode(Set<String>.self, from: enabledWidgetsData) {
-            return widgets
-        }
-        return ["media", "calendar", "notes", "tray"]
+    private func moduleVisibility(_ id: PanelModuleID) -> Binding<Bool> {
+        Binding(get: { panelLayoutStore.configuration.items.first { $0.id == id }?.isVisible ?? false }, set: { visible in
+            panelLayoutStore.reload()
+            var next = panelLayoutStore.configuration
+            next.setVisible(id, visible: visible)
+            do { try panelLayoutStore.save(next); layoutSaveError = nil }
+            catch { layoutSaveError = error.localizedDescription }
+        })
     }
 
     private var historyDisplayLimitBinding: Binding<Int> {
@@ -400,7 +414,7 @@ struct SettingsView: View {
                 card {
                     settingRow(L10n.showNookFlowHistory, id: "showNookFlowHistory",
                               description: L10n.showNookFlowHistoryDesc) {
-                        AppStorageToggle(key: "showNookFlowHistory")
+                        Toggle("", isOn: moduleVisibility(.recentTasks)).labelsHidden().disabled(!panelLayoutStore.canEdit)
                     }
                     dividerLine
                     settingRow(L10n.nookFlowHistoryDisplayLimit, id: "nookFlowHistoryDisplayLimit",
@@ -412,37 +426,29 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.menu)
                         .frame(width: 120)
-                        .disabled(!showNookFlowHistory)
+                        .disabled(!moduleVisibility(.recentTasks).wrappedValue)
                     }
                 }
             }
 
             section(L10n.sectionWidgets) {
                 card {
-                    ForEach(NotchContentView.WidgetType.allCases, id: \.self) { widget in
-                        if widget != NotchContentView.WidgetType.allCases.first {
-                            dividerLine
+                    ForEach(PanelModuleID.allCases) { module in
+                        if module != PanelModuleID.allCases.first { dividerLine }
+                        settingRow(module.localizedName, id: "widget_\(module.rawValue)", description: "") {
+                            Toggle("", isOn: moduleVisibility(module))
+                                .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                                .disabled(!panelLayoutStore.canEdit)
                         }
-                        settingRow(widget.localizedName, id: "widget_\(widget.rawValue)",
-                                  description: "") {
-                            Toggle("", isOn: Binding(
-                                get: { enabledWidgets.contains(widget.rawValue) },
-                                set: { newValue in
-                                    var current = enabledWidgets
-                                    if newValue {
-                                        current.insert(widget.rawValue)
-                                    } else {
-                                        current.remove(widget.rawValue)
-                                    }
-                                    if let data = try? JSONEncoder().encode(current) {
-                                        enabledWidgetsData = data
-                                    }
-                                }
-                            ))
-                            .toggleStyle(.switch)
-                            .labelsHidden()
-                            .controlSize(.small)
-                        }
+                    }
+                    dividerLine
+                    Button(L10n.localized(zh: "打开布局编辑器", en: "Open Layout Editor")) {
+                        if let delegate = AppDelegate.shared { delegate.openLayoutEditor() }
+                        else { NotificationCenter.default.post(name: .xnookEditPanelLayout, object: nil) }
+                    }
+                    .accessibilityIdentifier("settingsPanelLayoutEditor")
+                    if let message = layoutSaveError ?? panelLayoutStore.loadError {
+                        Text(message).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }

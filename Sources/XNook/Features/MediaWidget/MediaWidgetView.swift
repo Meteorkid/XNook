@@ -4,6 +4,8 @@ import SwiftUI
 struct MediaWidgetView: View {
     var mediaManager: MediaManager
     var isDetail = false
+    var onShowAll: (() -> Void)? = nil
+    var availableHeight: CGFloat? = nil
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
 
@@ -16,49 +18,86 @@ struct MediaWidgetView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            if isDetail { Spacer() }
-
-            // 专辑封面
-            Button(action: { mediaManager.openCurrentPlayer() }) {
-                artworkView
+        Group {
+            if isDetail {
+                VStack(spacing: 8) {
+                    Spacer()
+                    artworkButton
+                    trackInformation
+                    playbackControls
+                    Spacer()
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    if availableHeight != nil {
+                        HStack {
+                            Label(L10n.widgetMedia, systemImage: "music.note")
+                                .font(.system(size: 12, weight: .semibold))
+                            Spacer(minLength: 4)
+                            if let onShowAll {
+                                Button(action: onShowAll) { Image(systemName: "chevron.right").frame(width: 22, height: 22) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(L10n.localized(zh: "媒体详情", en: "Media details"))
+                            }
+                        }
+                    }
+                    HStack(spacing: 12) {
+                        artworkButton
+                        VStack(alignment: .leading, spacing: 12) {
+                            trackInformation
+                            playbackControls
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: 64)
+                }
             }
+        }
+    }
+
+    private var artworkButton: some View {
+        Button(action: { mediaManager.openCurrentPlayer() }) { artworkView }
             .buttonStyle(.plain)
             .disabled(mediaManager.currentSource == nil)
             .help(mediaManager.currentSource?.rawValue ?? L10n.noTrack)
+            .expandedPanelDebugFrame(id: "gridWidgetMediaArtwork")
+    }
 
-            // 歌曲信息
-            VStack(spacing: 2) {
-                Text(mediaManager.currentTitle.isEmpty ? L10n.noTrack : mediaManager.currentTitle)
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundColor(.primary)
-
-                Text(mediaManager.currentArtist.isEmpty ? L10n.unknownArtist : mediaManager.currentArtist)
-                    .font(.system(size: 9, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundColor(.secondary)
-            }
-
-            // 控制按钮 — 悬停时按封面强调色提亮
-            HStack(spacing: 16) {
-                controlButton(icon: "backward.fill", size: 11) { mediaManager.previousTrack() }
-
-                Button(action: {
-                    mediaManager.isPlaying ? mediaManager.pause() : mediaManager.play()
-                }) {
-                    Image(systemName: mediaManager.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(accent)
-
-                controlButton(icon: "forward.fill", size: 11) { mediaManager.nextTrack() }
-            }
-            .foregroundColor(.primary)
-
-            if isDetail { Spacer() }
+    private var trackInformation: some View {
+        VStack(alignment: isDetail ? .center : .leading, spacing: 3) {
+            Text(mediaManager.currentTitle.isEmpty ? L10n.noTrack : mediaManager.currentTitle)
+                .font(.system(size: isDetail ? 11 : 12, weight: .semibold))
+                .lineLimit(1)
+                .foregroundColor(.primary)
+            Text(mediaManager.currentArtist.isEmpty ? L10n.unknownArtist : mediaManager.currentArtist)
+                .font(.system(size: isDetail ? 9 : 10, weight: .medium))
+                .lineLimit(1)
+                .foregroundColor(.secondary)
         }
+        .expandedPanelDebugFrame(id: "gridWidgetMediaTrack")
+    }
+
+    private var playbackControls: some View {
+        HStack(spacing: isDetail ? 16 : 12) {
+            controlButton(icon: "backward.fill", size: 11) { mediaManager.previousTrack() }
+                .accessibilityLabel(L10n.gridMediaPrevious)
+            Button(action: {
+                mediaManager.isPlaying ? mediaManager.pause() : mediaManager.play()
+            }) {
+                Image(systemName: mediaManager.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 16))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(accent)
+            .accessibilityLabel(mediaManager.isPlaying ? L10n.gridMediaPause : L10n.gridMediaPlay)
+            controlButton(icon: "forward.fill", size: 11) { mediaManager.nextTrack() }
+                .accessibilityLabel(L10n.gridMediaNext)
+        }
+        .foregroundColor(.primary)
+        .expandedPanelDebugFrame(id: "gridWidgetMediaControls")
     }
 
     private func controlButton(
@@ -68,6 +107,8 @@ struct MediaWidgetView: View {
     ) -> some View {
         Button(action: action) {
             MotionIcon(systemName: icon, fontSize: size, reduceMotion: shouldReduceMotion)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

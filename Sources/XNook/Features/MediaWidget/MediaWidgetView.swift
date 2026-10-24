@@ -41,13 +41,11 @@ struct MediaWidgetView: View {
                             }
                         }
                     }
-                    HStack(spacing: 12) {
+                    GridWidgetMediaContentLayout() {
                         artworkButton
-                        VStack(alignment: .leading, spacing: 12) {
-                            trackInformation
-                            playbackControls
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        trackInformation
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        playbackControls
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: 64)
@@ -140,6 +138,45 @@ struct MediaWidgetView: View {
                         .foregroundColor(.pink)
                 )
         }
+    }
+}
+
+/// 极窄面板把播放控件移到下一行，保留封面与按钮尺寸以及同一组视图身份。
+private struct GridWidgetMediaContentLayout: Layout {
+    private let spacing: CGFloat = 12
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrangement(width: proposal.width, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let layout = arrangement(width: bounds.width, subviews: subviews)
+        for (index, frame) in layout.frames.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                                 anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    private func arrangement(width proposedWidth: CGFloat?, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        let artwork = subviews[0].sizeThatFits(.unspecified)
+        let controls = subviews[2].sizeThatFits(.unspecified)
+        let horizontalMinimum = artwork.width + spacing + controls.width
+        let width = proposedWidth.flatMap { $0.isFinite ? max(0, $0) : nil } ?? horizontalMinimum
+        let informationWidth = max(0, width - artwork.width - spacing)
+        let information = subviews[1].sizeThatFits(ProposedViewSize(width: informationWidth, height: nil))
+        let inline = width >= horizontalMinimum
+        let topHeight = max(artwork.height, information.height)
+        let height = inline ? max(artwork.height, information.height + spacing + controls.height)
+            : topHeight + spacing + controls.height
+        return (CGSize(width: width, height: height), [
+            CGRect(x: 0, y: inline ? (height - artwork.height) / 2 : 0,
+                   width: artwork.width, height: artwork.height),
+            CGRect(x: artwork.width + spacing, y: inline ? 0 : (topHeight - information.height) / 2,
+                   width: informationWidth, height: information.height),
+            CGRect(x: inline ? artwork.width + spacing : max(0, (width - controls.width) / 2),
+                   y: inline ? information.height + spacing : topHeight + spacing,
+                   width: controls.width, height: controls.height)
+        ])
     }
 }
 

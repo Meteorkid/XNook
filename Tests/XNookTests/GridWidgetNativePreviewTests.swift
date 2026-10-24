@@ -14,8 +14,10 @@ final class GridWidgetNativePreviewTests: XCTestCase {
         defer { fixture.cleanUp() }
         for language in ["zh", "en"] {
             try withLanguage(language) {
-                for width: CGFloat in [220, 320, 480, 720] {
+                for width: CGFloat in [136, 160, 220, 320, 480, 720] {
                     for kind in GridWidgetPreviewKind.allCases {
+                        // 160pt 旧面板扣除外边距后，媒体卡片只有 136pt 可用宽度。
+                        if width < 220 && kind != .media { continue }
                         let height: CGFloat = kind == .tray ? 136 : 184
                         let scheme: ColorScheme = language == "zh" ? .dark : .light
                         try withHost(width: width, height: height, scheme: scheme, content: { bodyHeight in
@@ -28,7 +30,11 @@ final class GridWidgetNativePreviewTests: XCTestCase {
                             case .media:
                                 let artwork = try XCTUnwrap(record.frames["gridWidgetMediaArtwork"])
                                 let controls = try XCTUnwrap(record.frames["gridWidgetMediaControls"])
-                                XCTAssertGreaterThan(controls.minX, artwork.maxX)
+                                if width < 220 {
+                                    XCTAssertGreaterThan(controls.minY, artwork.maxY)
+                                } else {
+                                    XCTAssertGreaterThan(controls.minX, artwork.maxX)
+                                }
                                 XCTAssertGreaterThanOrEqual(controls.width, 96)
                             case .calendar:
                                 XCTAssertEqual(record.frames.keys.filter { $0.hasPrefix("gridWidgetCalendarDay-") }.count,

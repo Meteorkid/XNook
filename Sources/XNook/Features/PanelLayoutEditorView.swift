@@ -148,7 +148,8 @@ struct PanelDashboardGrid<Content: View>: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .gesture(gesture(for: item, resizing: false))
+                            // 原生面板中先识别拖动，避免被按钮自身的点击手势吞掉。
+                            .highPriorityGesture(gesture(for: item, resizing: false))
                             .accessibilityLabel(L10n.localized(zh: "移动", en: "Move") + " " + item.id.localizedName)
                             .accessibilityIdentifier("panelLayoutMove-\(item.id.rawValue)")
                 .expandedPanelDebugFrame(id: "panelLayoutMove-\(item.id.rawValue)")

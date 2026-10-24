@@ -1,0 +1,69 @@
+{
+  "version": "1.3.20",
+  "preparedAtUTC": "2026-10-24T09:40:08.580253+00:00",
+  "implementationCommit": "dc5c78a4105294dd4240bbcbe9bed8c00dde16ff",
+  "previousRelease": "v1.3.19",
+  "releaseTag": "v1.3.20",
+  "build": {
+    "succeeded": true,
+    "command": "XNOOK_BUILD_DMG=1 bash build-app.sh",
+    "log": ".build/release-1.3.20-evidence/package-build.log"
+  },
+  "artifact": {
+    "name": "XNook-1.3.20.dmg",
+    "dmgSHA256": "95cdbf79131c3222a7f4b96fbbbc48379cd448fe599dc2f7846e83e8e5716b32",
+    "dmgSizeBytes": 4354951,
+    "executableSHA256": "7984654440e8e1ff2b358b9d8cf88edad2af8a03fec115613934e7b13c8219cd",
+    "version": "1.3.20",
+    "bundleIdentifier": "com.meteorkid.xnook",
+    "architecture": "arm64",
+    "minimumOS": "14.0",
+    "appSignatureVerified": true,
+    "dmgIntegrityVerified": true,
+    "dmgContainedAppSignatureVerified": true,
+    "appContentsMatchDMG": true,
+    "signing": "ad-hoc",
+    "notarized": false,
+    "bookmarkEntitlement": true,
+    "appleEventsEntitlement": true
+  },
+  "sourceInputs": {
+    "manifest": "source-hashes-1.3.20.json",
+    "manifestSHA256": "df7f20b8834f920d4d7492f677d9fae554fe179f4aa1c9c98101195f536eb651",
+    "count": 133
+  },
+  "tests": {
+    "total": 508,
+    "passed": 507,
+    "skipped": 1,
+    "failed": 0,
+    "command": "XNOOK_RENDER_UI=1 bash scripts/test-signed-bookmarks.sh",
+    "log": ".build/release-1.3.20-evidence/full-render-tests-final.log",
+    "signedBookmarkCrossProcessCheck": true,
+    "skippedCase": "opt-in live grid editor",
+    "narrowMediaRegressionPassed": true,
+    "preFixFullRunFailed": true,
+    "preFixFailureEvidence": ".build/release-1.3.20-evidence/full-render-tests.log",
+    "isolatedNativeMouseBeforeNarrowMediaFix": true,
+    "isolatedNativeMouseWidthPt": 800
+  },
+  "publicAssetVerification": {
+    "completed": false
+  },
+  "localInstallation": {
+    "completed": false
+  },
+  "notVerified": [
+    "formal App Settings/editor/cold restart acceptance pending local update",
+    "VoiceOver speech",
+    "external multiple displays",
+    "actual frame rate",
+    "600pt real pointer interaction",
+    "Intel and Windows runtime",
+    "two prior isolated live layout warnings remain unlocalized"
+  ],
+  "scope": {
+    "uncommittedParallelVisualWorkIncluded": false,
+    "windowsArtifactPublished": false
+  }
+}

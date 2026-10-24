@@ -244,8 +244,15 @@ enum ScriptingBridgeHelper {
         let reply = await executeHandler(seekScript(for: app), app,
             MediaSeekArguments(seconds: target, identity: context.identity))
         guard !Task.isCancelled else { return .failed(.unavailable) }
-        guard let reply, reply.descriptorType == typeBoolean else { return .failed(.commandFailed) }
-        guard reply.booleanValue else { return .failed(.trackChanged) }
+        guard let reply else { return .failed(.commandFailed) }
+        let accepted: Bool
+        switch reply.descriptorType {
+        case typeTrue: accepted = true
+        case typeFalse: accepted = false
+        case typeBoolean: accepted = reply.booleanValue
+        default: return .failed(.commandFailed)
+        }
+        guard accepted else { return .failed(.trackChanged) }
         let writeFinishedAt = now()
         for attempt in 0..<2 {
             if attempt > 0 {

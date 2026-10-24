@@ -46,6 +46,48 @@ final class ScriptingBridgeSeekTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testLocalAppleScriptBooleanRepliesUseRealDescriptorsThroughSeekEvent() async throws {
+        let context = try seekContext()
+        for accepted in [true, false] {
+            // 仅执行本地常量 handler，不含 tell，也不访问或启动播放器。
+            let script = try XCTUnwrap(NSAppleScript(source: """
+                on seekToPosition(targetSeconds, expectedID, expectedTitle, expectedArtist, expectedAlbum)
+                    return \(accepted ? "true" : "false")
+                end seekToPosition
+                """))
+            var error: NSDictionary?
+            let reply = script.executeAppleEvent(
+                ScriptingBridgeHelper.seekEvent(seconds: 75, identity: context.identity), error: &error)
+            XCTAssertNil(error, "本地 AppleScript handler 应正常返回")
+            XCTAssertEqual(reply.descriptorType, accepted ? typeTrue : typeFalse)
+            var writes = 0
+            var reads = 0
+            let result = await ScriptingBridgeHelper.seek(to: 75, context: context,
+                isRunning: { _ in true }, executeHandler: { _, _, arguments in
+                    writes += 1
+                    XCTAssertEqual(arguments.seconds, 75)
+                    XCTAssertEqual(arguments.identity, context.identity)
+                    return reply
+                }, execute: { _, _ in
+                    reads += 1
+                    return self.snapshot(position: 75)
+                }, sleep: { _ in XCTFail("真实布尔返回值不应触发多余重试") }, now: { self.date })
+            if accepted {
+                if case .confirmed(let confirmation) = result {
+                    XCTAssertEqual(confirmation.position, 75)
+                    XCTAssertEqual(confirmation.identity, context.identity)
+                } else {
+                    XCTFail("真实 AppleScript true 应进入位置回读确认")
+                }
+            } else {
+                assertFailure(result, .trackChanged)
+            }
+            XCTAssertEqual(writes, 1)
+            XCTAssertEqual(reads, accepted ? 1 : 0)
+        }
+    }
+
     func testSuccessfulScriptWithoutPositionChangeIsNotConfirmation() async throws {
         var writes = 0
         var reads = 0

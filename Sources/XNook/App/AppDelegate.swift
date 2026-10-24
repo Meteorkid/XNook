@@ -372,7 +372,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func makeSettingsContent() -> some View {
-        SettingsView()
+        SettingsView(
+            claudeReceiver: claudeCompletionReceiver,
+            globalPanelShortcut: globalPanelShortcut
+        )
             .environment(themeManager)
             .environment(updateManager)
     }

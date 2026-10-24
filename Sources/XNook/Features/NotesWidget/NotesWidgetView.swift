@@ -7,6 +7,7 @@ struct NotesWidgetView: View {
     var isDetail: Bool = false
     var onShowAll: (() -> Void)? = nil
     var onInteractionChanged: (Bool) -> Void = { _ in }
+    var availableHeight: CGFloat? = nil
     @Environment(\.colorScheme) private var colorScheme
     private var noteAccent: Color { colorScheme == .dark ? .yellow : Color(red: 0.55, green: 0.32, blue: 0.02) }
 
@@ -27,7 +28,8 @@ struct NotesWidgetView: View {
                 undoDeleteBar
             }
 
-            if notesManager.isEditing, let note = notesManager.currentNote {
+            if notesManager.isEditing, let note = notesManager.currentNote,
+               isDetail || availableHeight == nil || onShowAll == nil {
                 noteEditor(note: note)
             } else {
                 if isDetail {
@@ -49,11 +51,13 @@ struct NotesWidgetView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .expandedPanelDebugFrame(id: "expandedPanelNotesShowAll")
+                    .expandedPanelDebugFrame(id: "gridWidgetNotesShowAll")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: notesManager.currentNote?.id, initial: true) { _, id in
-            guard id != nil, !notesManager.isStorageReadOnly else { return }
+            guard id != nil, !notesManager.isStorageReadOnly,
+                  isDetail || availableHeight == nil || onShowAll == nil else { return }
             focusedField = notesManager.currentNote?.content.isEmpty == true ? .title : .content
         }
         .onChange(of: showsStorageIssue) { _, isPresented in
@@ -155,19 +159,29 @@ struct NotesWidgetView: View {
     }
 
     private var visibleNotes: [NotesManager.Note] {
-        isDetail ? notesManager.filteredNotes(matching: searchQuery) : Array(notesManager.notes.prefix(3))
+        let reserved: CGFloat = 54 + (notesManager.canUndoDelete ? 30 : 0)
+        let limit = GridWidgetContentLayout.rowLimit(height: availableHeight, reserved: reserved, rowHeight: 44, maximum: 3)
+        return isDetail ? notesManager.filteredNotes(matching: searchQuery) : Array(notesManager.notes.prefix(limit))
     }
 
     private var noteList: some View {
         LazyVStack(alignment: .leading, spacing: isDetail ? 6 : 4) {
             if visibleNotes.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Image(systemName: "note.text")
-                        .font(.system(size: 20))
-                    Text(notesManager.notes.isEmpty ? L10n.noNotes : L10n.notesNoMatches)
-                    Text(notesManager.notes.isEmpty ? L10n.notesEmptyHint : L10n.notesSearchHint)
-                        .font(.system(size: 11))
-                        .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if isDetail || availableHeight == nil {
+                        VStack(spacing: 8) {
+                            Image(systemName: "note.text")
+                                .font(.system(size: 20))
+                            Text(notesManager.notes.isEmpty ? L10n.noNotes : L10n.notesNoMatches)
+                            if isDetail {
+                                Text(notesManager.notes.isEmpty ? L10n.notesEmptyHint : L10n.notesSearchHint)
+                                    .font(.system(size: 12))
+                            }
+                        }
+                    } else {
+                        Label(L10n.noNotes, systemImage: "note.text")
+                            .font(.system(size: 11))
+                    }
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -218,6 +232,7 @@ struct NotesWidgetView: View {
         }
         .buttonStyle(.plain)
         .expandedPanelDebugFrame(id: "expandedPanelNote-\(note.id.uuidString)")
+        .expandedPanelDebugFrame(id: "gridWidgetNotesRow-\(note.id.uuidString)")
         .contextMenu {
             Button(L10n.notesDelete, role: .destructive) { notesManager.deleteNote(note) }
                 .disabled(notesManager.isStorageReadOnly)

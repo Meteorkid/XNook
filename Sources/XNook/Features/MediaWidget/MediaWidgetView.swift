@@ -5,6 +5,7 @@ struct MediaWidgetView: View {
     var mediaManager: MediaManager
     var isDetail = false
     var onShowAll: (() -> Void)?
+    var availableHeight: CGFloat? = nil
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
@@ -101,6 +102,7 @@ struct MediaWidgetView: View {
             }
         }
         .expandedPanelDebugFrame(id: "mediaWidgetArtwork")
+        .expandedPanelDebugFrame(id: "gridWidgetMediaArtwork")
     }
 
     private var trackInfo: some View {
@@ -130,10 +132,11 @@ struct MediaWidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .expandedPanelDebugFrame(id: "mediaWidgetInfo")
+        .expandedPanelDebugFrame(id: "gridWidgetMediaTrack")
     }
 
     private var playbackControls: some View {
-        HStack(spacing: 0) {
+        MediaPlaybackControlsLayout {
             controlButton(icon: "backward.fill", label: L10n.mediaPrevious) { mediaManager.previousTrack() }
                 .expandedPanelDebugFrame(id: "mediaWidgetPrevious")
 
@@ -155,6 +158,7 @@ struct MediaWidgetView: View {
         }
         .foregroundStyle(.primary)
         .expandedPanelDebugFrame(id: "mediaWidgetControls")
+        .expandedPanelDebugFrame(id: "gridWidgetMediaControls")
     }
 
     private func controlButton(
@@ -289,6 +293,23 @@ private struct MediaArtworkLayout: Layout {
                 y: horizontal ? bounds.midY - infoHeight / 2 : bounds.minY + artworkSize + spacing),
             proposal: infoProposal
         )
+    }
+}
+
+/// 极窄卡片将控制垂直排列，保持37pt点击面积且不撑出卡片。
+private struct MediaPlaybackControlsLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let horizontal = (proposal.width ?? 111) >= 111
+        return CGSize(width: horizontal ? 111 : 37, height: horizontal ? 37 : 111)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let horizontal = bounds.width >= 111
+        for index in subviews.indices {
+            subviews[index].place(at: CGPoint(x: bounds.minX + (horizontal ? CGFloat(index) * 37 : 0),
+                y: bounds.minY + (horizontal ? 0 : CGFloat(index) * 37)),
+                proposal: ProposedViewSize(width: 37, height: 37))
+        }
     }
 }
 

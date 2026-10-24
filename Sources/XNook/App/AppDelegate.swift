@@ -314,6 +314,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showIsland(preferMouseScreen: false, hidePeers: true)
     }
 
+    func openLayoutEditor() {
+        showIsland(preferMouseScreen: false, hidePeers: true)
+        NotificationCenter.default.post(name: .xnookEditPanelLayout, object: nil)
+    }
+
     @objc func openPreferences() {
         let window = settingsWindowForPresentation()
         if window.isMiniaturized { window.deminiaturize(nil) }

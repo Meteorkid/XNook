@@ -13,6 +13,11 @@ final class ExpandedPanelLayoutTests: XCTestCase {
         XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 320, deadZoneWidth: 200, deadZoneHeight: 32), 32)
         XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 160, deadZoneWidth: 200, deadZoneHeight: 32), 32)
         XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 160, deadZoneWidth: 0, deadZoneHeight: 0), 0)
+        for width: CGFloat in [380, 400] {
+            XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: width, deadZoneWidth: 200, deadZoneHeight: 32, toolbarWidth: 60), 0)
+            XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: width, deadZoneWidth: 200, deadZoneHeight: 32, toolbarWidth: 94), 32)
+        }
+        XCTAssertEqual(ExpandedPanelLayout.headerTopInset(width: 412, deadZoneWidth: 200, deadZoneHeight: 32, toolbarWidth: 94), 0)
     }
 
     func testNarrowPanelsUseOneColumnAndFourWidgetsUseTwoBalancedColumns() {

@@ -23,7 +23,13 @@ struct NotchContentView: View {
     @State private var showContent = false
     @State private var cachedExpandedShapeHeight: CGFloat = 220
     @State private var selectedWidget: WidgetType?
-    @State private var enabledWidgets = WidgetType.enabledWidgets
+    @State private var panelLayoutStore = PanelLayoutStore()
+    @State private var isEditingPanelLayout = false
+    @State private var editingViewportHeight: CGFloat?
+    @State private var layoutEditRequest = 0
+    private var enabledWidgets: [WidgetType] {
+        panelLayoutStore.configuration.visibleItems.compactMap { WidgetType(rawValue: $0.id.rawValue) }
+    }
     @State private var expandedMeasurement: ExpandedPanelMeasurement?
     @State private var expandedResizeScheduled = false
     @State private var availablePanelSize = CGSize(width: 1600, height: 900)
@@ -176,8 +182,11 @@ struct NotchContentView: View {
     }
 
     private var naturalExpandedHeight: CGFloat {
+        if isEditingPanelLayout, let editingViewportHeight {
+            return min(availablePanelSize.height, editingViewportHeight)
+        }
         let measurement = expandedMeasurement.flatMap {
-            $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets) ? $0.height : nil
+            $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelLayoutStore.configuration.signature) ? $0.height : nil
         }
         return ExpandedPanelLayout.height(
             measuredContentHeight: measurement,
@@ -381,6 +390,16 @@ struct NotchContentView: View {
             expandedMeasurement = nil
             scheduleExpandedWindowResize()
         }
+        .onChange(of: panelLayoutStore.configuration.signature) { _, signature in
+            if let selectedWidget, !enabledWidgets.contains(selectedWidget) { self.selectedWidget = nil }
+            if expandedMeasurement?.layoutSignature != signature { expandedMeasurement = nil }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookEditPanelLayout)) { _ in
+            guard !notesManager.isEditing || notesManager.closeEditor() else { return }
+            selectedWidget = nil
+            expand(to: .expanded)
+            layoutEditRequest += 1
+        }
         .onChange(of: selectedWidget) { _, newWidget in
             expandedMeasurement = nil
             if newWidget != .notes, notesManager.isEditing {
@@ -423,62 +442,7 @@ struct NotchContentView: View {
                 }
             }
         }
-        .onAppear {
-            AppDelegate.shared?.notesManagerForTermination = notesManager
-            enabledWidgets = WidgetType.enabledWidgets
-            // 缓存 NotchWindow 引用，后续直接使用
-            notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
-
-            // 如果窗口尚未就绪，递增延迟重试（0.3s → 0.6s → 1.0s）
-            if notchWindow == nil {
-                let delays: [TimeInterval] = [0.3, 0.6, 1.0]
-                for delay in delays {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
-                        guard notchWindow == nil else { return } // 已找到则跳过后续重试
-                        notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
-                        if let window = notchWindow {
-                            islandObscuredByNotch = window.isObscuredByPhysicalNotch()
-                            availablePanelSize = window.maximumExpandedContentSize()
-                            installKeyboardHandler(on: window)
-                            installHandoffHandler(on: window)
-                        }
-                    }
-                }
-            }
-
-            // 检查是否被物理 Notch 遮挡
-            if let window = notchWindow {
-                islandObscuredByNotch = window.isObscuredByPhysicalNotch()
-                isWindowVisible = window.isVisible && window.occlusionState.contains(.visible)
-                availablePanelSize = window.maximumExpandedContentSize()
-                installKeyboardHandler(on: window)
-                installHandoffHandler(on: window)
-                if isWindowVisible { restoreCancelledHandoffContentIfNeeded(window: window) }
-            }
-
-            // 初始化窗口大小为收起状态（含 Ticker 高度）
-            if notchWindow?.handoffState.pendingPreparation == nil {
-                resizeCollapsedWindow()
-            }
-
-            if isExpanded {
-                cachedExpandedShapeHeight = naturalExpandedHeight
-            }
-            startHoverPolling()
-            loadGifData()
-
-            // 应用退出时恢复光标（防止崩溃导致光标残留隐藏）
-            terminateObserver = NotificationCenter.default.addObserver(
-                forName: NSApplication.willTerminateNotification,
-                object: nil,
-                queue: .main
-            ) { _ in
-                MainActor.assumeIsolated {
-                    notesManager.flushPendingChanges()
-                    NSCursor.arrow.set()
-                }
-            }
-        }
+        .onAppear(perform: handleAppearance)
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { notification in
             guard let window = notification.object as? NotchWindow,
                   window === resolveNotchWindow() else { return }
@@ -508,12 +472,7 @@ struct NotchContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             if let notchWindow { AppDelegate.shared?.updateWindowAppearance(notchWindow) }
-            let widgets = WidgetType.enabledWidgets
-            if widgets != enabledWidgets {
-                enabledWidgets = widgets
-                if let selectedWidget, !widgets.contains(selectedWidget) { self.selectedWidget = nil }
-                expandedMeasurement = nil
-            }
+            panelLayoutStore.reload()
             // UserDefaults 变更时更新窗口大小
             if state == .collapsed {
                 resizeCollapsedWindow()
@@ -662,6 +621,7 @@ struct NotchContentView: View {
     }
 
     private func collapse(force: Bool = false) {
+        guard !isEditingPanelLayout || force else { return }
         guard Self.allowsCollapse(isTaskLinksPresented: isTaskLinksPresented, forced: force) else { return }
         expandPending = false
         expandedByHover = false
@@ -1050,7 +1010,7 @@ struct NotchContentView: View {
     }
 
     private func shouldKeepPanelOpen(_ window: NotchWindow) -> Bool {
-        notesManager.isEditing || isPanelInteractionActive || isTaskLinksPresented || window.isDragging
+        notesManager.isEditing || isEditingPanelLayout || isPanelInteractionActive || isTaskLinksPresented || window.isDragging
             || window.attachedSheet != nil
             || (window.childWindows?.contains(where: \.isVisible) ?? false)
             || (window.isKeyWindow && window.firstResponder is NSTextView)
@@ -1063,6 +1023,7 @@ struct NotchContentView: View {
                 characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags
             ) else { return false }
             guard !event.isARepeat else { return true }
+            guard !isEditingPanelLayout else { return false }
             switch action {
             case .overview:
                 selectedWidget = nil
@@ -1147,12 +1108,86 @@ struct NotchContentView: View {
             onSettings: openSettingsWindow,
             onClose: { collapse(force: true) },
             onMeasurement: { measurement in
-                guard measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets),
+                guard !measurement.isEditingLayout,
+                      measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelLayoutStore.configuration.signature),
                       measurement.differs(from: expandedMeasurement) else { return }
                 expandedMeasurement = measurement
             },
-            deadZone: panelDeadZone
+            deadZone: panelDeadZone,
+            layoutStore: panelLayoutStore,
+            editRequest: layoutEditRequest,
+            onEditRequestHandled: { layoutEditRequest = 0 },
+            onEditingChanged: { editing in
+                if editing && !isEditingPanelLayout {
+                    editingViewportHeight = min(availablePanelSize.height, max(460, naturalExpandedHeight))
+                }
+                isEditingPanelLayout = editing
+                if editing { cancelExpandedAutoHide() }
+                else {
+                    editingViewportHeight = nil
+                    // 结束编辑的测量可能先于这个回调到达，不能清掉已收到的正常布局高度。
+                    if expandedMeasurement?.layoutSignature != panelLayoutStore.configuration.signature { expandedMeasurement = nil }
+                    if isExpanded { scheduleExpandedAutoHide() }
+                }
+            }
         )
+    }
+
+    private func handleAppearance() {
+        AppDelegate.shared?.notesManagerForTermination = notesManager
+        panelLayoutStore.reload()
+        // 缓存 NotchWindow 引用，后续直接使用
+        notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
+
+        // 如果窗口尚未就绪，递增延迟重试（0.3s → 0.6s → 1.0s）
+        if notchWindow == nil {
+            let delays: [TimeInterval] = [0.3, 0.6, 1.0]
+            for delay in delays {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
+                    guard notchWindow == nil else { return } // 已找到则跳过后续重试
+                    notchWindow = NSApp.windows.first(where: { $0 is NotchWindow }) as? NotchWindow
+                    if let window = notchWindow {
+                        islandObscuredByNotch = window.isObscuredByPhysicalNotch()
+                        availablePanelSize = window.maximumExpandedContentSize()
+                        installKeyboardHandler(on: window)
+                        installHandoffHandler(on: window)
+                    }
+                }
+            }
+        }
+
+        // 检查是否被物理 Notch 遮挡
+        if let window = notchWindow {
+            islandObscuredByNotch = window.isObscuredByPhysicalNotch()
+            isWindowVisible = window.isVisible && window.occlusionState.contains(.visible)
+            availablePanelSize = window.maximumExpandedContentSize()
+            installKeyboardHandler(on: window)
+            installHandoffHandler(on: window)
+            if isWindowVisible { restoreCancelledHandoffContentIfNeeded(window: window) }
+        }
+
+        // 初始化窗口大小为收起状态（含 Ticker 高度）
+        if notchWindow?.handoffState.pendingPreparation == nil {
+            resizeCollapsedWindow()
+        }
+
+        if isExpanded {
+            cachedExpandedShapeHeight = naturalExpandedHeight
+        }
+        startHoverPolling()
+        loadGifData()
+
+        // 应用退出时恢复光标（防止崩溃导致光标残留隐藏）
+        terminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                notesManager.flushPendingChanges()
+                NSCursor.arrow.set()
+            }
+        }
     }
 
     // MARK: - NookFlow 协调逻辑

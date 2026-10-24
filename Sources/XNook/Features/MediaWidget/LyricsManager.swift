@@ -1,12 +1,20 @@
 import Foundation
 import Observation
 
+enum LyricsStatus: Equatable {
+    case idle, loading, synced, plainText, notFound, failed, disabled
+}
+
+enum LyricsRefreshNotice: Equatable {
+    case failedKeepingCurrent, noMatchKeepingCurrent
+}
+
 /// 歌词管理器 — 从 LRCLIB 获取同步歌词，解析 LRC 格式
 @Observable @MainActor
 final class LyricsManager {
     typealias RequestLoader = @MainActor (URLRequest) async throws -> (Data, URLResponse)
     typealias CacheReader = @MainActor (String, String, String) async -> LyricsCache.Entry?
-    typealias CacheWriter = @MainActor (String, String, String, LyricsCache.EntryType, String) -> Void
+    typealias CacheWriter = @MainActor (String, String, String, LyricsCache.EntryType, String, LyricsCache.MatchMetadata?) -> Void
 
     private let defaults: UserDefaults
     private let loadRequest: RequestLoader
@@ -19,7 +27,7 @@ final class LyricsManager {
         defaults: UserDefaults = .standard,
         loadRequest: @escaping RequestLoader = { try await URLSession.shared.data(for: $0) },
         readCache: @escaping CacheReader = { await LyricsCache.readAsync(title: $0, artist: $1, album: $2) },
-        writeCache: @escaping CacheWriter = { LyricsCache.write(title: $0, artist: $1, album: $2, type: $3, payload: $4) },
+        writeCache: @escaping CacheWriter = { LyricsCache.write(title: $0, artist: $1, album: $2, type: $3, payload: $4, match: $5) },
         sleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         now: @escaping () -> Date = Date.init
     ) {
@@ -29,17 +37,70 @@ final class LyricsManager {
         self.writeCache = writeCache
         self.sleep = sleep
         self.now = now
+        self.storedLyricsOffset = Self.normalizedOffset(defaults.double(forKey: "lyricsOffset"))
+        self.status = defaults.bool(forKey: "showLyrics") ? .idle : .disabled
     }
 
     private var retryAfter: Date?
+    private var manualRetryAfter: Date?
     private var consecutiveFailures = 0
 
     var shouldRetryCurrentTrack: Bool {
-        guard !isFetching, let retryAfter else { return false }
-        return now() >= retryAfter
+        guard !isFetching, !isCoolingDown else { return false }
+        return (durationRevalidationPending && !hasRevalidatedDuration) || (status == .failed && retryAfter != nil)
     }
     var currentLine: String = ""
     var isFetching = false
+    private(set) var status: LyricsStatus = .idle
+    private(set) var refreshNotice: LyricsRefreshNotice?
+
+    var canRetryCurrentTrack: Bool {
+        guard defaults.bool(forKey: "showLyrics"), !currentTitle.isEmpty,
+              !isFetching, [.notFound, .failed, .synced, .plainText].contains(status) else { return false }
+        return !isCoolingDown
+    }
+
+    /// 详情只需在冷却结束时刷新按钮，无需常驻轮询。
+    var retryAvailableAt: Date? {
+        [retryAfter, manualRetryAfter].compactMap { $0 }.max()
+    }
+
+    private var isCoolingDown: Bool { retryAvailableAt.map { now() < $0 } ?? false }
+
+    @discardableResult
+    func retryCurrentTrack() -> Bool {
+        guard canRetryCurrentTrack else { return false }
+        manualRetryAfter = now().addingTimeInterval(5)
+        fetchLyrics(title: currentTitle, artist: currentArtist, album: currentAlbum,
+                    duration: currentDuration, isManualRetry: true)
+        return true
+    }
+
+    private var storedLyricsOffset: TimeInterval
+
+    /// 正值延后歌词，负值提前；只影响歌词定位，不修改播放进度或缓存时间轴。
+    var lyricsOffset: TimeInterval {
+        get { storedLyricsOffset }
+        set {
+            let offset = Self.normalizedOffset(newValue)
+            let changed = storedLyricsOffset != offset
+            storedLyricsOffset = offset
+            if defaults.object(forKey: "lyricsOffset") == nil || defaults.double(forKey: "lyricsOffset") != offset {
+                defaults.set(offset, forKey: "lyricsOffset")
+            }
+            if changed { notifyStateChanged() }
+        }
+    }
+
+    /// 同步设置页通过 AppStorage 写入的值，让当前歌词立即重新定位。
+    func refreshPreferences() {
+        lyricsOffset = defaults.double(forKey: "lyricsOffset")
+    }
+
+    private static func normalizedOffset(_ value: TimeInterval) -> TimeInterval {
+        guard value.isFinite else { return 0 }
+        return (min(5, max(-5, value)) * 10).rounded() / 10
+    }
 
     /// 当前是否有同步歌词可供推进 — timer 启动条件之一
     var hasLyrics: Bool { !lyrics.isEmpty }
@@ -102,8 +163,12 @@ final class LyricsManager {
     private var currentTitle = ""
     private var currentArtist = ""
     private var currentAlbum = ""
-    /// 上次请求所用的 duration，用于判断"duration 迟到"是否值得重试一次
+    /// 最新可信时长供手动重试使用；另存查找时长，避免浮点抖动取消慢请求。
     private var currentDuration: TimeInterval?
+    private var lookupDuration: TimeInterval?
+    private var currentMatch: LyricsCache.MatchMetadata?
+    private var durationRevalidationPending = false
+    private var hasRevalidatedDuration = false
     /// 代际标识：每次切歌递增，防止旧异步请求覆盖新状态
     private var fetchGeneration: Int = 0
     /// 当前歌词请求任务，用于取消旧请求
@@ -155,6 +220,16 @@ final class LyricsManager {
         album: String,
         duration: TimeInterval? = nil
     ) {
+        fetchLyrics(title: title, artist: artist, album: album, duration: duration, isManualRetry: false)
+    }
+
+    private func fetchLyrics(
+        title: String,
+        artist: String,
+        album: String,
+        duration: TimeInterval?,
+        isManualRetry: Bool
+    ) {
         // 检查歌词功能是否开启（默认开启，可在设置中关闭）
         let lyricsEnabled = defaults.bool(forKey: "showLyrics")
         guard lyricsEnabled else {
@@ -162,43 +237,62 @@ final class LyricsManager {
             return
         }
 
-        let identityChanged = title != currentTitle
-            || artist != currentArtist
-            || album != currentAlbum
-        // duration 常常比曲目信息晚一拍到达，缺 duration 时 LRCLIB 的精确匹配用不上。
-        // 因此仅在"还没拿到任何歌词"时允许 duration 到位后重试一次；
-        // 已有歌词就不必为 duration 变化重复请求；忽略不足一秒的浮点波动，
-        // 否则慢请求可能在每次轮询时被取消，始终无法完成。
-        let durationChanged = (duration ?? 0) > 0
-            && ((currentDuration ?? 0) <= 0 || abs((duration ?? 0) - (currentDuration ?? 0)) >= 1)
-        let shouldRetryWithDuration = durationChanged
-            && lyrics.isEmpty
-            && plainLyricsText.isEmpty
-        guard !title.isEmpty, identityChanged || shouldRetryWithDuration || shouldRetryCurrentTrack else { return }
-        if identityChanged { consecutiveFailures = 0 }
+        guard !title.isEmpty else { return }
+        let identityChanged = title != currentTitle || artist != currentArtist || album != currentAlbum
+        let usableDuration = Self.validDuration(duration)
+        if identityChanged {
+            currentDuration = usableDuration
+            lookupDuration = nil
+            currentMatch = nil
+            hasRevalidatedDuration = false
+            durationRevalidationPending = false
+            consecutiveFailures = 0
+            manualRetryAfter = nil
+            retryAfter = nil
+        } else {
+            if let usableDuration { currentDuration = usableDuration }
+            if !hasRevalidatedDuration {
+                durationRevalidationPending = currentDuration.map {
+                    lookupDuration == nil || abs($0 - (lookupDuration ?? 0)) >= 1
+                } ?? false
+            }
+            discardIncompatibleCurrentLyrics()
+        }
+        let revalidatingDuration = durationRevalidationPending && !hasRevalidatedDuration && (isManualRetry || !isCoolingDown)
+        guard identityChanged || revalidatingDuration || shouldRetryCurrentTrack || isManualRetry else { return }
+        if revalidatingDuration {
+            hasRevalidatedDuration = true
+            durationRevalidationPending = false
+        }
+        let bypassCache = isManualRetry || revalidatingDuration
+        let requestedDuration = currentDuration
+        lookupDuration = requestedDuration
         retryAfter = nil
+        refreshNotice = nil
         currentTitle = title
         currentArtist = artist
         currentAlbum = album
-        currentDuration = duration
-        lyrics = []
-        plainLyricsText = ""
-        currentLine = ""
+        if identityChanged {
+            lyrics = []
+            plainLyricsText = ""
+            currentLine = ""
+        }
         isFetching = true
+        if lyrics.isEmpty && plainLyricsText.isEmpty { status = .loading }
         fetchGeneration += 1  // 递增代际标识
         let generation = fetchGeneration  // 捕获当前代际
 
         // 取消旧的歌词请求
         fetchTask?.cancel()
+        notifyStateChanged()
 
         fetchTask = Task {
             // 先尝试磁盘缓存：命中即出，避免网络往返。
             // 读取放到后台队列 —— JSON 解码与 mtime 刷新都是阻塞 syscall，
             // 在 MainActor 上执行会在磁盘繁忙时卡掉 UI 帧。
-            let cached = await self.readCache(title, artist, album)
+            let cached = bypassCache ? nil : await self.readCache(title, artist, album)
             guard generation == self.fetchGeneration else { return }
-            // apply 返回 false 表示缓存内容解析后为空（数据损坏/曾写入坏数据），
-            // 此时不能直接返回，否则该曲目会永远卡在坏缓存上，落回网络重新获取。
+            // 内容无效或候选元数据冲突时继续联网，不能永久卡在旧缓存上。
             if let cached, self.apply(entry: cached) {
                 self.isFetching = false
                 self.consecutiveFailures = 0
@@ -220,11 +314,16 @@ final class LyricsManager {
                         title: title,
                         artist: artist,
                         album: album,
-                        duration: duration,
+                        duration: requestedDuration,
                         loadRequest: self.loadRequest,
-                        onPlainLyrics: { plain in
-                            guard generation == self.fetchGeneration else { return }
-                            self.plainLyricsText = plain
+                        matchingDuration: { self.currentDuration },
+                        onPlainLyrics: { candidate in
+                            guard generation == self.fetchGeneration,
+                                  Self.isEligibleCandidate(candidate, title: title, artist: artist, duration: self.currentDuration),
+                                  self.lyrics.isEmpty else { return }
+                            self.plainLyricsText = candidate.plainLyrics ?? ""
+                            self.currentMatch = Self.matchMetadata(candidate)
+                            self.status = .plainText
                             self.notifyStateChanged()
                         }
                     )
@@ -245,20 +344,24 @@ final class LyricsManager {
             // 代际检查：如果切歌了，丢弃本次结果
             guard generation == self.fetchGeneration else { return }
 
-            if let decoded {
+            if let decoded, Self.isEligibleCandidate(decoded, title: title, artist: artist, duration: self.currentDuration) {
+                self.currentMatch = Self.matchMetadata(decoded)
                 let parsed = Self.parseLrc(decoded.syncedLyrics ?? "")
                 if let synced = decoded.syncedLyrics, !parsed.isEmpty {
                     self.lyrics = parsed
                     self.plainLyricsText = ""
-                    self.writeCache(title, artist, album, .synced, synced)
+                    self.status = .synced
+                    self.writeCache(title, artist, album, .synced, synced, self.currentMatch)
                 } else if let plain = decoded.plainLyrics, !plain.isEmpty {
                     // 无同步时间轴：保留纯歌词全文供 UI 兜底显示
                     self.lyrics = []
                     self.plainLyricsText = plain
-                    self.writeCache(title, artist, album, .plain, plain)
+                    self.status = .plainText
+                    self.writeCache(title, artist, album, .plain, plain, self.currentMatch)
                 } else {
                     self.lyrics = []
                     self.plainLyricsText = ""
+                    self.status = .notFound
                 }
                 self.consecutiveFailures = 0
                 self.isFetching = false
@@ -268,13 +371,21 @@ final class LyricsManager {
                 // 全部重试失败：不影响功能（ticker 回退到标题显示）。
                 // 但要留下痕迹，否则线上"没歌词"完全无从判断是网络问题还是确无歌词。
                 // 只打印错误本身，不打印曲目信息，避免把用户的听歌记录写进日志。
-                if let lastError {
+                if let lastError, Self.isRetryable(lastError) {
+                    self.consecutiveFailures += 1
+                    let delay = 15.0 * Double(1 << min(self.consecutiveFailures - 1, 3))
+                    self.retryAfter = self.now().addingTimeInterval(delay)
+                }
+                if self.hasLyrics || !self.plainLyricsText.isEmpty {
+                    if lastError == nil { self.consecutiveFailures = 0 }
+                    self.status = self.hasLyrics ? .synced : .plainText
+                    self.refreshNotice = lastError == nil ? .noMatchKeepingCurrent : .failedKeepingCurrent
+                } else if let lastError {
+                    self.status = .failed
                     print("[Lyrics] 歌词获取失败: \(lastError.localizedDescription)")
-                    if Self.isRetryable(lastError) {
-                        self.consecutiveFailures += 1
-                        let delay = 15.0 * Double(1 << min(self.consecutiveFailures - 1, 3))
-                        self.retryAfter = self.now().addingTimeInterval(delay)
-                    }
+                } else {
+                    self.status = .notFound
+                    self.consecutiveFailures = 0
                 }
                 self.isFetching = false
                 // 加载失败也要通知：让 timer 评估在没有歌词时是否应停止
@@ -307,19 +418,50 @@ final class LyricsManager {
     /// - Returns: 缓存内容是否可用。解析后为空说明缓存已损坏，调用方应落回网络。
     @discardableResult
     private func apply(entry: LyricsCache.Entry) -> Bool {
+        let candidate = LrcResponse(trackName: entry.match?.trackName, artistName: entry.match?.artistName,
+            duration: entry.match?.duration, syncedLyrics: entry.type == .synced ? entry.payload : nil,
+            plainLyrics: entry.type == .plain ? entry.payload : nil)
+        guard Self.isEligibleCandidate(candidate, title: currentTitle, artist: currentArtist, duration: currentDuration) else { return false }
         switch entry.type {
         case .synced:
             let parsed = Self.parseLrc(entry.payload)
             guard !parsed.isEmpty else { return false }
             lyrics = parsed
             plainLyricsText = ""
+            status = .synced
         case .plain:
             guard !entry.payload.isEmpty else { return false }
             lyrics = []
             plainLyricsText = entry.payload
+            status = .plainText
         }
+        currentMatch = entry.match
         currentLine = ""
         return true
+    }
+
+    private static func validDuration(_ duration: TimeInterval?) -> TimeInterval? {
+        guard let duration, duration.isFinite, duration > 0, duration < Double(Int.max) else { return nil }
+        return duration
+    }
+
+    private static func matchMetadata(_ candidate: LrcResponse) -> LyricsCache.MatchMetadata {
+        LyricsCache.MatchMetadata(trackName: candidate.trackName, artistName: candidate.artistName,
+                                 duration: validDuration(candidate.duration))
+    }
+
+    private func discardIncompatibleCurrentLyrics() {
+        guard let currentMatch else { return }
+        let candidate = LrcResponse(trackName: currentMatch.trackName, artistName: currentMatch.artistName,
+            duration: currentMatch.duration, syncedLyrics: nil, plainLyrics: nil)
+        guard !Self.hasCompatibleMetadata(candidate, title: currentTitle, artist: currentArtist, duration: currentDuration) else { return }
+        lyrics = []
+        plainLyricsText = ""
+        currentLine = ""
+        self.currentMatch = nil
+        refreshNotice = nil
+        status = isFetching ? .loading : .notFound
+        notifyStateChanged()
     }
 
     static func bestSearchResult(
@@ -330,8 +472,7 @@ final class LyricsManager {
     ) -> LrcResponse? {
         // 元数据或空白内容不能阻断后续候选与 q= 兜底搜索。
         let usableCandidates = candidates.filter {
-            !parseLrc($0.syncedLyrics ?? "").isEmpty
-                || $0.plainLyrics?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            isEligibleCandidate($0, title: title, artist: artist, duration: duration)
         }
         let normalizedTitle = normalize(title)
         let normalizedArtist = normalize(artist)
@@ -383,6 +524,36 @@ final class LyricsManager {
         return coverMatch.max(by: { searchScore($0, duration: duration) < searchScore($1, duration: duration) })
     }
 
+    /// 精确和搜索结果共用资格检查；缺字段不是冲突，也不能据此认定版本已校准。
+    static func isEligibleCandidate(_ candidate: LrcResponse, title: String, artist: String,
+                                    duration: TimeInterval?) -> Bool {
+        guard !parseLrc(candidate.syncedLyrics ?? "").isEmpty
+            || candidate.plainLyrics?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return false }
+        return hasCompatibleMetadata(candidate, title: title, artist: artist, duration: duration)
+    }
+
+    private static func hasCompatibleMetadata(_ candidate: LrcResponse, title: String, artist: String,
+                                              duration: TimeInterval?) -> Bool {
+        let candidateTitle = normalize(candidate.trackName ?? "")
+        let requestedTitle = normalize(title)
+        let candidateCore = coreTitle(candidate.trackName ?? "")
+        let requestedCore = coreTitle(title)
+        if !candidateTitle.isEmpty, !requestedTitle.isEmpty {
+            guard titleMatches(candidateTitle, requestedTitle)
+                || titleMatches(candidateCore, requestedCore) else { return false }
+        }
+        let candidateArtist = normalize(candidate.artistName ?? "")
+        let requestedArtist = normalize(artist)
+        if candidateArtist.isEmpty || requestedArtist.isEmpty
+            || candidateArtist.contains(requestedArtist) || requestedArtist.contains(candidateArtist) { return true }
+
+        // 歌手明确不同时，仅沿用现有翻唱回退；不对同歌手新增统一时长门槛。
+        guard !candidateCore.isEmpty, candidateCore == requestedCore,
+              let duration, let candidateDuration = candidate.duration,
+              duration.isFinite, duration > 0, candidateDuration.isFinite, candidateDuration > 0 else { return false }
+        return abs(candidateDuration - duration) <= 15
+    }
+
     /// 判断候选是否严格匹配（完整 normalize 字符串）
     private static func matches(
         _ candidate: LrcResponse,
@@ -432,11 +603,17 @@ final class LyricsManager {
         album: String,
         duration: TimeInterval?,
         loadRequest: RequestLoader,
-        onPlainLyrics: @MainActor (String) -> Void
+        matchingDuration: @escaping @MainActor () -> TimeInterval?,
+        onPlainLyrics: @MainActor (LrcResponse) -> Void
     ) async throws -> LrcResponse? {
         try Task.checkCancellation()
         var exactFallback: LrcResponse?
         var exactFailure: Error?
+        let currentExactFallback = { () -> LrcResponse? in
+            guard let result = exactFallback,
+                  isEligibleCandidate(result, title: title, artist: artist, duration: matchingDuration()) else { return nil }
+            return result
+        }
 
         if let duration,
            shouldUseExactLookup(album: album, duration: duration),
@@ -447,13 +624,15 @@ final class LyricsManager {
                 let status = try responseStatus(exactResponse)
                 if status == 200 {
                     let exactResult = try JSONDecoder().decode(LrcResponse.self, from: exactData)
-                    if !parseLrc(exactResult.syncedLyrics ?? "").isEmpty {
-                        return exactResult
-                    }
-                    if let plain = exactResult.plainLyrics,
-                       !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        exactFallback = exactResult
-                        onPlainLyrics(plain)
+                    if isEligibleCandidate(exactResult, title: title, artist: artist, duration: matchingDuration()) {
+                        if !parseLrc(exactResult.syncedLyrics ?? "").isEmpty {
+                            return exactResult
+                        }
+                        if let plain = exactResult.plainLyrics,
+                           !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            exactFallback = exactResult
+                            onPlainLyrics(exactResult)
+                        }
                     }
                 } else if status != 404 {
                     throw LookupError.httpStatus(status)
@@ -470,7 +649,7 @@ final class LyricsManager {
         }
 
         guard let searchURL = searchLyricsURL(title: title, artist: artist) else {
-            return exactFallback
+            return currentExactFallback()
         }
 
         do {
@@ -484,7 +663,7 @@ final class LyricsManager {
                 from: candidates,
                 title: title,
                 artist: artist,
-                duration: duration
+                duration: matchingDuration()
             )
 
             // 兜底：track_name+artist_name 搜索无匹配结果时，用 q= 全文搜索重试
@@ -500,7 +679,7 @@ final class LyricsManager {
                         from: fbCandidates,
                         title: title,
                         artist: artist,
-                        duration: duration
+                        duration: matchingDuration()
                     )
                 } else {
                     throw LookupError.httpStatus(fallbackStatus)
@@ -508,13 +687,13 @@ final class LyricsManager {
             }
 
             if let best, !parseLrc(best.syncedLyrics ?? "").isEmpty { return best }
-            if let result = exactFallback ?? best { return result }
+            if let result = currentExactFallback() ?? best { return result }
             if let exactFailure { throw exactFailure }
             return nil
         } catch {
             try Task.checkCancellation()
             // 搜索只是尝试补充同步时间轴，失败不能抹掉精确查询已取得的歌词。
-            if let exactFallback { return exactFallback }
+            if let fallback = currentExactFallback() { return fallback }
             throw error
         }
     }
@@ -538,7 +717,7 @@ final class LyricsManager {
 
     static func shouldUseExactLookup(album: String, duration: TimeInterval?) -> Bool {
         !album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (duration ?? 0) > 0
+            && validDuration(duration) != nil
     }
 
     private static func exactLyricsURL(
@@ -620,8 +799,10 @@ final class LyricsManager {
             return
         }
 
+        // 保留负时间，才能让零秒首句也正确延后显示。
+        let lyricTime = elapsedTime - lyricsOffset
         // 前奏阶段：早于第一句歌词时不显示
-        guard elapsedTime >= lyrics[0].time else {
+        guard lyricTime >= lyrics[0].time else {
             currentLine = ""
             return
         }
@@ -630,7 +811,7 @@ final class LyricsManager {
         var lo = 0, hi = lyrics.count - 1
         while lo < hi {
             let mid = (lo + hi + 1) / 2
-            if lyrics[mid].time <= elapsedTime {
+            if lyrics[mid].time <= lyricTime {
                 lo = mid
             } else {
                 hi = mid - 1
@@ -649,9 +830,16 @@ final class LyricsManager {
         currentArtist = ""
         currentAlbum = ""
         currentDuration = nil
+        lookupDuration = nil
+        currentMatch = nil
+        durationRevalidationPending = false
+        hasRevalidatedDuration = false
+        refreshNotice = nil
         retryAfter = nil
+        manualRetryAfter = nil
         consecutiveFailures = 0
         isFetching = false
+        status = defaults.bool(forKey: "showLyrics") ? .idle : .disabled
         fetchGeneration += 1  // 使旧的异步请求失效
         // reset 后 hasLyrics 变 false，通知 MediaManager 停止 timer（避免空转）
         notifyStateChanged()

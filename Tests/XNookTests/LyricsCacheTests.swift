@@ -78,6 +78,89 @@ final class LyricsCacheTests: XCTestCase {
         XCTAssertEqual(entry?.payload, "Plain lyrics here")
     }
 
+    func testWriteThenReadPreservesMatchMetadata() async throws {
+        let match = LyricsCache.MatchMetadata(
+            trackName: "Candidate Song",
+            artistName: "Candidate Artist",
+            duration: 183.5
+        )
+        LyricsCache.write(
+            title: "Song",
+            artist: "Tester",
+            album: "Album",
+            type: .synced,
+            payload: "[00:01.00]Silver lantern",
+            match: match
+        )
+
+        let cached = await LyricsCache.readAsync(title: "Song", artist: "Tester", album: "Album")
+        let entry = try XCTUnwrap(cached)
+        XCTAssertEqual(entry.match, match)
+        XCTAssertEqual(entry.payload, "[00:01.00]Silver lantern")
+    }
+
+    func testWriteThenReadPreservesMatchMetadataWithNilFields() async throws {
+        let match = LyricsCache.MatchMetadata(trackName: nil, artistName: nil, duration: nil)
+        LyricsCache.write(
+            title: "Song",
+            artist: "Tester",
+            type: .plain,
+            payload: "Quiet paper cloud",
+            match: match
+        )
+
+        let cached = await LyricsCache.readAsync(title: "Song", artist: "Tester")
+        let entry = try XCTUnwrap(cached)
+        XCTAssertEqual(entry.match, match)
+        XCTAssertNotNil(entry.match)
+    }
+
+    func testLegacyJSONWithoutMatchMetadataRemainsReadable() async throws {
+        LyricsCache.write(title: "Song", artist: "Tester", type: .plain, payload: "Initial lantern")
+        _ = await LyricsCache.readAsync(title: "Song", artist: "Tester")
+        let fileURL = try XCTUnwrap(onlyCachedFile())
+        let legacyJSON: [String: Any] = [
+            "type": "plain",
+            "payload": "Old paper moon",
+            "fetchedAt": Date().timeIntervalSinceReferenceDate,
+            "key": LyricsCache.cacheKey(title: "Song", artist: "Tester"),
+        ]
+        try JSONSerialization.data(withJSONObject: legacyJSON).write(to: fileURL)
+
+        let cached = await LyricsCache.readAsync(title: "Song", artist: "Tester")
+        let entry = try XCTUnwrap(cached)
+        XCTAssertEqual(entry.type, .plain)
+        XCTAssertEqual(entry.payload, "Old paper moon")
+        XCTAssertNil(entry.match)
+    }
+
+    func testMatchMetadataDoesNotChangeCacheKeyOrFile() async throws {
+        LyricsCache.write(
+            title: "Song", artist: "Tester", album: "Album", type: .plain, payload: "First lantern"
+        )
+        _ = await LyricsCache.readAsync(title: "Song", artist: "Tester", album: "Album")
+        let originalFile = try XCTUnwrap(onlyCachedFile())
+        let match = LyricsCache.MatchMetadata(
+            trackName: "Other Candidate", artistName: "Other Artist", duration: 300
+        )
+        LyricsCache.write(
+            title: "Song",
+            artist: "Tester",
+            album: "Album",
+            type: .plain,
+            payload: "Next lantern",
+            match: match
+        )
+
+        let cached = await LyricsCache.readAsync(title: "Song", artist: "Tester", album: "Album")
+        let entry = try XCTUnwrap(cached)
+        let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+        XCTAssertEqual(entry.key, LyricsCache.cacheKey(title: "Song", artist: "Tester", album: "Album"))
+        XCTAssertEqual(entry.payload, "Next lantern")
+        XCTAssertEqual(entry.match, match)
+        XCTAssertEqual(files, [originalFile])
+    }
+
     func testReadMissingReturnsNil() async {
         let entry = await LyricsCache.readAsync(title: "DefinitelyNotExists", artist: "Nobody")
         XCTAssertNil(entry)

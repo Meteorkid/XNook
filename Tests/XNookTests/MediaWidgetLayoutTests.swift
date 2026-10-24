@@ -36,6 +36,7 @@ final class MediaWidgetLayoutTests: XCTestCase {
                     try assertLayout(result)
                     XCTAssertEqual(try frame("mediaWidgetArtwork", in: result).width, 100, accuracy: 0.5)
                     XCTAssertNotNil(result.frames["mediaWidgetAlbum"], "只展示播放器已有的真实专辑字段")
+                    XCTAssertNil(result.frames["mediaWidgetLyricsDetails"], "歌词校正入口只放在详情，不增加概览高度")
                 }
             }
         }
@@ -126,8 +127,12 @@ final class MediaWidgetLayoutTests: XCTestCase {
                     let progress = try frame("mediaWidgetProgress", in: result)
                     let lyrics = try frame("mediaWidgetLyrics", in: result)
                     let controls = try frame("mediaWidgetControls", in: result)
+                    let lyricsDetails = try frame("mediaWidgetLyricsDetails", in: result)
+                    let trackGroup = try frame("mediaWidgetTrackGroup", in: result)
                     try assertContained(progress, in: root, identifier: "progress")
                     try assertContained(lyrics, in: root, identifier: "lyrics")
+                    try assertContained(lyricsDetails, in: trackGroup, identifier: "lyrics details")
+                    XCTAssertGreaterThanOrEqual(lyricsDetails.height, 28)
                     XCTAssertLessThan(progress.maxY, lyrics.minY)
                     XCTAssertLessThan(lyrics.maxY, controls.minY)
                 }
@@ -147,6 +152,7 @@ final class MediaWidgetLayoutTests: XCTestCase {
                 XCTAssertNil(result.frames["mediaWidgetAlbum"])
                 XCTAssertNil(result.frames["mediaWidgetProgress"])
                 XCTAssertNil(result.frames["mediaWidgetLyrics"])
+                XCTAssertNotNil(result.frames["mediaWidgetLyricsDetails"], "关闭歌词时仍可从详情查看状态与偏移")
             }
         }
     }
@@ -244,6 +250,12 @@ final class MediaWidgetLayoutTests: XCTestCase {
         try assertHeader(result)
         let summaryHeight = result.width >= 223 ? max(artwork.height, group.height) : artwork.height + 12 + group.height
         if result.isDetail {
+            let lyricsDetails = try frame("mediaWidgetLyricsDetails", in: result)
+            try assertContained(lyricsDetails, in: group, identifier: "lyrics details")
+            XCTAssertEqual(lyricsDetails.height, 28, accuracy: 1)
+            XCTAssertEqual(lyricsDetails.minY, info.maxY + 8, accuracy: 1,
+                "歌词入口应计入曲目信息分组，避免额外撑出全宽详情行")
+            XCTAssertEqual(group.maxY, lyricsDetails.maxY, accuracy: 1)
             var previousBottom = content.minY + summaryHeight
             for identifier in ["mediaWidgetProgress", "mediaWidgetLyrics", "mediaWidgetControls"] {
                 guard let section = result.frames[identifier] else { continue }

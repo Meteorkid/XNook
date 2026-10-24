@@ -56,6 +56,156 @@ final class LyricsRequestTests: XCTestCase {
         XCTAssertEqual(manager.currentLine, "Recovered line")
     }
 
+    func testExactSyncedLyricsWithConflictingTitleContinueToSearch() async {
+        let fixture = LyricsRequestFixture()
+        var requests = 0
+        let manager = fixture.manager { request in
+            requests += 1
+            return Self.response(request, json: request.url!.path.hasSuffix("/get")
+                ? #"{"trackName":"Other","artistName":"Artist","duration":180,"syncedLyrics":"[00:01.00]Wrong lantern"}"#
+                : "[\(Self.syncedJSON)]")
+        }
+
+        await fetch(manager)
+        manager.updateCurrentLine(elapsedTime: 2)
+
+        XCTAssertEqual(requests, 2)
+        XCTAssertEqual(manager.currentLine, "Recovered line")
+        XCTAssertEqual(fixture.writes.count, 1)
+        XCTAssertEqual(fixture.writes.last?.0, .synced)
+        XCTAssertEqual(fixture.writes.last?.1, "[00:01.00]Recovered line")
+    }
+
+    func testExactPlainLyricsWithConflictingTitleAreNeverDisplayedOrCached() async throws {
+        let fixture = LyricsRequestFixture()
+        let searching = expectation(description: "Search waits after rejected exact lyrics")
+        let completed = expectation(description: "Empty searches finish without lyrics")
+        var pending: CheckedContinuation<(Data, URLResponse), Error>?
+        var searchRequest: URLRequest?
+        var searchRequests = 0
+        let manager = fixture.manager { request in
+            if request.url!.path.hasSuffix("/get") {
+                return Self.response(request, json: #"{"trackName":"Other","artistName":"Artist","duration":180,"plainLyrics":"Wrong paper moon"}"#)
+            }
+            searchRequests += 1
+            guard searchRequests == 1 else { return Self.response(request, json: "[]") }
+            searchRequest = request
+            return try await withCheckedThrowingContinuation { continuation in
+                pending = continuation
+                searching.fulfill()
+            }
+        }
+        var displayedPlainLyrics: [String] = []
+        manager.onLyricsStateChanged = {
+            displayedPlainLyrics.append(manager.plainLyricPreview)
+            if !manager.isFetching { completed.fulfill() }
+        }
+        manager.fetchLyrics(title: "Song", artist: "Artist", album: "Album", duration: 180)
+        await fulfillment(of: [searching], timeout: 1)
+
+        XCTAssertTrue(manager.isFetching)
+        XCTAssertTrue(manager.plainLyricPreview.isEmpty)
+        XCTAssertTrue(fixture.writes.isEmpty)
+        try XCTUnwrap(pending).resume(returning: Self.response(try XCTUnwrap(searchRequest), json: "[]"))
+        await fulfillment(of: [completed], timeout: 1)
+        manager.onLyricsStateChanged = nil
+
+        XCTAssertEqual(searchRequests, 2)
+        XCTAssertEqual(manager.status, .notFound)
+        XCTAssertFalse(manager.hasLyrics)
+        XCTAssertTrue(manager.plainLyricPreview.isEmpty)
+        XCTAssertTrue(displayedPlainLyrics.allSatisfy(\.isEmpty))
+        XCTAssertTrue(fixture.writes.isEmpty)
+    }
+
+    func testExactSyncedLyricsWithConflictingArtistAndDurationContinueToSearch() async {
+        let fixture = LyricsRequestFixture()
+        var requests = 0
+        let manager = fixture.manager { request in
+            requests += 1
+            return Self.response(request, json: request.url!.path.hasSuffix("/get")
+                ? #"{"trackName":"Song","artistName":"Other","duration":300,"syncedLyrics":"[00:01.00]Distant paper moon"}"#
+                : "[\(Self.syncedJSON)]")
+        }
+
+        await fetch(manager)
+        manager.updateCurrentLine(elapsedTime: 2)
+
+        XCTAssertEqual(requests, 2)
+        XCTAssertEqual(manager.currentLine, "Recovered line")
+        XCTAssertEqual(fixture.writes.count, 1)
+        XCTAssertEqual(fixture.writes.last?.1, "[00:01.00]Recovered line")
+    }
+
+    func testExactSyncedLyricsWithoutTitleOrArtistRemainAccepted() async {
+        let fixture = LyricsRequestFixture()
+        var requests = 0
+        let manager = fixture.manager { request in
+            requests += 1
+            return Self.response(request, json: #"{"syncedLyrics":"[00:01.00]Quiet spark"}"#)
+        }
+
+        await fetch(manager)
+        manager.updateCurrentLine(elapsedTime: 2)
+
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(manager.status, .synced)
+        XCTAssertEqual(manager.currentLine, "Quiet spark")
+        XCTAssertEqual(fixture.writes.count, 1)
+        XCTAssertEqual(fixture.writes.last?.0, .synced)
+        XCTAssertEqual(fixture.writes.last?.1, "[00:01.00]Quiet spark")
+    }
+
+    func testConflictingExactAndStructuredResultsAllowQueryFallback() async {
+        let fixture = LyricsRequestFixture()
+        var requests = 0
+        var usedQueryFallback = false
+        let conflictingJSON = #"{"trackName":"Other","artistName":"Artist","duration":180,"syncedLyrics":"[00:01.00]Wrong silver cloud"}"#
+        let manager = fixture.manager { request in
+            requests += 1
+            if request.url!.path.hasSuffix("/get") {
+                return Self.response(request, json: conflictingJSON)
+            }
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            if query?.contains(where: { $0.name == "q" }) == true {
+                usedQueryFallback = true
+                return Self.response(request, json: "[\(Self.syncedJSON)]")
+            }
+            return Self.response(request, json: "[\(conflictingJSON)]")
+        }
+
+        await fetch(manager)
+        manager.updateCurrentLine(elapsedTime: 2)
+
+        XCTAssertEqual(requests, 3)
+        XCTAssertTrue(usedQueryFallback)
+        XCTAssertEqual(manager.currentLine, "Recovered line")
+        XCTAssertEqual(fixture.writes.count, 1)
+        XCTAssertEqual(fixture.writes.last?.0, .synced)
+        XCTAssertEqual(fixture.writes.last?.1, "[00:01.00]Recovered line")
+    }
+
+    func testAcceptedExactPlainLyricsSurviveConflictingSearchCandidates() async {
+        let fixture = LyricsRequestFixture()
+        var requests = 0
+        let manager = fixture.manager { request in
+            requests += 1
+            return Self.response(request, json: request.url!.path.hasSuffix("/get")
+                ? #"{"trackName":"Song","artistName":"Artist","duration":180,"plainLyrics":"Steady lantern"}"#
+                : #"[{"trackName":"Other","artistName":"Artist","duration":180,"syncedLyrics":"[00:01.00]Wrong silver cloud"}]"#)
+        }
+
+        await fetch(manager)
+
+        XCTAssertEqual(requests, 3)
+        XCTAssertEqual(manager.status, .plainText)
+        XCTAssertFalse(manager.hasLyrics)
+        XCTAssertEqual(manager.plainLyricPreview, "Steady lantern")
+        XCTAssertEqual(fixture.writes.count, 1)
+        XCTAssertEqual(fixture.writes.last?.0, .plain)
+        XCTAssertEqual(fixture.writes.last?.1, "Steady lantern")
+    }
+
     func testTransientFailureCanRecoverForUnchangedSongAfterCooldown() async {
         let fixture = LyricsRequestFixture()
         var online = false
@@ -281,7 +431,7 @@ private final class LyricsRequestFixture {
     func manager(loadRequest: @escaping LyricsManager.RequestLoader) -> LyricsManager {
         LyricsManager(defaults: defaults, loadRequest: loadRequest,
                       readCache: { _, _, _ in nil },
-                      writeCache: { [weak self] _, _, _, type, payload in self?.writes.append((type, payload)) },
+                      writeCache: { [weak self] _, _, _, type, payload, _ in self?.writes.append((type, payload)) },
                       sleep: { _ in }, now: { [weak self] in self?.date ?? .distantPast })
     }
 

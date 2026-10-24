@@ -11,11 +11,17 @@ enum IslandState: Equatable {
 struct NotchContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @State private var mediaManager = MediaManager()
-    @State private var calendarManager = CalendarManager()
-    @State private var notesManager = NotesManager()
-    @State private var trayManager = TrayManager()
-    @State private var focusSessionManager = FocusSessionManager()
+    @State private var mediaManager: MediaManager
+    @State private var calendarManager: CalendarManager
+    @State private var notesManager: NotesManager
+    @State private var trayManager: TrayManager
+    @State private var focusSessionManager: FocusSessionManager
+    @State private var focusResources: FocusResourceCoordinator
+    @State private var activityCoordinator: PanelActivityCoordinator
+    @State private var taskInbox: PendingTaskCoordinator?
+    @State private var deadlineMonitor: FocusDeadlineMonitor?
+    private let expandedContentOnly: Bool
+    private let enabledWidgetsOverride: [WidgetType]?
     /// 网页链接面板展开期间不得自动收起，否则编辑中的内容会丢失。
     @State private var isTaskLinksPresented = false
 
@@ -28,13 +34,19 @@ struct NotchContentView: View {
     @State private var editingViewportHeight: CGFloat?
     @State private var layoutEditRequest = 0
     private var enabledWidgets: [WidgetType] {
-        panelLayoutStore.configuration.visibleItems.compactMap { WidgetType(rawValue: $0.id.rawValue) }
+        enabledWidgetsOverride ?? panelLayoutStore.configuration.visibleItems.compactMap { WidgetType(rawValue: $0.id.rawValue) }
+    }
+    private var panelMeasurementSignature: String {
+        PanelGridGeometry.measurementSignature(for: panelLayoutStore.configuration,
+            fitsContent: panelLayoutStore.shouldFitDefaultContent(automaticallyFit: panelAutoSize,
+                isEditing: isEditingPanelLayout, isOverview: selectedWidget == nil))
     }
     @State private var expandedMeasurement: ExpandedPanelMeasurement?
     @State private var expandedResizeScheduled = false
     @State private var availablePanelSize = CGSize(width: 1600, height: 900)
     @State private var isPanelInteractionActive = false
     @State private var hoverTimer: Timer?
+    @State private var hoverPollGeneration = 0
     @State private var hoverPollingFast = false
     @State private var autoHideController = ExpandedAutoHideController()
     @State private var isWindowVisible = false
@@ -100,6 +112,7 @@ struct NotchContentView: View {
     private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
     @AppStorage("showTickerLine") private var showTickerLine = SettingsDefaults.bool(for: "showTickerLine", fallback: true)
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
+    @AppStorage("activityNotificationsEnabled") private var activityNotificationsEnabled = SettingsDefaults.bool(for: "activityNotificationsEnabled")
     @AppStorage("tickerSpeed") private var tickerSpeed = SettingsDefaults.double(for: "tickerSpeed")
     @AppStorage("showNookFlowHistory") private var showNookFlowHistory = SettingsDefaults.bool(for: "showNookFlowHistory", fallback: true)
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
@@ -109,8 +122,38 @@ struct NotchContentView: View {
 
     private var onSizeChange: ((CGFloat, CGFloat) -> Void)?
 
-    init(onSizeChange: ((CGFloat, CGFloat) -> Void)? = nil) {
+    @MainActor
+    init(onSizeChange: ((CGFloat, CGFloat) -> Void)? = nil,
+         mediaManager: MediaManager? = nil, calendarManager: CalendarManager? = nil,
+         notesManager: NotesManager? = nil, trayManager: TrayManager? = nil,
+         focusSessionManager: FocusSessionManager? = nil, enabledWidgets: [WidgetType]? = nil,
+         expandedContentOnly: Bool = false, activityCoordinator: PanelActivityCoordinator? = nil,
+         taskInbox: PendingTaskCoordinator? = nil) {
         self.onSizeChange = onSizeChange
+        self.expandedContentOnly = expandedContentOnly
+        enabledWidgetsOverride = enabledWidgets
+        let notes = notesManager ?? NotesManager()
+        let tray = trayManager ?? TrayManager()
+        let activities = activityCoordinator ?? PanelActivityCoordinator()
+        let focus = taskInbox?.focus ?? focusSessionManager ?? FocusSessionManager(onSessionEnded: { [weak activities] session in
+            activities?.enqueue(.completedSession(session))
+        })
+        _mediaManager = State(initialValue: mediaManager ?? MediaManager())
+        _calendarManager = State(initialValue: calendarManager ?? CalendarManager())
+        _notesManager = State(initialValue: notes)
+        _trayManager = State(initialValue: tray)
+        _focusSessionManager = State(initialValue: focus)
+        _focusResources = State(initialValue: FocusResourceCoordinator(manager: focus, notes: notes, tray: tray))
+        _activityCoordinator = State(initialValue: activities)
+        _taskInbox = State(initialValue: taskInbox ?? (expandedContentOnly ? nil : PendingTaskCoordinator(pending: PendingTaskManager(), focus: focus)))
+        _deadlineMonitor = State(initialValue: expandedContentOnly ? nil : FocusDeadlineMonitor(
+            currentSession: { [weak focus] in
+                guard let focus, focus.storageError == nil else { return nil }
+                return focus.activeSession
+            },
+            notificationsEnabled: { UserDefaults.standard.bool(forKey: "activityNotificationsEnabled") },
+            emit: { [weak activities] event in activities?.enqueue(event) ?? false }
+        ))
     }
 
     enum WidgetType: String, CaseIterable {
@@ -186,7 +229,7 @@ struct NotchContentView: View {
             return min(availablePanelSize.height, editingViewportHeight)
         }
         let measurement = expandedMeasurement.flatMap {
-            $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelLayoutStore.configuration.signature) ? $0.height : nil
+            $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature) ? $0.height : nil
         }
         return ExpandedPanelLayout.height(
             measuredContentHeight: measurement,
@@ -271,6 +314,13 @@ struct NotchContentView: View {
     // MARK: - 主视图
 
     var body: some View {
+        Group {
+            if expandedContentOnly { expandedContent }
+            else { islandBody }
+        }
+    }
+
+    private var islandLayout: some View {
         ZStack(alignment: .top) {
             // 背景形状：macOS 26 走玻璃材质，低版本回退纯色填充
             islandShape
@@ -320,15 +370,8 @@ struct NotchContentView: View {
                     containerWidth: shapeWidth,
                     containerHeight: collapsedShapeHeight,
                     onTap: { expand(to: .expanded) },
-                    onFileDrop: { providers in
-                        for provider in providers {
-                            provider.loadObject(ofClass: NSURL.self) { reading, _ in
-                                guard let nsurl = reading as? NSURL else { return }
-                                DispatchQueue.main.async { trayManager.addFile(from: nsurl as URL) }
-                            }
-                        }
-                        return true
-                    }
+                    onFileDrop: trayManager.handleDrop,
+                    activitySummary: activityCoordinator.current?.title
                 )
                 .gesture(
                     DragGesture(minimumDistance: 15, coordinateSpace: .global)
@@ -381,6 +424,10 @@ struct NotchContentView: View {
             }
         }
         .preferredColorScheme(colorScheme)
+    }
+
+    private var islandPresentationBody: some View {
+        islandLayout
         .onChange(of: expandedHeight) { _, newHeight in
             guard isExpanded else { return }
             cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, newHeight)
@@ -390,7 +437,7 @@ struct NotchContentView: View {
             expandedMeasurement = nil
             scheduleExpandedWindowResize()
         }
-        .onChange(of: panelLayoutStore.configuration.signature) { _, signature in
+        .onChange(of: panelMeasurementSignature) { _, signature in
             if let selectedWidget, !enabledWidgets.contains(selectedWidget) { self.selectedWidget = nil }
             if expandedMeasurement?.layoutSignature != signature { expandedMeasurement = nil }
         }
@@ -442,7 +489,50 @@ struct NotchContentView: View {
                 }
             }
         }
+    }
+
+    private var islandActivityBody: some View {
+        islandPresentationBody
+        .onChange(of: activityNotificationsEnabled) { _, enabled in
+            activityCoordinator.setEnabled(enabled)
+            deadlineMonitor?.refresh()
+        }
+        .onChange(of: focusSessionManager.activeSession) { _, _ in deadlineMonitor?.refresh() }
+        .onChange(of: focusSessionManager.storageError) { _, _ in deadlineMonitor?.refresh() }
+        .onChange(of: calendarManager.isRequestingAccess) { _, _ in activityCoordinator.refreshPresentation() }
+        .onChange(of: notchWindow?.activityState.isActive) { _, active in
+            if active == true { startHoverPolling() }
+            else { stopHoverPolling(); resetHoverEffects(); cancelExpandedAutoHide() }
+            activityCoordinator.refreshPresentation()
+        }
+        .onChange(of: notesManager.isEditing) { _, _ in activityCoordinator.refreshPresentation() }
+        .onChange(of: isPanelInteractionActive) { _, _ in activityCoordinator.refreshPresentation() }
+        .onChange(of: isTaskLinksPresented) { _, _ in activityCoordinator.refreshPresentation() }
+        .onChange(of: isEditingPanelLayout) { _, _ in activityCoordinator.refreshPresentation() }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)) { _ in
+            stopHoverPolling()
+            cancelExpandedAutoHide()
+            resetHoverEffects()
+            notchWindow?.activityState.setSystemAwake(false)
+            activityCoordinator.refreshPresentation()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            startHoverPolling()
+            deadlineMonitor?.resynchronize()
+            activityCoordinator.refreshPresentation()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            deadlineMonitor?.resynchronize()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name.NSSystemClockDidChange)) { _ in
+            deadlineMonitor?.resynchronize()
+        }
         .onAppear(perform: handleAppearance)
+        .task { await taskInbox?.prepare() }
+    }
+
+    private var islandBody: some View {
+        islandActivityBody
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { notification in
             guard let window = notification.object as? NotchWindow,
                   window === resolveNotchWindow() else { return }
@@ -452,6 +542,7 @@ struct NotchContentView: View {
             } else {
                 resetHoverEffects()
             }
+            activityCoordinator.refreshPresentation()
             scheduleExpandedAutoHide()
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookScrollDown)) { _ in
@@ -461,6 +552,10 @@ struct NotchContentView: View {
             guard !isExpanded, !collapseAnimating,
                   Date().timeIntervalSince(expandedAt) > cooldown else { return }
             expand(to: .expanded)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookRevealPanel)) { notification in
+            guard let window = resolveNotchWindow(), notification.object as AnyObject? === window else { return }
+            consumePanelReveal(on: window)
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookCollapse)) { _ in
             // 切换到另一个岛时必须收起，即使在编辑网页链接。
@@ -473,6 +568,8 @@ struct NotchContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             if let notchWindow { AppDelegate.shared?.updateWindowAppearance(notchWindow) }
             panelLayoutStore.reload()
+            activityCoordinator.refreshPresentation()
+            deadlineMonitor?.refresh()
             // UserDefaults 变更时更新窗口大小
             if state == .collapsed {
                 resizeCollapsedWindow()
@@ -489,7 +586,9 @@ struct NotchContentView: View {
             stopHoverPolling()
             cancelExpandedAutoHide()
             resetHoverEffects()
-            notesManager.flushPendingChanges()
+            if AppDelegate.shared?.discardsPendingNotesOnTermination != true { notesManager.flushPendingChanges() }
+            deadlineMonitor?.suspend()
+            activityCoordinator.configurePresentation { false }
             isWindowVisible = false
             notchWindow?.keyEquivalentHandler = nil
             notchWindow?.removeHandoffPreparationHandler()
@@ -799,6 +898,7 @@ struct NotchContentView: View {
     }
 
     private func stopHoverPolling() {
+        hoverPollGeneration &+= 1
         hoverTimer?.invalidate()
         hoverTimer = nil
     }
@@ -834,7 +934,12 @@ struct NotchContentView: View {
 
     /// 调度单次轮询，完成后根据鼠标距离决定下次频率
     private func scheduleHoverPoll(interval: TimeInterval) {
+        guard notchWindow?.activityState.isSystemAwake != false else { stopHoverPolling(); return }
+        hoverTimer?.invalidate()
+        hoverPollGeneration &+= 1
+        let generation = hoverPollGeneration
         hoverTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { _ in
+            guard generation == hoverPollGeneration else { return }
             pollMousePosition()
         }
     }
@@ -851,6 +956,10 @@ struct NotchContentView: View {
     }
 
     private func pollMousePosition() {
+        // 系统文件面板关闭没有统一的 SwiftUI 状态通知，复用现有轮询恢复等待中的提示。
+        if activityCoordinator.current != nil || activityCoordinator.pendingCount > 0 {
+            activityCoordinator.refreshPresentation()
+        }
         guard let window = resolveNotchWindow() else {
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
             return
@@ -1109,7 +1218,7 @@ struct NotchContentView: View {
             onClose: { collapse(force: true) },
             onMeasurement: { measurement in
                 guard !measurement.isEditingLayout,
-                      measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelLayoutStore.configuration.signature),
+                      measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature),
                       measurement.differs(from: expandedMeasurement) else { return }
                 expandedMeasurement = measurement
             },
@@ -1117,6 +1226,9 @@ struct NotchContentView: View {
             layoutStore: panelLayoutStore,
             editRequest: layoutEditRequest,
             onEditRequestHandled: { layoutEditRequest = 0 },
+            focusResources: focusResources,
+            pendingTasks: taskInbox,
+            activityCoordinator: activityCoordinator,
             onEditingChanged: { editing in
                 if editing && !isEditingPanelLayout {
                     editingViewportHeight = min(availablePanelSize.height, max(460, naturalExpandedHeight))
@@ -1126,11 +1238,13 @@ struct NotchContentView: View {
                 else {
                     editingViewportHeight = nil
                     // 结束编辑的测量可能先于这个回调到达，不能清掉已收到的正常布局高度。
-                    if expandedMeasurement?.layoutSignature != panelLayoutStore.configuration.signature { expandedMeasurement = nil }
+                    if expandedMeasurement?.layoutSignature != panelMeasurementSignature { expandedMeasurement = nil }
                     if isExpanded { scheduleExpandedAutoHide() }
                 }
             }
         )
+        .environment(\.mediaSeekInteractionEnabled,
+            expandedContentOnly || (isExpanded && showContent && isWindowVisible && !isEditingPanelLayout))
     }
 
     private func handleAppearance() {
@@ -1151,6 +1265,8 @@ struct NotchContentView: View {
                         availablePanelSize = window.maximumExpandedContentSize()
                         installKeyboardHandler(on: window)
                         installHandoffHandler(on: window)
+                        configureActivityPresentation()
+                        consumePanelReveal(on: window)
                     }
                 }
             }
@@ -1175,7 +1291,10 @@ struct NotchContentView: View {
             cachedExpandedShapeHeight = naturalExpandedHeight
         }
         startHoverPolling()
+        configureActivityPresentation()
+        deadlineMonitor?.refresh()
         loadGifData()
+        if let window = notchWindow { consumePanelReveal(on: window) }
 
         // 应用退出时恢复光标（防止崩溃导致光标残留隐藏）
         terminateObserver = NotificationCenter.default.addObserver(
@@ -1184,9 +1303,45 @@ struct NotchContentView: View {
             queue: .main
         ) { _ in
             MainActor.assumeIsolated {
-                notesManager.flushPendingChanges()
+                if AppDelegate.shared?.discardsPendingNotesOnTermination != true { notesManager.flushPendingChanges() }
+                deadlineMonitor?.shutdown()
                 NSCursor.arrow.set()
             }
+        }
+    }
+
+    private func configureActivityPresentation() {
+        activityCoordinator.setEnabled(activityNotificationsEnabled)
+        let window = resolveNotchWindow()
+        let notes = notesManager
+        let calendar = calendarManager
+        activityCoordinator.configurePresentation { [weak window, weak notes, weak calendar] in
+            guard let window, let notes, let calendar else { return false }
+            let defaults = UserDefaults.standard
+            return PanelActivityPresentationContext(
+                isWindowActive: window.activityState.isActive && window.occlusionState.contains(.visible) && !window.isHiddenByUser
+                    && !window.isHiddenByIslandSwitch && !window.isSwitchingApps,
+                isEditing: notes.isEditing || isPanelInteractionActive || isTaskLinksPresented || isEditingPanelLayout,
+                isRequestingPermission: calendar.isRequestingAccess,
+                hasModalWindow: NSApp.modalWindow != nil,
+                hasAttachedSheet: window.attachedSheet != nil,
+                hasVisibleChildWindow: window.childWindows?.contains(where: { $0.isVisible }) ?? false,
+                isQuietHours: CalendarReminderManager.isQuietHoursActive(
+                    enabled: defaults.bool(forKey: "quietHoursEnabled"),
+                    start: defaults.string(forKey: "quietHoursStart") ?? "22:00",
+                    end: defaults.string(forKey: "quietHoursEnd") ?? "07:00")
+            ).allowsPresentation
+        }
+    }
+
+    private func consumePanelReveal(on window: NotchWindow) {
+        guard window.consumePanelReveal() else { return }
+        expandedByHover = false
+        if isExpanded {
+            window.makeKey()
+            scheduleExpandedAutoHide()
+        } else {
+            expand(to: .expanded)
         }
     }
 
@@ -1310,6 +1465,7 @@ struct CollapsedPillView: View {
     let containerHeight: CGFloat
     let onTap: () -> Void
     var onFileDrop: (([NSItemProvider]) -> Bool)?
+    var activitySummary: String? = nil
 
     /// 内容区域的可用高度（减去上下 padding）
     private var contentHeight: CGFloat { containerHeight - 12 }
@@ -1334,6 +1490,10 @@ struct CollapsedPillView: View {
                 }
 
                 Spacer(minLength: 6)
+                if activitySummary != nil {
+                    Circle().fill(Color.accentColor).frame(width: 5, height: 5)
+                        .padding(.trailing, 6)
+                }
 
                 // 右侧：自定义 GIF 或默认音频波形
                 if let gifData {
@@ -1352,6 +1512,8 @@ struct CollapsedPillView: View {
             .padding(.vertical, 6)
         }
         .buttonStyle(.plain)
+        .help(activitySummary.map { L10n.activityExpandHint($0) } ?? "")
+        .accessibilityHint(activitySummary.map { L10n.activityExpandHint($0) } ?? "")
         .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
             // 收起状态拖入文件：展开面板 + 接受文件
             if !isExpanded { onTap() }

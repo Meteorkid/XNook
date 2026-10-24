@@ -37,7 +37,11 @@ struct ExpandedPanelView: View {
     var layoutStore: PanelLayoutStore? = nil
     var editRequest: Int = 0
     var onEditRequestHandled: () -> Void = {}
+    var focusResources: FocusResourceCoordinator? = nil
+    var pendingTasks: PendingTaskCoordinator? = nil
+    var activityCoordinator: PanelActivityCoordinator? = nil
     var onEditingChanged: (Bool) -> Void = { _ in }
+    @State private var showsFallbackInbox = false
     @State private var layoutEditor = PanelLayoutEditingSession()
     @State private var layoutSelection: PanelModuleID = .media
     @State private var interactingModules: Set<PanelModuleID> = []
@@ -50,8 +54,16 @@ struct ExpandedPanelView: View {
         layoutEditor.isEditing ? layoutEditor.draft : layoutStore?.configuration
             ?? .legacy(enabledWidgetIDs: Set(enabledWidgets.map(\.rawValue)), showHistory: showHistory)
     }
-    private var layoutSignature: String { layoutStore == nil ? "" : dashboardConfiguration.signature }
+    private var usesDefaultContentFit: Bool {
+        layoutStore?.shouldFitDefaultContent(automaticallyFit: panelAutoSize,
+            isEditing: layoutEditor.isEditing, isOverview: selectedWidget == nil) == true
+    }
+    private var layoutSignature: String {
+        layoutStore == nil ? "" : PanelGridGeometry.measurementSignature(
+            for: dashboardConfiguration, fitsContent: usesDefaultContentFit)
+    }
 
+    @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
     @AppStorage("islandBackgroundStyle") private var backgroundStyle = SettingsDefaults.string(for: "islandBackgroundStyle")
 
@@ -76,6 +88,12 @@ struct ExpandedPanelView: View {
                 .frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: IslandTokens.Spacing.compact) {
+                    if let activityCoordinator, let event = activityCoordinator.current {
+                        PanelActivitySummaryView(event: event,
+                            onDismiss: { activityCoordinator.dismissCurrent(event) },
+                            onAction: { activityCoordinator.performCurrentAction(event) })
+                            .accessibilityIdentifier("panelActivitySummary")
+                    }
                     if selectedWidget == nil, let layoutStore {
                         if let layoutEntryError { Text(layoutEntryError).font(.caption).foregroundStyle(.secondary) }
                         if layoutEditor.isEditing {
@@ -90,8 +108,20 @@ struct ExpandedPanelView: View {
                         PanelDashboardGrid(
                             configuration: Binding(get: { dashboardConfiguration }, set: { if layoutEditor.isEditing { layoutEditor.draft = $0 } }),
                             selection: $layoutSelection, width: max(1, panelWidth - ExpandedPanelLayout.outerPadding * 2),
-                            isEditing: layoutEditor.isEditing, summary: moduleSummary, moduleFill: moduleFill
+                            isEditing: layoutEditor.isEditing, summary: moduleSummary, moduleFill: moduleFill,
+                            fitsContent: usesDefaultContentFit
                         ) { item, size in moduleView(item.id, size: size) }
+                        if let pendingTasks, !layoutEditor.isEditing,
+                           !visibleModuleIDs.contains(.currentTask), !visibleModuleIDs.contains(.recentTasks) {
+                            Button { showsFallbackInbox = true } label: {
+                                Label("\(L10n.inboxShortTitle) \(pendingTasks.visibleTasks.count)", systemImage: "tray")
+                            }
+                            .accessibilityLabel(L10n.inboxTitle)
+                            .accessibilityIdentifier("panelTaskInboxFallback")
+                            .popover(isPresented: $showsFallbackInbox) {
+                                TaskInboxView(coordinator: pendingTasks, onClose: { showsFallbackInbox = false })
+                            }
+                        }
                     } else if selectedWidget == nil {
                         if enabledWidgets.isEmpty {
                             Text(L10n.panelNoWidgets)
@@ -140,6 +170,7 @@ struct ExpandedPanelView: View {
             reportInteractions()
         }
         .onChange(of: confirmsLayoutRecovery) { _, _ in reportInteractions() }
+        .onChange(of: showsFallbackInbox) { _, _ in reportInteractions() }
         .onChange(of: dashboardConfiguration.signature) { _, _ in
             reportInteractions()
             onLinksPresentationChanged(!linkingModules.intersection(visibleModuleIDs).isEmpty)
@@ -309,7 +340,8 @@ struct ExpandedPanelView: View {
             onOpenNote: onOpenNote,
             onOpenFile: onOpenFile,
             onInteractionChanged: { reportModuleInteraction(.currentTask, active: $0) },
-            onLinksPresentationChanged: { reportModuleLinks(.currentTask, active: $0) }
+            onLinksPresentationChanged: { reportModuleLinks(.currentTask, active: $0) },
+            resources: focusResources, pendingTasks: pendingTasks
         )
         .padding(ExpandedPanelLayout.cardPadding)
         .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
@@ -395,7 +427,8 @@ struct ExpandedPanelView: View {
         onLinksPresentationChanged(!linkingModules.intersection(visibleModuleIDs).isEmpty)
     }
     private func reportInteractions() {
-        onInteractionChanged(layoutEditor.isEditing || confirmsLayoutRecovery || !interactingModules.intersection(visibleModuleIDs).isEmpty)
+        onInteractionChanged(layoutEditor.isEditing || confirmsLayoutRecovery || showsFallbackInbox
+            || !interactingModules.intersection(visibleModuleIDs).isEmpty)
     }
 
     private func moduleSummary(_ id: PanelModuleID) -> String {
@@ -429,7 +462,8 @@ struct ExpandedPanelView: View {
                 onOpenNote: onOpenNote, onOpenFile: onOpenFile,
                 onInteractionChanged: { reportModuleInteraction(id, active: $0) },
                 onLinksPresentationChanged: { reportModuleLinks(id, active: $0) },
-                section: id == .currentTask ? .currentTask : .recentTasks, availableHeight: size.height)
+                section: id == .currentTask ? .currentTask : .recentTasks, availableHeight: size.height,
+                resources: focusResources, pendingTasks: pendingTasks)
         }
     }
 

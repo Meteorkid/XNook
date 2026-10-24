@@ -5,6 +5,54 @@ import XCTest
 
 @MainActor
 final class NotchWindowHandoffTests: XCTestCase {
+    func testPanelRevealSurvivesMissingHostAndIsConsumedOnlyOnce() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        fixture.window.requestPanelReveal()
+        XCTAssertTrue(fixture.window.hasPendingPanelReveal)
+        XCTAssertTrue(fixture.window.consumePanelReveal())
+        XCTAssertFalse(fixture.window.consumePanelReveal())
+        XCTAssertEqual(fixture.harness.orderFrontCount, 0, "展开请求只记意图，不绕过显示所有权")
+    }
+
+    func testHideAndInboundHandoffCancelStalePanelReveal() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        fixture.window.requestPanelReveal()
+        fixture.window.hideWindow()
+        XCTAssertFalse(fixture.window.consumePanelReveal())
+        fixture.window.showWindow()
+        fixture.window.requestPanelReveal()
+        fixture.window.hideWindowForIslandSwitch(animated: false)
+        XCTAssertFalse(fixture.window.consumePanelReveal())
+        fixture.window.showWindow()
+        fixture.window.requestPanelReveal()
+        _ = fixture.window.beginInboundHandoff { _ in }
+        XCTAssertFalse(fixture.window.hasPendingPanelReveal)
+        fixture.window.tearDown()
+        fixture.window.requestPanelReveal()
+        XCTAssertFalse(fixture.window.hasPendingPanelReveal)
+    }
+
+    func testTornDownWindowCannotCompleteOrRestartHandoff() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        var prepared = 0
+        let generation = fixture.window.beginInboundHandoff { _ in prepared += 1 }
+
+        fixture.window.tearDown()
+        fixture.window.tearDown()
+        XCTAssertFalse(fixture.window.completeInboundHandoffPreparation(generation: generation))
+        fixture.window.showWindow()
+        fixture.window.showAtMouseScreen()
+        _ = fixture.window.beginInboundHandoff { _ in prepared += 1 }
+
+        XCTAssertEqual(prepared, 0)
+        XCTAssertEqual(fixture.harness.orderFrontCount, 0)
+        XCTAssertNil(fixture.window.handoffState.pendingPreparation)
+        XCTAssertFalse(fixture.window.activityState.isActive)
+    }
+
     func testExplicitShowsPublishAfterPresentationWithoutAVisibilityEdge() throws {
         let fixture = try makeFixture()
         defer { fixture.close() }

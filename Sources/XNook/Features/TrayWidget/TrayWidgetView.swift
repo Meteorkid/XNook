@@ -111,7 +111,7 @@ struct TrayWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onDrop(of: [.fileURL], isTargeted: $trayManager.isDropTargeted) { providers in
-            handleDrop(providers: providers)
+            trayManager.handleDrop(providers)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -242,19 +242,6 @@ struct TrayWidgetView: View {
         Button(L10n.removeFile) { withAnimation(motion) { trayManager.removeFile(file) } }
     }
 
-    // MARK: - 处理拖放
-
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        var accepted = false
-        for provider in providers {
-            provider.loadObject(ofClass: NSURL.self) { reading, _ in
-                guard let nsurl = reading as? NSURL else { return }
-                DispatchQueue.main.async { trayManager.addFile(from: nsurl as URL) }
-            }
-            accepted = true
-        }
-        return accepted
-    }
 }
 
 #if !XNOOK_DISABLE_PREVIEWS

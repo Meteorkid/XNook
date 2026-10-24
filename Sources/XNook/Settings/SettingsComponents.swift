@@ -50,6 +50,7 @@ struct AppStorageSlider: View {
     @AppStorage private var value: Double
     @State private var inputText: String = ""
     @State private var isEditing = false
+    @State private var invalidInput = false
 
     private let range: ClosedRange<Double>
     private let step: Double?
@@ -95,9 +96,16 @@ struct AppStorageSlider: View {
                     .multilineTextAlignment(.trailing)
                     .onSubmit { commitInput() }
                     .onExitCommand { commitInput() }
+                if invalidInput {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                        .help(L10n.settingsNumberInvalid)
+                        .accessibilityLabel(L10n.settingsNumberInvalid)
+                }
             } else {
                 Button(action: {
                     inputText = String(format: format, value)
+                    invalidInput = false
                     isEditing = true
                 }) {
                     Text(String(format: format, value))
@@ -111,11 +119,27 @@ struct AppStorageSlider: View {
     }
 
     private func commitInput() {
-        isEditing = false
-        let cleaned = inputText.filter { "0123456789.".contains($0) }
-        if let v = Double(cleaned) {
-            value = min(max(v, range.lowerBound), range.upperBound)
+        guard let parsed = Self.parsedInput(inputText, range: range, format: format) else {
+            invalidInput = true
+            return
         }
+        value = parsed
+        invalidInput = false
+        isEditing = false
+    }
+
+    static func parsedInput(_ text: String, range: ClosedRange<Double>, format: String) -> Double? {
+        var number = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 只移除控件自己的单位；不能把拼错的字符串过滤成另一个数值。
+        if let conversion = format.lastIndex(of: "f") {
+            let suffix = String(format[format.index(after: conversion)...])
+            if !suffix.isEmpty, number.hasSuffix(suffix) {
+                number.removeLast(suffix.count)
+                number = number.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        guard let value = Double(number), value.isFinite else { return nil }
+        return min(max(value, range.lowerBound), range.upperBound)
     }
 }
 
@@ -319,9 +343,9 @@ struct GifPickerButton: View {
                 let selectedName = UserDefaults.standard.string(forKey: "selectedGifName")
                 let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
                 let bookmarkData = UserDefaults.standard.data(forKey: "customGifBookmark")
-                _ = try await Task.detached(priority: .utility) {
+                _ = try await GifResource.performFileIO {
                     try GifResource.selectedData(selectedName: selectedName, appSupport: appSupport, bookmarkData: bookmarkData)
-                }.value
+                }
             } catch {
                 failureMessage = L10n.gifLoadFailed(selectedGif.isEmpty ? "GIF" : selectedGif, reason: error.localizedDescription)
             }
@@ -335,7 +359,7 @@ struct GifPickerButton: View {
         defer { isLoading = false }
         do {
             let url = dir.appendingPathComponent(name)
-            _ = try await Task.detached(priority: .userInitiated) { try GifResource(contentsOf: url).data }.value
+            _ = try await GifResource.performFileIO { try GifResource(contentsOf: url).data }
             selectedGif = name
             UserDefaults.standard.set(name, forKey: "selectedGifName")
             failureMessage = nil
@@ -350,21 +374,11 @@ struct GifPickerButton: View {
         guard let dir = gifsDirectory else { return }
 
         do {
-            let data = try await Task.detached(priority: .userInitiated) {
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                return try GifResource(contentsOf: url).data
-            }.value
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // 验证后的同一份字节才允许复制及自动选中。
-            let baseName = url.deletingPathExtension().lastPathComponent
-            var fileName = "\(baseName).gif"
-            var counter = 1
-            while gifList.contains(fileName) || FileManager.default.fileExists(atPath: dir.appendingPathComponent(fileName).path) {
-                fileName = "\(baseName)_\(counter).gif"
-                counter += 1
+            let existingNames = Set(gifList)
+            let fileName = try await GifResource.performFileIO {
+                try GifResource.importFile(from: url, to: dir, existingNames: existingNames)
             }
-            try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+            // 已写入的文件即使遇到任务取消也必须登记，避免产生无列表项的文件。
             gifList.append(fileName)
             UserDefaults.standard.set(gifList, forKey: "customGifList")
             if selectedGif.isEmpty {
@@ -380,18 +394,23 @@ struct GifPickerButton: View {
     private func deleteGif(name: String) {
         guard let dir = gifsDirectory else { return }
         let gifURL = dir.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: gifURL)
+        do {
+            try GifResource.removeStoredFile(at: gifURL) {
+                gifList.removeAll { $0 == name }
+                UserDefaults.standard.set(gifList, forKey: "customGifList")
+                failureMessage = nil
 
-        gifList.removeAll { $0 == name }
-        UserDefaults.standard.set(gifList, forKey: "customGifList")
-
-        if selectedGif == name {
-            selectedGif = ""
-            UserDefaults.standard.set(selectedGif, forKey: "selectedGifName")
-            NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
-            if let nextName = gifList.first {
-                Task { await selectGif(name: nextName) }
+                if selectedGif == name {
+                    selectedGif = ""
+                    UserDefaults.standard.set(selectedGif, forKey: "selectedGifName")
+                    NotificationCenter.default.post(name: .init("GifDidChange"), object: nil)
+                    if let nextName = gifList.first {
+                        Task { await selectGif(name: nextName) }
+                    }
+                }
             }
+        } catch {
+            failureMessage = L10n.gifDeleteFailed(name, reason: error.localizedDescription)
         }
     }
 }
@@ -456,9 +475,9 @@ struct GifThumbnailView: View {
         guard let dir = gifsDirectory else { return }
         let gifURL = dir.appendingPathComponent(name)
         do {
-            let image = try await Task.detached(priority: .utility) {
+            let image = try await GifResource.performFileIO {
                 try GifResource(contentsOf: gifURL).thumbnail()
-            }.value
+            }
             guard !Task.isCancelled else { return }
             thumbnail = NSImage(cgImage: image, size: NSSize(width: 50, height: 50))
             loadError = nil

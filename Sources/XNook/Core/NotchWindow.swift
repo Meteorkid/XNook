@@ -62,7 +62,9 @@ final class NotchWindow: NSPanel {
 
     var customX: CGFloat?
     var keyEquivalentHandler: ((NSEvent) -> Bool)?
-    private(set) var isDragging = false
+    private(set) var isDragging = false {
+        didSet { if oldValue != isDragging { synchronizeActivity() } }
+    }
     private var dragTracking = false
     private var dragStartWindowX: CGFloat = 0
     private var dragStartMouseX: CGFloat = 0
@@ -83,7 +85,12 @@ final class NotchWindow: NSPanel {
     private var handoffPrepared: (@MainActor (UInt64) -> Void)?
     private var cancelHandoffFrames: [() -> Void] = []
     private var visibilityGeneration: UInt64 = 0
-    private var mouseTrackingTimer: Timer?
+    let activityState = PanelActivityState()
+    private var isTornDown = false
+    private var isClosed = false
+    private lazy var mouseTracking = PanelMouseTrackingController { [weak self] in
+        self?.followMouseIfScreenChanged()
+    }
     private var lastActiveScreenID: CGDirectDisplayID?
     private var cachedBestScreen: NSScreen?
 
@@ -106,6 +113,7 @@ final class NotchWindow: NSPanel {
     /// 用户主动隐藏后，不应因桌面或全屏状态变化重新出现
     private(set) var isHiddenByUser = false
     private(set) var lastExplicitShowTime: TimeInterval = 0
+    private(set) var hasPendingPanelReveal = false
 
     // MARK: - Init
 
@@ -191,22 +199,74 @@ final class NotchWindow: NSPanel {
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil
         )
 
-        mouseTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.followMouseIfScreenChanged()
-            }
-        }
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(systemWillSleep),
+            name: NSWorkspace.willSleepNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification, object: nil)
     }
 
     deinit {
-        mouseTrackingTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     // MARK: - Window Visibility
 
+    override func orderFrontRegardless() {
+        guard !isTornDown else { return }
+        super.orderFrontRegardless()
+        synchronizeActivity()
+    }
+
+    override func orderFront(_ sender: Any?) {
+        guard !isTornDown else { return }
+        super.orderFront(sender)
+        synchronizeActivity()
+    }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        synchronizeActivity()
+    }
+
+    override func close() {
+        hasPendingPanelReveal = false
+        isClosed = true
+        visibilityGeneration &+= 1
+        cancelHandoffPresentation()
+        super.close()
+        synchronizeActivity()
+    }
+
+    func tearDown() {
+        guard !isTornDown else { return }
+        isTornDown = true
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        close()
+        mouseTracking.setActive(false)
+    }
+
+    private func synchronizeActivity() {
+        activityState.setWindowVisible(isVisible && !isClosed && !isTornDown)
+        mouseTracking.setActive(activityState.isActive && !isDragging)
+    }
+
+    @objc private func systemWillSleep(_ note: Notification) {
+        visibilityGeneration &+= 1
+        activityState.setSystemAwake(false)
+        mouseTracking.setActive(false)
+    }
+
+    @objc private func systemDidWake(_ note: Notification) {
+        guard !isTornDown else { return }
+        activityState.setSystemAwake(true)
+        synchronizeActivity()
+    }
+
     func showWindow() {
+        guard !isTornDown else { return }
+        isClosed = false
         cancelHandoffPresentation()
         lastExplicitShowTime = Date().timeIntervalSince1970
         onExplicitShow()
@@ -217,12 +277,14 @@ final class NotchWindow: NSPanel {
         orderFrontForPresentation()
     }
     func hideWindow() {
+        hasPendingPanelReveal = false
         cancelHandoffPresentation()
         visibilityGeneration &+= 1
         isHiddenByUser = true
         handoffEnvironment.orderOut(self)
     }
     func hideWindowForIslandSwitch(animated: Bool = true) {
+        hasPendingPanelReveal = false
         guard !isHiddenByIslandSwitch || handoffState.isFadingOut else { return }
         guard let generation = handoffState.beginFadeOut() else { return }
         cancelScheduledHandoffFrames()
@@ -251,6 +313,19 @@ final class NotchWindow: NSPanel {
     }
     func toggleVisibility() { isVisible ? hideWindow() : showWindow() }
 
+    /// 隐藏窗口可能尚未建立 SwiftUI 订阅，保留快捷唤出意图直到宿主准备好。
+    func requestPanelReveal() {
+        guard !isTornDown else { return }
+        hasPendingPanelReveal = true
+        NotificationCenter.default.post(name: .xnookRevealPanel, object: self)
+    }
+
+    func consumePanelReveal() -> Bool {
+        guard hasPendingPanelReveal, !isTornDown, !isHiddenByUser, !isHiddenByIslandSwitch else { return false }
+        hasPendingPanelReveal = false
+        return true
+    }
+
     /// 在鼠标所在屏幕显示窗口（URL Scheme 唤醒时调用）
     func showAtMouseScreen() {
         cancelHandoffPresentation()
@@ -258,6 +333,8 @@ final class NotchWindow: NSPanel {
     }
 
     private func presentAtMouseScreen(reposition: Bool = true) {
+        guard !isTornDown else { return }
+        isClosed = false
         alphaValue = 1
         lastExplicitShowTime = Date().timeIntervalSince1970
         onExplicitShow()
@@ -283,6 +360,8 @@ final class NotchWindow: NSPanel {
 
     @discardableResult
     func beginInboundHandoff(onPrepared: @escaping @MainActor (UInt64) -> Void) -> UInt64 {
+        guard !isTornDown else { return handoffState.generation }
+        hasPendingPanelReveal = false
         cancelScheduledHandoffFrames()
         let generation = handoffState.beginInbound()
         handoffPrepared = onPrepared
@@ -367,6 +446,7 @@ final class NotchWindow: NSPanel {
     // MARK: - Screen Tracking
 
     private func followMouseIfScreenChanged() {
+        guard activityState.isActive, !isDragging else { return }
         let mouseLocation = NSEvent.mouseLocation
         guard let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }),
               let screenID = mouseScreen.deviceDescription[NSDeviceDescriptionKey(rawValue: "NSScreenNumber")] as? CGDirectDisplayID
@@ -381,17 +461,11 @@ final class NotchWindow: NSPanel {
     }
 
     private func pauseMouseTracking() {
-        mouseTrackingTimer?.invalidate()
-        mouseTrackingTimer = nil
+        mouseTracking.setActive(false)
     }
 
     private func resumeMouseTracking() {
-        guard mouseTrackingTimer == nil else { return }
-        mouseTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.followMouseIfScreenChanged()
-            }
-        }
+        mouseTracking.setActive(activityState.isActive && !isDragging)
     }
 
     private func repositionOnScreen(_ screen: NSScreen) {
@@ -435,7 +509,8 @@ final class NotchWindow: NSPanel {
         visibilityGeneration &+= 1
         let generation = visibilityGeneration
         // 切换应用期间不自动显示窗口
-        guard !isSwitchingApps, !isHiddenByIslandSwitch else { return nil }
+        guard !isTornDown, !isClosed, activityState.isSystemAwake,
+              !isSwitchingApps, !isHiddenByIslandSwitch else { return nil }
 
         let hideInFullscreen = defaults.bool(forKey: "hideInFullscreen")
         guard hideInFullscreen else {

@@ -228,6 +228,175 @@ final class GifResourceTests: XCTestCase {
         return result
     }
 
+    func testFileReaderRejectsFIFOWithoutWaitingForAWriter() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fifo = directory.appendingPathComponent("pipe.gif")
+        XCTAssertEqual(mkfifo(fifo.path, S_IRUSR | S_IWUSR), 0)
+        let finished = expectation(description: "FIFO is rejected immediately")
+        DispatchQueue.global().async {
+            do {
+                _ = try GifResource(contentsOf: fifo)
+                XCTFail("FIFO must not be accepted as a GIF file")
+            } catch {
+                XCTAssertEqual(error as? GifResource.ValidationError, .fileType)
+            }
+            finished.fulfill()
+        }
+        let result = XCTWaiter.wait(for: [finished], timeout: 0.5)
+        if result != .completed {
+            // 回归时解开阻塞的 open，避免测试自身遗留一个永久等待的线程。
+            let writer = open(fifo.path, O_RDWR | O_NONBLOCK)
+            if writer >= 0 { close(writer) }
+        }
+        XCTAssertEqual(result, .completed)
+    }
+
+    func testFileReaderAcceptsRegularFileAndItsSymbolicLink() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("regular.gif")
+        let symlink = directory.appendingPathComponent("link.gif")
+        let data = makeBudgetGIF()
+        try data.write(to: file)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: file)
+        XCTAssertEqual(try GifResource(contentsOf: file).data, data)
+        XCTAssertEqual(try GifResource(contentsOf: symlink).data, data)
+    }
+
+    func testFileReaderRejectsDirectoryAndDeviceBeforeReading() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for url in [directory, URL(fileURLWithPath: "/dev/null")] {
+            assertRejection(.fileType) { try GifResource(contentsOf: url) }
+        }
+    }
+
+    func testInjectedLegacyBookmarkReadsThroughTheSameBudget() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("bookmark.gif")
+        let valid = makeBudgetGIF()
+        try valid.write(to: url)
+        let bookmark = Data("isolated bookmark".utf8)
+        let read = {
+            try GifResource.selectedData(selectedName: nil, appSupport: nil, bookmarkData: bookmark,
+                                         resolveBookmark: { _ in url }, startAccessing: { _ in true }, stopAccessing: { _ in })
+        }
+        XCTAssertEqual(try read(), valid)
+        try makeBudgetGIF(frameCount: 501).write(to: url)
+        assertRejection(.frameCount) { try read() }
+    }
+
+    func testBadLegacyCopyFallsBackToBookmarkAndBalancesAccess() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let legacy = directory.appendingPathComponent("XNook/custom.gif")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("broken".utf8).write(to: legacy)
+        let bookmarkURL = directory.appendingPathComponent("bookmark.gif")
+        let valid = makeBudgetGIF()
+        try valid.write(to: bookmarkURL)
+        var accesses: [String] = []
+        let read = {
+            try GifResource.selectedData(selectedName: nil, appSupport: directory, bookmarkData: Data([1]),
+                resolveBookmark: { _ in accesses.append("resolve"); return bookmarkURL },
+                startAccessing: { _ in accesses.append("start"); return true },
+                stopAccessing: { _ in accesses.append("stop") })
+        }
+        XCTAssertEqual(try read(), valid)
+        XCTAssertEqual(accesses, ["resolve", "start", "stop"])
+        accesses = []
+        try makeBudgetGIF(frameCount: 501).write(to: bookmarkURL)
+        assertRejection(.frameCount) { try read() }
+        XCTAssertEqual(accesses, ["resolve", "start", "stop"])
+    }
+
+    func testExplicitSelectionFailureAndEmptySelectionNeverUseBookmark() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gifs = directory.appendingPathComponent("XNook/gifs")
+        try FileManager.default.createDirectory(at: gifs, withIntermediateDirectories: true)
+        try Data("broken".utf8).write(to: gifs.appendingPathComponent("selected.gif"))
+        var resolved = false
+        let read: (String) throws -> Data? = { name in
+            try GifResource.selectedData(selectedName: name, appSupport: directory, bookmarkData: Data([1]),
+                resolveBookmark: { _ in resolved = true; throw CocoaError(.fileReadUnknown) })
+        }
+        XCTAssertThrowsError(try read("selected.gif"))
+        XCTAssertThrowsError(try read("missing.gif"))
+        XCTAssertNil(try read(""))
+        XCTAssertFalse(resolved)
+    }
+
+    func testBookmarkResolutionAndAccessFailuresDoNotLeakAccess() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var stopped = false
+        XCTAssertThrowsError(try GifResource.selectedData(selectedName: nil, appSupport: nil, bookmarkData: Data([1]),
+            resolveBookmark: { _ in throw CocoaError(.fileReadCorruptFile) },
+            startAccessing: { _ in XCTFail("Resolution failed"); return true },
+            stopAccessing: { _ in stopped = true }))
+        XCTAssertThrowsError(try GifResource.selectedData(selectedName: nil, appSupport: nil, bookmarkData: Data([1]),
+            resolveBookmark: { _ in directory }, startAccessing: { _ in false },
+            stopAccessing: { _ in stopped = true }))
+        XCTAssertFalse(stopped)
+    }
+
+    func testValidLegacyCopyTakesPrecedenceOverBookmark() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let legacy = directory.appendingPathComponent("XNook/custom.gif")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let valid = makeBudgetGIF()
+        try valid.write(to: legacy)
+        XCTAssertEqual(try GifResource.selectedData(selectedName: nil, appSupport: directory, bookmarkData: Data([1]),
+            resolveBookmark: { _ in XCTFail("Valid legacy copy should be used first"); return legacy }), valid)
+    }
+
+    func testEveryStoredSourceAndThumbnailUseTheResourceBudget() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gifs = directory.appendingPathComponent("XNook/gifs")
+        try FileManager.default.createDirectory(at: gifs, withIntermediateDirectories: true)
+        let selected = gifs.appendingPathComponent("selected.gif")
+        let legacy = directory.appendingPathComponent("XNook/custom.gif")
+        for invalid in [makeBudgetGIF(frameCount: 501), makeBudgetGIF(width: 2_049),
+                        makeBudgetGIF(width: 2_048, height: 2_048, frameCount: 17),
+                        Data(count: GifResource.maximumEncodedBytes + 1)] {
+            try invalid.write(to: selected)
+            try invalid.write(to: legacy)
+            XCTAssertThrowsError(try GifResource(contentsOf: selected).thumbnail())
+            XCTAssertThrowsError(try GifResource.selectedData(selectedName: "selected.gif", appSupport: directory, bookmarkData: nil))
+            XCTAssertThrowsError(try GifResource.selectedData(selectedName: nil, appSupport: directory, bookmarkData: nil))
+            XCTAssertThrowsError(try GifResource.selectedData(selectedName: nil, appSupport: nil, bookmarkData: Data([1]),
+                resolveBookmark: { _ in selected }, startAccessing: { _ in true }, stopAccessing: { _ in }))
+        }
+    }
+
+    func testStoredFileRemovalOnlyUpdatesStateAfterSuccessOrMissingFile() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("selected.gif")
+        let original = makeBudgetGIF()
+        try original.write(to: url)
+        var names = ["selected.gif", "other.gif"]
+        var selectedName = "selected.gif"
+        let update = { names.removeAll { $0 == "selected.gif" }; selectedName = "" }
+        XCTAssertThrowsError(try GifResource.removeStoredFile(at: url, removeItem: { _ in
+            throw CocoaError(.fileWriteNoPermission)
+        }, didRemove: update))
+        XCTAssertEqual(names, ["selected.gif", "other.gif"])
+        XCTAssertEqual(selectedName, "selected.gif")
+        XCTAssertEqual(try Data(contentsOf: url), original)
+        try GifResource.removeStoredFile(at: url, didRemove: update)
+        XCTAssertEqual(names, ["other.gif"])
+        XCTAssertEqual(selectedName, "")
+        var missingDidUpdate = false
+        try GifResource.removeStoredFile(at: url, didRemove: { missingDidUpdate = true })
+        XCTAssertTrue(missingDidUpdate)
+    }
+
     private func temporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -14,6 +14,12 @@ enum LyricsCache {
         case plain
     }
 
+    struct MatchMetadata: Codable, Equatable {
+        let trackName: String?
+        let artistName: String?
+        let duration: TimeInterval?
+    }
+
     struct Entry: Codable {
         let type: EntryType
         let payload: String  // LRC 全文或纯歌词全文
@@ -22,6 +28,8 @@ enum LyricsCache {
         /// 同一个文件；读取时比对 key 才能发现碰撞，否则表现为"某首歌固定显示
         /// 另一首歌的歌词"且不会自愈。
         let key: String
+        /// 旧缓存缺少候选元数据时仍可读取，但不能据此确认版本已匹配。
+        var match: MatchMetadata? = nil
     }
 
     private static let maxCacheBytes: Int = 5 * 1024 * 1024
@@ -86,11 +94,12 @@ enum LyricsCache {
         artist: String,
         album: String? = nil,
         type: EntryType,
-        payload: String
+        payload: String,
+        match: MatchMetadata? = nil
     ) {
         let key = cacheKey(title: title, artist: artist, album: album)
         guard let url = fileURL(for: key) else { return }
-        let entry = Entry(type: type, payload: payload, fetchedAt: Date(), key: key)
+        let entry = Entry(type: type, payload: payload, fetchedAt: Date(), key: key, match: match)
         ioQueue.async {
             guard let data = try? JSONEncoder().encode(entry) else { return }
             // 目录不存在则创建
@@ -110,7 +119,7 @@ enum LyricsCache {
     ///
     /// 不含 duration：duration 往往比曲目信息晚一拍到达，若参与 key，同一首歌会先以
     /// "无 duration"写一份、拿到 duration 后再写一份，既产生重复文件，又让后续查询
-    /// 必然未命中。曲目版本的区分交给 album，duration 只用于 LRCLIB 候选打分。
+    /// 必然未命中。曲目版本的区分交给 album，duration 用于候选核验与打分。
     ///
     /// 对 "G.E.M. 邓紫棋" vs "邓紫棋" 这种 LRCLIB 别名场景不试图归并，
     /// 因为该归并由 LRCLIB 服务端负责；客户端只对"完全相同的查询"做缓存

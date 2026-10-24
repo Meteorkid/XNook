@@ -9,8 +9,15 @@ final class PanelLayoutStore {
     let defaults: UserDefaults
     private(set) var configuration: PanelLayoutConfiguration
     private(set) var loadError: String?
+    private(set) var hasSavedConfiguration = false
 
     var canEdit: Bool { loadError == nil }
+
+    func shouldFitDefaultContent(
+        automaticallyFit: Bool, isEditing: Bool = false, isOverview: Bool = true
+    ) -> Bool {
+        automaticallyFit && !hasSavedConfiguration && loadError == nil && !isEditing && isOverview
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -19,7 +26,9 @@ final class PanelLayoutStore {
     }
 
     func reload() {
-        guard let stored = defaults.object(forKey: Self.storageKey) else {
+        let stored = defaults.object(forKey: Self.storageKey)
+        hasSavedConfiguration = stored != nil
+        guard let stored else {
             let enabled = defaults.data(forKey: "enabledWidgets")
                 .flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }
                 ?? PanelLayoutConfiguration.defaultWidgetIDs
@@ -64,6 +73,7 @@ final class PanelLayoutStore {
         let data = try JSONEncoder().encode(configuration)
         defaults.set(data, forKey: Self.storageKey)
         self.configuration = configuration
+        hasSavedConfiguration = true
         loadError = nil
     }
 

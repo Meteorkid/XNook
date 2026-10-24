@@ -73,11 +73,15 @@ final class ScriptingBridgeHelperTests: XCTestCase {
             XCTAssertTrue(script.contains("with timeout of 2 seconds"))
             XCTAssertTrue(script.contains("is not running"))
             XCTAssertFalse(script.contains("raw data"))
+            XCTAssertFalse(script.contains("artwork url"))
             let position = script.range(of: "set snapshotPosition to player position")!
             XCTAssertFalse(script[position.upperBound...].contains(" of snapshotTrack"))
         }
         XCTAssertTrue(ScriptingBridgeHelper.musicArtworkScript.contains("with timeout of 2 seconds"))
         XCTAssertTrue(ScriptingBridgeHelper.musicArtworkScript.contains("is not running"))
+        XCTAssertTrue(ScriptingBridgeHelper.spotifyArtworkScript.contains("with timeout of 2 seconds"))
+        XCTAssertTrue(ScriptingBridgeHelper.spotifyArtworkScript.contains("is not running"))
+        XCTAssertTrue(ScriptingBridgeHelper.spotifyArtworkScript.contains("artwork url of artworkTrack"))
         for command in [ScriptingBridgeHelper.PlaybackCommand.play, .pause, .nextTrack, .previousTrack] {
             for app in [ScriptingBridgeHelper.SupportedApp.music, .spotify] {
                 let source = ScriptingBridgeHelper.commandScript(command, for: app)
@@ -94,11 +98,11 @@ final class ScriptingBridgeHelperTests: XCTestCase {
         let cache = ScriptingBridgeHelper.ArtworkCache()
         let info: [String: Any] = ["source": "Music", "title": "Song", "artist": "Artist", "album": "Album", "playbackRate": 1.0]
         let artworkTask = Task {
-            await ScriptingBridgeHelper.getArtwork(for: info, cache: cache, isRunning: { _ in true }) { _, _ in
+            await ScriptingBridgeHelper.getArtwork(for: info, cache: cache, isRunning: { _ in true }, execute: { _, _ in
                 artworkStarted.fulfill()
                 await gate.wait()
                 return nil
-            }
+            })
         }
         await fulfillment(of: [artworkStarted], timeout: 1)
         let expected = snapshot()
@@ -124,6 +128,240 @@ final class ScriptingBridgeHelperTests: XCTestCase {
             return nil
         }
         XCTAssertTrue(closed.isEmpty)
+    }
+
+    func testSpotifyArtworkIsDownloadedAndReusedWhilePaused() async throws {
+        let cache = ScriptingBridgeHelper.ArtworkCache()
+        let image = try ArtworkTestImage.data()
+        let url = URL(string: "https://i.scdn.co/image/cover")!
+        let descriptor = artworkDescriptor(value: NSAppleEventDescriptor(string: url.absoluteString))
+        let result = await ScriptingBridgeHelper.getArtwork(
+            for: spotifyInfo(), cache: cache, isRunning: { $0 == .spotify }, download: { request in
+                XCTAssertEqual(request.url, url)
+                return (image, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }, execute: { script, app in
+                XCTAssertEqual(app, .spotify)
+                XCTAssertEqual(script, ScriptingBridgeHelper.spotifyArtworkScript)
+                return descriptor
+            }
+        )
+        XCTAssertNotNil(result.flatMap { NSImage(data: $0) })
+        let paused = await ScriptingBridgeHelper.getArtwork(
+            for: spotifyInfo(rate: 0), cache: cache, isRunning: { _ in true }, download: { _ in
+                XCTFail("Paused playback must not download artwork")
+                throw URLError(.cancelled)
+            }, execute: { _, _ in
+                XCTFail("Paused playback must use the cached artwork")
+                return nil
+            }
+        )
+        XCTAssertEqual(paused, result)
+    }
+
+    func testSpotifyMetadataCompletesWhileArtworkDownloadIsPending() async {
+        let started = expectation(description: "Spotify download started")
+        let metadataReturned = expectation(description: "Spotify metadata is independent from download")
+        let gate = ArtworkGate()
+        let descriptor = artworkDescriptor(value: NSAppleEventDescriptor(string: "https://i.scdn.co/image/cover"))
+        let artwork = Task {
+            await ScriptingBridgeHelper.getArtwork(
+                for: spotifyInfo(), cache: ScriptingBridgeHelper.ArtworkCache(), isRunning: { _ in true },
+                download: { _ in
+                    started.fulfill()
+                    await gate.wait()
+                    throw URLError(.timedOut)
+                }, execute: { _, _ in descriptor }
+            )
+        }
+        await fulfillment(of: [started], timeout: 1)
+        let expected = snapshot(duration: 210_000)
+        let metadata = Task {
+            let info = await ScriptingBridgeHelper.getNowPlayingFromSpotify(isRunning: { _ in true }) { source, app in
+                XCTAssertEqual(app, .spotify)
+                XCTAssertFalse(source.contains("artwork url"))
+                return expected
+            }
+            XCTAssertEqual(info?["duration"] as? Double, 210)
+            metadataReturned.fulfill()
+        }
+        await fulfillment(of: [metadataReturned], timeout: 1)
+        await gate.release()
+        _ = await artwork.value
+        await metadata.value
+    }
+
+    func testSpotifyArtworkRejectsInvalidURLAndTrackChangedDuringRead() async {
+        let descriptors = [
+            artworkDescriptor(value: NSAppleEventDescriptor(string: "http://example.com/cover.png")),
+            artworkDescriptor(value: NSAppleEventDescriptor(string: "file:///tmp/cover.png")),
+            artworkDescriptor(value: NSAppleEventDescriptor.null()),
+            artworkDescriptor(value: NSAppleEventDescriptor(string: "https://i.scdn.co/image/cover"), afterTitle: "Next song"),
+        ]
+        for descriptor in descriptors {
+            let result = await ScriptingBridgeHelper.getArtwork(
+                for: spotifyInfo(), cache: ScriptingBridgeHelper.ArtworkCache(), isRunning: { _ in true },
+                download: { _ in
+                    XCTFail("An invalid or stale artwork URL must not start a download")
+                    throw URLError(.cancelled)
+                }, execute: { _, _ in descriptor }
+            )
+            XCTAssertNil(result)
+        }
+    }
+
+    func testSpotifyArtworkFailureBacksOffWithoutRepeatingScriptOrDownload() async {
+        for responseBody in [Data("not an image".utf8), Data()] {
+            let cache = ScriptingBridgeHelper.ArtworkCache()
+            let url = URL(string: "https://i.scdn.co/image/cover")!
+            let descriptor = artworkDescriptor(value: NSAppleEventDescriptor(string: url.absoluteString))
+            var requests = 0
+            var scriptReads = 0
+            for _ in 0..<2 {
+                let result = await ScriptingBridgeHelper.getArtwork(
+                    for: spotifyInfo(), cache: cache, isRunning: { _ in true }, download: { _ in
+                        requests += 1
+                        if responseBody.isEmpty { throw URLError(.notConnectedToInternet) }
+                        return (responseBody, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+                    }, execute: { _, _ in
+                        scriptReads += 1
+                        return descriptor
+                    }
+                )
+                XCTAssertNil(result)
+            }
+            XCTAssertEqual(requests, 1)
+            XCTAssertEqual(scriptReads, 1)
+        }
+    }
+
+    func testMusicAndSpotifyWithSameMetadataDoNotShareArtworkCache() async throws {
+        let cache = ScriptingBridgeHelper.ArtworkCache()
+        let musicBytes = Data([1, 2, 3])
+        let musicDescriptor = artworkDescriptor(value: try XCTUnwrap(NSAppleEventDescriptor(descriptorType: typeData, data: musicBytes)))
+        var musicInfo = spotifyInfo()
+        musicInfo["source"] = "Music"
+        let music = await ScriptingBridgeHelper.getArtwork(for: musicInfo, cache: cache, isRunning: { _ in true }, execute: { _, _ in musicDescriptor })
+        XCTAssertEqual(music, musicBytes)
+        let url = URL(string: "https://i.scdn.co/image/cover")!
+        let spotifyDescriptor = artworkDescriptor(value: NSAppleEventDescriptor(string: url.absoluteString))
+        let image = try ArtworkTestImage.data()
+        var downloaded = false
+        let spotify = await ScriptingBridgeHelper.getArtwork(
+            for: spotifyInfo(), cache: cache, isRunning: { _ in true }, download: { _ in
+                downloaded = true
+                return (image, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }, execute: { _, _ in spotifyDescriptor }
+        )
+        XCTAssertTrue(downloaded)
+        XCTAssertNotEqual(spotify, music)
+        XCTAssertNotNil(spotify.flatMap { NSImage(data: $0) })
+    }
+
+    func testClosedOrUncachedPausedSpotifyNeverReadsArtwork() async {
+        for running in [true, false] {
+            let result = await ScriptingBridgeHelper.getArtwork(
+                for: spotifyInfo(rate: running ? 0 : 1), cache: ScriptingBridgeHelper.ArtworkCache(),
+                isRunning: { _ in running }, execute: { _, _ in
+                    XCTFail("Closed or uncached paused Spotify must not receive artwork events")
+                    return nil
+                }
+            )
+            XCTAssertNil(result)
+        }
+    }
+
+    func testLateArtworkCacheResultDoesNotEvictNewTrack() async {
+        let cache = ScriptingBridgeHelper.ArtworkCache()
+        let started = expectation(description: "Old cache request started")
+        let gate = ArtworkGate()
+        let old = Task {
+            await cache.data(for: "old") {
+                started.fulfill()
+                await gate.wait()
+                return Data([1])
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+        let new = await cache.data(for: "new") { Data([2]) }
+        await gate.release()
+        _ = await old.value
+        let cached = await cache.data(for: "new") {
+            XCTFail("Late artwork must not evict the newer track's cache")
+            return nil
+        }
+        XCTAssertEqual(cached, new)
+    }
+
+    func testCancelledArtworkDoesNotPopulateCacheOrStartFailureBackoff() async {
+        let cache = ScriptingBridgeHelper.ArtworkCache()
+        let started = expectation(description: "Artwork that will be cancelled started")
+        let gate = ArtworkGate()
+        let task = Task {
+            await cache.data(for: "song") {
+                started.fulfill()
+                await gate.wait()
+                XCTAssertTrue(Task.isCancelled)
+                return Data([1])
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+        task.cancel()
+        await gate.release()
+        let cancelled = await task.value
+        XCTAssertNil(cancelled)
+        let replacement = await cache.data(for: "song") { Data([2]) }
+        XCTAssertEqual(replacement, Data([2]))
+    }
+
+    func testReturningToCancelledTrackStartsFreshArtworkBeforeOldRequestFinishes() async {
+        let cache = ScriptingBridgeHelper.ArtworkCache()
+        let oldStarted = expectation(description: "First A request started")
+        let replacementFinished = expectation(description: "New A finishes while cancelled A is still blocked")
+        let oldGate = ArtworkGate()
+        let oldA = Task {
+            await cache.data(for: "A") {
+                oldStarted.fulfill()
+                await oldGate.wait()
+                return Data([1])
+            }
+        }
+        await fulfillment(of: [oldStarted], timeout: 1)
+        oldA.cancel()
+        let artworkB = await cache.data(for: "B") { Data([2]) }
+        XCTAssertEqual(artworkB, Data([2]))
+
+        let newA = Task {
+            let data = await cache.data(for: "A") { Data([3]) }
+            replacementFinished.fulfill()
+            return data
+        }
+        await fulfillment(of: [replacementFinished], timeout: 1)
+        // 旧请求始终由显式门控制；若新请求错误地加入旧任务，先释放以免测试挂死。
+        await oldGate.release()
+        let currentArtwork = await newA.value
+        let cancelledArtwork = await oldA.value
+        XCTAssertEqual(currentArtwork, Data([3]))
+        XCTAssertNil(cancelledArtwork)
+        let cached = await cache.data(for: "A") {
+            XCTFail("Old A must not discard or overwrite the new A cache")
+            return nil
+        }
+        XCTAssertEqual(cached, Data([3]))
+    }
+
+    private func spotifyInfo(rate: Double = 1) -> [String: Any] {
+        ["source": "Spotify", "title": "Song", "artist": "Artist", "album": "Album", "playbackRate": rate]
+    }
+
+    private func artworkDescriptor(value: NSAppleEventDescriptor, afterTitle: String = "Song") -> NSAppleEventDescriptor {
+        let descriptor = NSAppleEventDescriptor.list()
+        let values = [
+            NSAppleEventDescriptor(string: "Song"), NSAppleEventDescriptor(string: "Artist"),
+            NSAppleEventDescriptor(string: "Album"), value, NSAppleEventDescriptor(string: afterTitle),
+            NSAppleEventDescriptor(string: "Artist"), NSAppleEventDescriptor(string: "Album"),
+        ]
+        for (index, value) in values.enumerated() { descriptor.insert(value, at: index + 1) }
+        return descriptor
     }
 
     func testClosedMusicIsNeverQueriedByDirectSnapshotMethod() async {

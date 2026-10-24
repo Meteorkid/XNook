@@ -2,46 +2,36 @@ import SwiftUI
 import ServiceManagement
 import AppKit
 
-// MARK: - 设置面板枚举
-
-private enum SettingsPane: String, CaseIterable, Identifiable {
-    case general
-    case display
-    case integration
-    case about
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .general: L10n.general
-        case .display: L10n.display
-        case .integration: L10n.integration
-        case .about: L10n.about
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .general: "gearshape.fill"
-        case .display: "paintbrush.fill"
-        case .integration: "rectangle.connected.to.line.below"
-        case .about: "info.circle.fill"
-        }
-    }
-}
-
 // MARK: - 设置视图
 
+@MainActor
 struct SettingsView: View {
     @Environment(UpdateManager.self) private var updateManager
-    @State private var selection: SettingsPane = .general
+    @State private var search: SettingsSearchState
+    @State private var permissions: SettingsPermissions
+    @State private var globalPanelShortcut: GlobalPanelShortcutController
+    @State private var claudeReceiver: ClaudeCompletionReceiver
+    @State private var claudeConfigurationCopied = false
+    private let claudeConfiguration: String?
+    @FocusState private var searchFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
+    @AppStorage("launchAtLogin") private var launchAtLogin = SettingsDefaults.bool(for: "launchAtLogin")
     @State private var panelLayoutStore: PanelLayoutStore
     @State private var layoutSaveError: String?
     @AppStorage("panelLayout.v1") private var panelLayoutData = Data()
 
-    init(layoutDefaults: UserDefaults = .standard) {
+    init(layoutDefaults: UserDefaults = .standard, search: SettingsSearchState? = nil,
+         permissions: SettingsPermissions? = nil, claudeReceiver: ClaudeCompletionReceiver? = nil,
+         claudeConfiguration: String? = nil, globalPanelShortcut: GlobalPanelShortcutController? = nil) {
         _panelLayoutStore = State(initialValue: PanelLayoutStore(defaults: layoutDefaults))
+        _search = State(initialValue: search ?? SettingsSearchState())
+        _permissions = State(initialValue: permissions ?? SettingsPermissions())
+        _globalPanelShortcut = State(initialValue: globalPanelShortcut ?? AppDelegate.shared?.globalPanelShortcut
+            ?? GlobalPanelShortcutController(defaults: layoutDefaults))
+        _claudeReceiver = State(initialValue: claudeReceiver ?? AppDelegate.shared?.claudeCompletionReceiver
+            ?? ClaudeCompletionReceiver(deliver: { _ in }))
+        self.claudeConfiguration = claudeConfiguration ?? ClaudeHookConfiguration.bundledJSON
     }
     @AppStorage("quietHoursEnabled") private var quietHoursEnabled = SettingsDefaults.bool(for: "quietHoursEnabled")
     @AppStorage("quietHoursStart") private var quietHoursStart = SettingsDefaults.string(for: "quietHoursStart", fallback: "22:00")
@@ -55,6 +45,7 @@ struct SettingsView: View {
     @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
     @AppStorage("enabledWidgets") private var enabledWidgetsData = Data()
+    @AppStorage("lyricsOffset") private var lyricsOffset = SettingsDefaults.double(for: "lyricsOffset")
 
     private var panelHeightRange: ClosedRange<Double> {
         let upper = max(1, Double(panelContentSizeLimit.height))
@@ -75,17 +66,46 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            ScrollView {
-                paneContent
+            searchField
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Group {
+                        if search.isSearching { searchResults } else { paneContent }
+                    }
                     .padding(.horizontal, 24)
                     .padding(.vertical, 18)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .expandedPanelDebugFrame(id: "settingsViewport")
+                .id(search.isSearching ? "search" : search.pane.rawValue)
+                .task(id: search.targetID) {
+                    guard let target = search.targetID else { return }
+                    // 等待目标页进入布局；新搜索/切页会取消本次定位。
+                    await Task.yield()
+                    guard !Task.isCancelled, search.targetID == target, !search.isSearching else { return }
+                    if reduceMotion || systemReduceMotion { proxy.scrollTo(target, anchor: .center) }
+                    else { withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .center) } }
+                }
             }
         }
         .frame(width: 560)
         .frame(minHeight: 400, maxHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { clampPanelHeightToVisibleRange(); panelLayoutStore.reload() }
+        .onAppear {
+            clampPanelHeightToVisibleRange()
+            panelLayoutStore.reload()
+            permissions.refresh()
+        }
+        .onChange(of: search.targetID) { _, target in
+            if let target { expandedDescriptions.insert(target) }
+        }
+        .onChange(of: launchAtLogin) { _, _ in permissions.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissions.refresh()
+        }
+        .background(Button(L10n.settingsSearch) { searchFocused = true }
+            .keyboardShortcut("f", modifiers: .command).hidden())
         .onChange(of: panelLayoutData) { _, _ in panelLayoutStore.reload() }
         .onChange(of: enabledWidgetsData) { _, _ in panelLayoutStore.reload() }
         .onChange(of: showNookFlowHistory) { _, _ in panelLayoutStore.reload() }
@@ -97,11 +117,65 @@ struct SettingsView: View {
 
     // MARK: - 工具栏
 
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(L10n.settingsSearch, text: $search.query)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+                .accessibilityIdentifier("settings-search")
+                .onSubmit { if let first = search.results.first { openSearchResult(first) } }
+                .onExitCommand { search.query = "" }
+            if !search.query.isEmpty {
+                Button { search.query = ""; searchFocused = true } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.settingsSearchClear)
+            }
+        }
+        .font(.system(size: 13))
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+    }
+
+    private var searchResults: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(search.results.isEmpty ? L10n.settingsSearchEmpty : L10n.settingsResults(search.results.count))
+                .font(.system(size: 13, weight: .semibold))
+            if search.results.isEmpty {
+                Text(L10n.settingsSearchHint).font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            ForEach(search.results) { entry in
+                Button { openSearchResult(entry) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.title).font(.system(size: 13, weight: .medium))
+                            Text(entry.pane.title).font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("search-result-" + entry.id)
+            }
+        }
+    }
+
+    private func openSearchResult(_ entry: SettingsSearchEntry) {
+        searchFocused = false
+        search.navigate(to: entry)
+    }
+
     private var toolbar: some View {
         HStack(spacing: 0) {
             ForEach(SettingsPane.allCases) { pane in
                 Button {
-                    selection = pane
+                    search.selectPane(pane)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: pane.icon)
@@ -112,12 +186,12 @@ struct SettingsView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(
-                        selection == pane
+                        search.pane == pane
                             ? RoundedRectangle(cornerRadius: 6)
                                 .fill(Color.accentColor.opacity(0.15))
                             : nil
                     )
-                    .foregroundColor(selection == pane ? .accentColor : .secondary)
+                    .foregroundColor(search.pane == pane ? .accentColor : .secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -131,7 +205,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var paneContent: some View {
-        switch selection {
+        switch search.pane {
         case .general:
             generalPane
         case .display:
@@ -178,36 +252,23 @@ struct SettingsView: View {
 
             section(L10n.sectionMacPrivacy) {
                 card {
-                    Text(L10n.macPrivacyIntro)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.vertical, 8)
+                    SettingsPermissionsView(permissions: permissions, highlightedID: search.targetID)
                     dividerLine
-                    HStack(spacing: 8) {
-                        macPrivacyButton(title: L10n.openPrivacySecurityButton) {
-                            SystemPrivacySettings.openPrivacySecurity()
-                        }
-                        macPrivacyButton(title: L10n.openCalendarsButton) {
-                            SystemPrivacySettings.openCalendars()
-                        }
+                    HStack {
+                        Button(L10n.settingsRefreshPermissions) { permissions.refresh() }
+                        Spacer()
+                        Button(L10n.openPrivacySecurityButton) { SystemPrivacySettings.openPrivacySecurity() }
                     }
-                    .padding(.vertical, 8)
-                    dividerLine
-                    HStack(spacing: 8) {
-                        macPrivacyButton(title: L10n.openAutomationButton) {
-                            SystemPrivacySettings.openAutomation()
-                        }
-                        macPrivacyButton(title: L10n.openLoginItemsButton) {
-                            SystemPrivacySettings.openLoginItems()
-                        }
-                    }
+                    .controlSize(.small)
                     .padding(.vertical, 8)
                 }
             }
 
             section(L10n.sectionInteraction) {
                 card {
+                    GlobalPanelShortcutSettingsView(controller: globalPanelShortcut)
+                        .settingsSearchTarget(id: "globalPanelShortcut", highlightedID: search.targetID)
+                    dividerLine
                     settingRow(L10n.hoverToExpand, id: "hoverToExpand",
                               description: L10n.hoverToExpandDesc) {
                         AppStorageToggle(key: "hoverToExpandPanel")
@@ -226,6 +287,14 @@ struct SettingsView: View {
                     settingRow(L10n.hoverExitCollapseDelay, id: "hoverExit",
                               description: L10n.hoverExitCollapseDelayDesc) {
                         AppStorageSlider(key: "hoverExitCollapseDelay", range: 0.01...10, format: "%.2fs")
+                    }
+                }
+            }
+
+            section(L10n.activitySection) {
+                card {
+                    settingRow(L10n.activityEnabled, id: "activityNotificationsEnabled", description: L10n.activityEnabledHelp) {
+                        AppStorageToggle(key: "activityNotificationsEnabled")
                     }
                 }
             }
@@ -261,6 +330,10 @@ struct SettingsView: View {
 
             section(L10n.sectionCalendarReminders) {
                 card {
+                    settingRow(L10n.activityCalendarEnabled, id: "calendarReminderActivityEnabled", description: L10n.activityCalendarHelp) {
+                        AppStorageToggle(key: "calendarReminderActivityEnabled")
+                    }
+                    dividerLine
                     settingRow(L10n.enableCalendarReminderSound, id: "calendarReminderSoundEnabled",
                               description: L10n.enableCalendarReminderSoundDesc) {
                         AppStorageToggle(key: "calendarReminderSoundEnabled")
@@ -329,8 +402,9 @@ struct SettingsView: View {
                         ThemePickerView()
                             .frame(width: 180)
                     }
+                    .settingsSearchTarget(id: "applicationAppearance", highlightedID: search.targetID)
                     dividerLine
-                    IslandBackgroundSettingsView()
+                    IslandBackgroundSettingsView(highlightedID: search.targetID)
                         .padding(.vertical, 8)
                 }
             }
@@ -373,6 +447,16 @@ struct SettingsView: View {
                     settingRow(L10n.showLyrics, id: "showLyrics",
                               description: L10n.showLyricsDesc) {
                         AppStorageToggle(key: "showLyrics")
+                    }
+                    dividerLine
+                    settingRow(L10n.lyricsOffset, id: "lyricsOffset", description: L10n.lyricsOffsetHelp) {
+                        HStack(spacing: 8) {
+                            AppStorageSlider(key: "lyricsOffset", range: -5...5, step: 0.1, format: "%+.1fs")
+                            Button(L10n.lyricsResetOffset) { lyricsOffset = 0 }
+                                .controlSize(.small)
+                                .fixedSize()
+                                .disabled(lyricsOffset == 0)
+                        }
                     }
                     dividerLine
                     settingRow(L10n.tickerSpeed, id: "tickerSpeed",
@@ -445,11 +529,12 @@ struct SettingsView: View {
                         }
                     }
                     dividerLine
-                    Button(L10n.localized(zh: "打开布局编辑器", en: "Open Layout Editor")) {
+                    Button(L10n.settingsLayoutEditor) {
                         if let delegate = AppDelegate.shared { delegate.openLayoutEditor() }
                         else { NotificationCenter.default.post(name: .xnookEditPanelLayout, object: nil) }
                     }
                     .accessibilityIdentifier("settingsPanelLayoutEditor")
+                    .settingsSearchTarget(id: "panelLayoutEditor", highlightedID: search.targetID)
                     if let message = layoutSaveError ?? panelLayoutStore.loadError {
                         Text(message).font(.caption).foregroundStyle(.secondary)
                     }
@@ -493,6 +578,32 @@ struct SettingsView: View {
         let status = AppSwitcher.shared.peerStatus(for: counterpart)
 
         return VStack(alignment: .leading, spacing: 16) {
+            section("Claude Code") {
+                card {
+                    settingRow(L10n.claudeCompletion, id: "claudeCompletionEnabled", description: L10n.claudeCompletionHelp) {
+                        AppStorageToggle(key: "claudeCompletionEnabled")
+                    }
+                    dividerLine
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.claudeReceiverState(claudeReceiver.state))
+                            .font(.system(size: 12, weight: .medium))
+                            .accessibilityIdentifier("settingsClaudeReceiverStatus")
+                        Button(L10n.claudeCopyConfiguration) {
+                            guard let claudeConfiguration else { return }
+                            NSPasteboard.general.clearContents()
+                            claudeConfigurationCopied = NSPasteboard.general.setString(claudeConfiguration, forType: .string)
+                        }
+                        .controlSize(.small)
+                        .disabled(claudeConfiguration == nil)
+                        .accessibilityIdentifier("settingsClaudeCopyConfiguration")
+                        Text(claudeConfigurationCopied ? L10n.claudeConfigurationCopied
+                             : (claudeConfiguration == nil ? L10n.claudeHelperMissing : L10n.claudeConfigurationHelp))
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
             section(L10n.sectionSwitching) {
                 card {
                     settingRow(L10n.enableSwipeSwitch, id: "enableSwipeSwitch",
@@ -743,6 +854,7 @@ struct SettingsView: View {
             }
         }
         .padding(.vertical, 8)
+        .settingsSearchTarget(id: id, highlightedID: search.targetID)
     }
 
     private var dividerLine: some View {

@@ -21,6 +21,7 @@ swift build -c release "$@" 2>&1
 # Create app bundle structure
 mkdir -p "${MACOS}"
 mkdir -p "${RESOURCES}"
+cp "scripts/claude-stop-hook.py" "${RESOURCES}/claude-stop-hook.py"
 
 # Copy executable
 cp "${BUILD_DIR}/release/XNook" "${MACOS}/${APP_NAME}"

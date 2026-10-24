@@ -19,10 +19,14 @@ struct FocusSessionView: View {
     @State private var isHistoryPresented = false
     @State private var isFilesPresented = false
     @State private var selectedHistoryID: UUID?
+    @State private var selectedResourceID: UUID?
     @State private var resourceError: String?
     @State private var linkSessionID: UUID?
     @State private var isEditingLink = false
     @State private var isFeedbackPresented = false
+    @State private var isInboxPresented = false
+    @State private var isEditingResourceNote = false
+    @State private var isEditingResourceLink = false
 
     let manager: FocusSessionManager
     let historyDisplayLimit: Int
@@ -37,6 +41,8 @@ struct FocusSessionView: View {
     let section: Section
     /// 父卡片扣除自身装饰后的内容高度，包含本视图的内边距。
     let availableHeight: CGFloat?
+    let resources: FocusResourceCoordinator?
+    let pendingTasks: PendingTaskCoordinator?
     /// 链接面板展示状态回调：展开期间父视图需要暂停面板自动收起。
     var onLinksPresentationChanged: (Bool) -> Void = { _ in }
 
@@ -53,7 +59,9 @@ struct FocusSessionView: View {
         onInteractionChanged: @escaping (Bool) -> Void = { _ in },
         onLinksPresentationChanged: @escaping (Bool) -> Void = { _ in },
         section: Section = .combined,
-        availableHeight: CGFloat? = nil
+        availableHeight: CGFloat? = nil,
+        resources: FocusResourceCoordinator? = nil,
+        pendingTasks: PendingTaskCoordinator? = nil
     ) {
         self.manager = manager
         self.historyDisplayLimit = historyDisplayLimit
@@ -68,6 +76,8 @@ struct FocusSessionView: View {
         self.onLinksPresentationChanged = onLinksPresentationChanged
         self.section = section
         self.availableHeight = availableHeight
+        self.resources = resources
+        self.pendingTasks = pendingTasks
     }
 
     static let storageIssueHeight: CGFloat = 28
@@ -110,7 +120,7 @@ struct FocusSessionView: View {
     }
 
     private var isInteracting: Bool {
-        titleFocused || !taskTitle.isEmpty || isHistoryPresented || isFilesPresented || isFeedbackPresented || linkSessionID != nil
+        titleFocused || !taskTitle.isEmpty || isHistoryPresented || isFilesPresented || isFeedbackPresented || linkSessionID != nil || isInboxPresented
     }
 
     var body: some View {
@@ -136,13 +146,33 @@ struct FocusSessionView: View {
             onInteractionChanged(interacting)
         }
         .onDisappear { onInteractionChanged(false) }
-        .popover(isPresented: $isHistoryPresented, arrowEdge: .bottom) {
-            historyBrowser
+        .popover(isPresented: Self.guardedPresentationBinding(
+            $isHistoryPresented, isEditing: { isEditingResourceNote || isEditingResourceLink }
+        ), arrowEdge: .bottom) {
+            if let resources {
+                coordinatedHistoryBrowser(resources)
+            } else {
+                historyBrowser
+            }
         }
-        .popover(isPresented: $isFilesPresented, arrowEdge: .bottom) {
-            if let session = manager.activeSession {
+        .popover(isPresented: Self.guardedPresentationBinding(
+            $isFilesPresented, isEditing: { isEditingResourceNote || isEditingResourceLink }
+        ), arrowEdge: .bottom) {
+            if let selectedResourceID, let resources {
+                FocusSessionResourcesView(sessionID: selectedResourceID, resources: resources,
+                    showsNoteEditor: $isEditingResourceNote, showsLinkEditor: $isEditingResourceLink,
+                    pendingTasks: pendingTasks)
+            } else if let selectedResourceID, let session = manager.session(id: selectedResourceID) {
                 resourceBrowser(for: session)
             }
+        }
+        .popover(isPresented: $isInboxPresented, arrowEdge: .bottom) {
+            if let pendingTasks {
+                TaskInboxView(coordinator: pendingTasks, onClose: { isInboxPresented = false })
+            }
+        }
+        .onChange(of: isEditingResourceNote || isEditingResourceLink) { _, editing in
+            onLinksPresentationChanged(editing || linkSessionID != nil)
         }
         .popover(isPresented: Self.guardedPresentationBinding(
             Binding(get: { linkSessionID != nil }, set: { presented in
@@ -167,6 +197,14 @@ struct FocusSessionView: View {
         Binding(get: { presented.wrappedValue }, set: { value in
             if value || !isEditing() { presented.wrappedValue = value }
         })
+    }
+
+    private func showResources(for sessionID: UUID) {
+        guard !isEditingResourceNote, !isEditingResourceLink else { return }
+        resources?.clearError()
+        resourceError = nil
+        selectedResourceID = sessionID
+        isFilesPresented = true
     }
 
     private func showLinks(for sessionID: UUID) {
@@ -236,6 +274,7 @@ struct FocusSessionView: View {
             .disabled(manager.storageError != nil)
             .expandedPanelDebugFrame(id: "expandedPanelTaskStart")
             .expandedPanelDebugFrame(id: "focusSessionStartTask")
+            inboxButton.labelStyle(.iconOnly)
             }
         }
         .padding(.horizontal, 8)
@@ -278,7 +317,7 @@ struct FocusSessionView: View {
                 HStack(alignment: .top, spacing: 8) {
                     noteButton(for: session)
                     webLinkButton(for: session)
-                    if !session.linkedFiles.isEmpty {
+                    if resources != nil || !session.linkedFiles.isEmpty {
                         filesButton(for: session)
                     }
                 }
@@ -286,7 +325,7 @@ struct FocusSessionView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     noteButton(for: session)
                     webLinkButton(for: session)
-                    if !session.linkedFiles.isEmpty {
+                    if resources != nil || !session.linkedFiles.isEmpty {
                         filesButton(for: session)
                     }
                 }
@@ -294,11 +333,13 @@ struct FocusSessionView: View {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     linkTrayButton
+                    inboxButton
                     Spacer(minLength: 8)
                     endSessionButton
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     linkTrayButton
+                    inboxButton
                     endSessionButton
                 }
             }
@@ -308,11 +349,8 @@ struct FocusSessionView: View {
     }
 
     private func filesButton(for session: FocusSession) -> some View {
-        Button {
-            resourceError = nil
-            isFilesPresented = true
-        } label: {
-            Label(L10n.flowFileCount(session.linkedFiles.count), systemImage: "folder")
+        Button { showResources(for: session.id) } label: {
+            Label(resources == nil ? L10n.flowFileCount(session.linkedFiles.count) : L10n.flowTaskDetails, systemImage: "folder")
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.bordered)
@@ -337,10 +375,7 @@ struct FocusSessionView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .help(session.title)
             HStack(spacing: 6) {
-                Button {
-                    resourceError = nil
-                    isFilesPresented = true
-                } label: {
+                Button { showResources(for: session.id) } label: {
                     Image(systemName: "folder")
                 }
                 .help(L10n.flowTaskDetails)
@@ -350,6 +385,7 @@ struct FocusSessionView: View {
                     noteButton(for: session)
                     webLinkButton(for: session)
                     linkTrayButton
+                    inboxButton
                 } label: {
                     Image(systemName: "ellipsis")
                 }
@@ -396,8 +432,16 @@ struct FocusSessionView: View {
 
     private func elapsedTime(for session: FocusSession) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            Text(elapsedString(from: session.startedAt, to: context.date))
-                .monospacedDigit()
+            HStack(spacing: 4) {
+                if let end = session.scheduledEndAt {
+                    Image(systemName: end <= context.date ? "clock.badge.exclamationmark" : "clock")
+                        .foregroundStyle(end <= context.date ? Color.orange : IslandStyle.secondaryText)
+                        .help(end <= context.date ? L10n.flowBudgetOverdue
+                            : L10n.flowBudgetEnd(end.formatted(date: .omitted, time: .shortened)))
+                }
+                Text(elapsedString(from: session.startedAt, to: context.date))
+                    .monospacedDigit()
+            }
         }
     }
 
@@ -419,7 +463,9 @@ struct FocusSessionView: View {
     private func noteButton(for session: FocusSession) -> some View {
         Button {
             resourceError = nil
-            if let note = session.linkedNote {
+            if resources != nil {
+                showResources(for: session.id)
+            } else if let note = session.linkedNote {
                 openNote(note)
             } else {
                 if !onCreateLinkedNote() {
@@ -436,7 +482,14 @@ struct FocusSessionView: View {
     }
 
     private var linkTrayButton: some View {
-        Button(action: onLinkTrayFiles) {
+        Button {
+            if let resources, let session = manager.activeSession {
+                resources.linkTrayFiles(to: session.id)
+                resourceError = resources.errorMessage
+            } else {
+                onLinkTrayFiles()
+            }
+        } label: {
             Label(trayFileCount == 0 ? L10n.flowEmptyTray : L10n.flowLinkTray, systemImage: "tray")
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -488,9 +541,14 @@ struct FocusSessionView: View {
                 .expandedPanelDebugFrame(id: "expandedPanelHistoryRow-\(record.id.uuidString)")
             }
             if hasHeightBudget {
-                viewAllTasksButton
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                HStack {
+                    viewAllTasksButton
+                    if section == .recentTasks { inboxButton.labelStyle(.iconOnly) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            } else if section == .recentTasks {
+                inboxButton
             }
         }
     }
@@ -517,6 +575,35 @@ struct FocusSessionView: View {
         }
         .frame(maxWidth: .infinity, minHeight: compact ? 24 : 28, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var inboxButton: some View {
+        if pendingTasks != nil {
+            Button { isInboxPresented = true } label: {
+                Label(L10n.inboxTitle, systemImage: "tray")
+            }
+            .help(L10n.inboxTitle)
+            .accessibilityLabel(L10n.inboxTitle)
+            .expandedPanelDebugFrame(id: "focusSessionInbox")
+        }
+    }
+
+    @ViewBuilder
+    private func coordinatedHistoryBrowser(_ resources: FocusResourceCoordinator) -> some View {
+        if let selectedHistoryID {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(L10n.flowBackToHistory) { self.selectedHistoryID = nil }
+                    .disabled(isEditingResourceNote || isEditingResourceLink)
+                    .padding([.horizontal, .top], 18)
+                FocusSessionResourcesView(sessionID: selectedHistoryID, resources: resources,
+                    showsNoteEditor: $isEditingResourceNote, showsLinkEditor: $isEditingResourceLink,
+                    pendingTasks: pendingTasks)
+            }
+        } else {
+            FocusSessionHistoryView(resources: resources, showsNoteEditor: $isEditingResourceNote,
+                showsLinkEditor: $isEditingResourceLink, pendingTasks: pendingTasks)
+        }
     }
 
     private var historyBrowser: some View {

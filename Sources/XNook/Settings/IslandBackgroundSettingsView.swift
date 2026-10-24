@@ -8,6 +8,7 @@ struct IslandBackgroundSettingsView: View {
     var supportsGlass = IslandCapabilities.supportsLiquidGlass && IslandCapabilities.useLiquidGlassBackground
     /// 预览与隔离测试可注入系统条件，正常设置页始终读取真实辅助功能偏好。
     var reducedTransparencyOverride: Bool? = nil
+    var highlightedID: String? = nil
 
     private var style: IslandBackgroundStyle { IslandBackgroundStyle.resolved(from: rawStyle) }
     private var styleBinding: Binding<IslandBackgroundStyle> {
@@ -34,6 +35,7 @@ struct IslandBackgroundSettingsView: View {
             .pickerStyle(.segmented)
             .accessibilityIdentifier("islandBackgroundPresets")
             .expandedPanelDebugFrame(id: "backgroundPresets")
+            .settingsSearchTarget(id: "islandBackgroundStyle", highlightedID: highlightedID)
 
             Text(statusText)
                 .font(.system(size: 11))
@@ -42,21 +44,22 @@ struct IslandBackgroundSettingsView: View {
                 .accessibilityIdentifier("islandBackgroundStatus")
                 .expandedPanelDebugFrame(id: "backgroundStatus")
 
-            if style == .glass {
+            if style == .glass || highlightedID == "islandGlassDepth" {
                 HStack(spacing: 8) {
                     Text(L10n.islandGlassDepth)
                         .font(.system(size: 12))
                     Slider(value: depthBinding, in: IslandBackgroundPolicy.glassDepthRange)
                         .accessibilityLabel(L10n.islandGlassDepth)
                         .accessibilityIdentifier("islandGlassDepthSlider")
-                        .disabled(!glassAvailable)
+                        .disabled(style != .glass || !glassAvailable)
                     Text(String(format: "%.0f%%", depthBinding.wrappedValue * 100))
                         .font(.system(size: 11, design: .monospaced))
                         .monospacedDigit()
                         .frame(width: 38, alignment: .trailing)
                 }
                 .expandedPanelDebugFrame(id: "glassDepthControls")
-                Text(L10n.islandGlassDepthDesc)
+                .settingsSearchTarget(id: "islandGlassDepth", highlightedID: highlightedID)
+                Text(style == .glass ? L10n.islandGlassDepthDesc : L10n.settingsGlassDepthRequiresGlass)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

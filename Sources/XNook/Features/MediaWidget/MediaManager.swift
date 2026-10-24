@@ -7,6 +7,7 @@ private final class MediaManagerCleanup: @unchecked Sendable {
     private let lock = NSLock()
     private var infoObserver: NSObjectProtocol?
     private var playingObserver: NSObjectProtocol?
+    private var preferencesObserver: NSObjectProtocol?
     private var infoTimer: Timer?
     private var progressTimer: Timer?
 
@@ -19,6 +20,12 @@ private final class MediaManagerCleanup: @unchecked Sendable {
     func storePlayingObserver(_ observer: NSObjectProtocol?) {
         lock.lock()
         playingObserver = observer
+        lock.unlock()
+    }
+
+    func storePreferencesObserver(_ observer: NSObjectProtocol?) {
+        lock.lock()
+        preferencesObserver = observer
         lock.unlock()
     }
 
@@ -52,10 +59,12 @@ private final class MediaManagerCleanup: @unchecked Sendable {
         lock.lock()
         let infoObserver = infoObserver
         let playingObserver = playingObserver
+        let preferencesObserver = preferencesObserver
         let infoTimer = infoTimer
         let progressTimer = progressTimer
         self.infoObserver = nil
         self.playingObserver = nil
+        self.preferencesObserver = nil
         self.infoTimer = nil
         self.progressTimer = nil
         lock.unlock()
@@ -64,6 +73,7 @@ private final class MediaManagerCleanup: @unchecked Sendable {
         progressTimer?.invalidate()
         if let infoObserver { NotificationCenter.default.removeObserver(infoObserver) }
         if let playingObserver { NotificationCenter.default.removeObserver(playingObserver) }
+        if let preferencesObserver { NotificationCenter.default.removeObserver(preferencesObserver) }
     }
 }
 
@@ -87,6 +97,11 @@ struct MediaInfoFetchGate {
         guard isInFlight, requestID == currentRequestID else { return false }
         isInFlight = false
         return true
+    }
+
+    mutating func invalidate() {
+        currentRequestID &+= 1
+        isInFlight = false
     }
 }
 
@@ -112,6 +127,17 @@ final class MediaManager {
     var elapsedTime: TimeInterval = 0
     var isAvailable = false
     private(set) var currentSource: ScriptingBridgeHelper.SupportedApp?
+    private(set) var currentTrackIdentity: MediaTrackIdentity?
+    private(set) var seekStatus: MediaSeekStatus = .idle
+    private var playbackGeneration = 0
+    @ObservationIgnored private var seekTask: Task<Void, Never>?
+
+    var seekContext: MediaSeekContext? {
+        guard let currentTrackIdentity, duration.isFinite, duration > 0, duration < Double(Int.max),
+              hasAuthoritativePlaybackPosition, !seekStatus.isPending,
+              isPlaying ? hasFreshPlaybackPosition : hasTrustedPausedPosition else { return nil }
+        return MediaSeekContext(identity: currentTrackIdentity, generation: playbackGeneration, duration: duration)
+    }
 
     /// 缓存的 NSImage 实例，仅在 currentArtworkData 变化时重建
     private var cachedArtworkImage: NSImage?
@@ -139,6 +165,8 @@ final class MediaManager {
     private let artworkProvider: @MainActor ([String: Any]) async -> Data?
     private let clock: () -> Date
     private let timersEnabled: Bool
+    private let commandSender: (@MainActor (MediaRemoteCommand) -> Void)?
+    private let seekProvider: @MainActor (TimeInterval, MediaSeekContext) async -> MediaSeekResult
 
     // MARK: - Private Properties
 
@@ -152,8 +180,12 @@ final class MediaManager {
     private var syncedElapsedTime: TimeInterval = 0
     /// 仅在播放器提供真实位置后才推进歌词时间轴，避免从 0 秒伪造同步。
     private var hasAuthoritativePlaybackPosition = false
+    /// 已确认或在新鲜采样上冻结的暂停位置，不随暂停时长继续外推。
+    private var hasTrustedPausedPosition = false
     /// 用户手动操作播放控制后的保护截止时间（防止 ScriptingBridge 延迟覆盖）
     private var userActionDeadline: Date = .distantPast
+    /// 本地播放态切换前取得的快照，即使仍在五秒内，也不能重新建立时间锚点。
+    private var playbackSampleNotBefore: Date = .distantPast
 
     // MARK: - Init
 
@@ -163,13 +195,19 @@ final class MediaManager {
         lyricsManager: LyricsManager? = nil,
         infoProvider: @escaping @MainActor () async -> [String: Any] = { await ScriptingBridgeHelper.getNowPlayingInfo() },
         artworkProvider: @escaping @MainActor ([String: Any]) async -> Data? = { await ScriptingBridgeHelper.getArtwork(for: $0) },
-        clock: @escaping () -> Date = Date.init
+        clock: @escaping () -> Date = Date.init,
+        commandSender: (@MainActor (MediaRemoteCommand) -> Void)? = nil,
+        seekProvider: @escaping @MainActor (TimeInterval, MediaSeekContext) async -> MediaSeekResult = {
+            await ScriptingBridgeHelper.seek(to: $0, context: $1)
+        }
     ) {
         self.defaults = defaults
         self.lyricsManager = lyricsManager ?? LyricsManager(defaults: defaults)
         self.infoProvider = infoProvider
         self.artworkProvider = artworkProvider
         self.clock = clock
+        self.commandSender = commandSender
+        self.seekProvider = seekProvider
         timersEnabled = startMonitoring
         let available = startMonitoring && MediaRemoteBridge.isAvailable
         isAvailable = available
@@ -180,6 +218,11 @@ final class MediaManager {
             self?.refreshLyricLine()
             self?.startProgressTimerIfNeeded()
         }
+        cleanup.storePreferencesObserver(NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: defaults, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshLyricsPreferences() }
+        })
         guard startMonitoring else { return }
         // MediaRemote 可用时注册系统通知（快速响应）
         // 不可用时仍可通过 AppleScript 轮询获取信息
@@ -197,6 +240,7 @@ final class MediaManager {
     }
 
     deinit {
+        seekTask?.cancel()
         cleanup.cleanUp()
         if mediaRemoteAvailable {
             MediaRemoteBridge.unregisterForNotifications()
@@ -247,8 +291,9 @@ final class MediaManager {
     }
 
     func refreshLyricLine() {
+        if !lyricsManager.hasLyrics { currentLyricLine = "" }
         guard hasAuthoritativePlaybackPosition else { return }
-        guard !isPlaying || hasFreshPlaybackPosition else {
+        guard isPlaying ? hasFreshPlaybackPosition : hasTrustedPausedPosition else {
             stopProgressTimer()
             return
         }
@@ -265,6 +310,28 @@ final class MediaManager {
 
     private var hasFreshPlaybackPosition: Bool {
         hasAuthoritativePlaybackPosition && max(0, clock().timeIntervalSince(lastSyncTime)) <= 5
+    }
+
+    private func freezePlaybackPosition() {
+        guard isPlaying else { return }
+        hasTrustedPausedPosition = hasFreshPlaybackPosition
+        if hasTrustedPausedPosition { refreshLyricLine() }
+    }
+
+    private func refreshLyricsPreferences() {
+        lyricsManager.refreshPreferences()
+        let enabled = defaults.bool(forKey: "showLyrics")
+        if enabled != lastLyricsEnabled {
+            lastLyricsEnabled = enabled
+            if enabled, !currentTitle.isEmpty {
+                lyricsManager.fetchLyrics(title: currentTitle, artist: currentArtist,
+                                          album: currentAlbum, duration: duration > 0 ? duration : nil)
+            } else {
+                lyricsManager.reset()
+            }
+        }
+        refreshLyricLine()
+        startProgressTimerIfNeeded()
     }
 
     /// 停止 progressTimer（用于无播放内容时彻底停止）
@@ -382,6 +449,7 @@ final class MediaManager {
     /// 与定时器、播放通知共享的可等待入口，便于复现完整取值链路。
     func refreshNowPlayingInfo() async {
         guard let requestID = infoFetchGate.begin() else { return }
+        let generation = playbackGeneration
         let timeout = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: Self.infoFetchTimeoutNanoseconds) }
             catch { return }
@@ -389,7 +457,7 @@ final class MediaManager {
         }
         let info = await infoProvider()
         timeout.cancel()
-        guard infoFetchGate.finish(requestID: requestID) else { return }
+        guard infoFetchGate.finish(requestID: requestID), generation == playbackGeneration else { return }
         applyNowPlayingInfo(info)
     }
 
@@ -413,7 +481,10 @@ final class MediaManager {
         let newArtist = info["artist"] as? String ?? ""
         let newAlbum = info["album"] as? String ?? ""
         let newSource = ScriptingBridgeHelper.supportedApp(from: info)
-        let trackChanged = newSource != currentSource || Self.hasTrackIdentityChanged(
+        let newIdentity = MediaTrackIdentity(info: info)
+        let nativeTrackChanged = currentTrackIdentity != nil && newIdentity != nil
+            && currentTrackIdentity?.id != newIdentity?.id
+        let trackChanged = nativeTrackChanged || newSource != currentSource || Self.hasTrackIdentityChanged(
             title: newTitle,
             artist: newArtist,
             album: newAlbum,
@@ -422,6 +493,7 @@ final class MediaManager {
             previousAlbum: self.currentAlbum
         )
         if trackChanged {
+            cancelSeek()
             artworkRequestID += 1
             artworkTask?.cancel()
             artworkTask = nil
@@ -429,17 +501,27 @@ final class MediaManager {
             currentArtworkData = nil
             self.currentLyricLine = ""
             self.hasAuthoritativePlaybackPosition = false
+            self.hasTrustedPausedPosition = false
+            self.userActionDeadline = .distantPast
+            self.playbackSampleNotBefore = .distantPast
             self.syncedElapsedTime = 0
             self.elapsedTime = 0
             self.duration = 0
             // 同步基准也要归零：否则 timer 会用上一首歌残留的 lastSyncTime
             // 外推，新歌开头就得到一个凭空累积出来的巨大 elapsedTime
             self.lastSyncTime = self.clock()
+        } else if seekStatus.isPending, newIdentity != currentTrackIdentity {
+            cancelSeek()
+            seekStatus = .failed(.unconfirmed)
         }
         self.currentTitle = newTitle
         self.currentArtist = newArtist
         self.currentAlbum = newAlbum
         self.currentSource = newSource
+        self.currentTrackIdentity = newIdentity
+
+        // 定位期间同曲目的普通轮询不能抢先覆盖时间轴；切歌已在上方取消定位。
+        if seekStatus.isPending { return }
 
         // 封面提取 — 有新数据才更新，暂停时保留当前封面
         let oldArtworkData = self.currentArtworkData
@@ -457,27 +539,37 @@ final class MediaManager {
         if let dur = info["duration"] as? TimeInterval, dur.isFinite, dur >= 0 {
             self.duration = dur
         }
-        // 先更新播放速率，位置补偿计算依赖最新速率
-        if let rate = info["playbackRate"] as? Double, rate.isFinite, rate >= 0 {
-            self.playbackRate = rate
+        let sampledAt = info["positionTimestamp"] as? Date ?? self.clock()
+        let sampledAfterAction = sampledAt >= self.playbackSampleNotBefore
+        // 先更新播放速率，位置补偿计算依赖最新速率。
+        if sampledAfterAction, let rate = info["playbackRate"] as? Double, rate.isFinite, rate >= 0 {
             // 用户手动操作后的保护期内，不覆盖状态
             if self.clock() > self.userActionDeadline {
+                if self.isPlaying && rate == 0 {
+                    self.freezePlaybackPosition()
+                } else if !self.isPlaying && rate > 0 {
+                    self.hasAuthoritativePlaybackPosition = false
+                    self.hasTrustedPausedPosition = false
+                }
                 self.isPlaying = rate > 0
             }
+            self.playbackRate = rate
         }
         // 用 playerPosition 校准播放位置（每秒同步一次，防止本地计时漂移）
         // lastSyncTime 取采样时刻，补偿调度和等待另一播放器的时间。
         if let pos = info["playerPosition"] as? TimeInterval, pos.isFinite, pos >= 0 {
-            let sampledAt = info["positionTimestamp"] as? Date ?? self.clock()
-            self.hasAuthoritativePlaybackPosition = true
-            self.syncedElapsedTime = pos
-            self.lastSyncTime = sampledAt
-            self.elapsedTime = Self.compensatedElapsedTime(
-                position: pos,
-                sampledAt: sampledAt,
-                now: self.clock(),
-                playbackRate: self.playbackRate
-            )
+            let isFresh = max(0, self.clock().timeIntervalSince(sampledAt)) <= 5
+            // 暂停命令保护期内的旧“播放中”快照，不能把冻结位置向前推。
+            if sampledAfterAction && isFresh && (self.isPlaying || self.playbackRate == 0) {
+                self.hasAuthoritativePlaybackPosition = true
+                self.syncedElapsedTime = pos
+                self.lastSyncTime = sampledAt
+                self.elapsedTime = Self.compensatedElapsedTime(
+                    position: pos, sampledAt: sampledAt, now: self.clock(),
+                    playbackRate: self.isPlaying ? self.playbackRate : 0
+                )
+                self.hasTrustedPausedPosition = !self.isPlaying
+            }
         }
 
         // 切歌或歌词开关变化时同步歌词状态
@@ -517,12 +609,7 @@ final class MediaManager {
         // AppleScript 取 player position 偶发失败/超时会导致一次返回空，
         // 一旦清空就会让 ticker 闪烁回标题再恢复下一帧 —— 视觉上"歌词不显示"。
         // 保留上一行内容，等下一次成功采样再校准。
-        if self.hasAuthoritativePlaybackPosition {
-            self.lyricsManager.updateCurrentLine(elapsedTime: self.elapsedTime)
-            if self.lyricsManager.currentLine != self.currentLyricLine {
-                self.currentLyricLine = self.lyricsManager.currentLine
-            }
-        }
+        self.refreshLyricLine()
 
         // 根据当前状态决定是否需要 progressTimer
         self.startProgressTimerIfNeeded()
@@ -534,7 +621,7 @@ final class MediaManager {
     }
 
     private func requestArtworkIfNeeded(for info: [String: Any]) {
-        guard currentSource == .music, isPlaying, !currentTitle.isEmpty,
+        guard currentSource != nil, isPlaying, !currentTitle.isEmpty,
               currentArtworkData == nil, artworkTask == nil, clock() >= nextArtworkRetry else { return }
         artworkRequestID += 1
         let requestID = artworkRequestID
@@ -584,28 +671,117 @@ final class MediaManager {
 
     // MARK: - 播放控制
 
+    /// 停止的是待处理交互与回读；已经送达播放器的 AppleEvent 无法撤销。
+    func cancelSeek() {
+        playbackGeneration &+= 1
+        infoFetchGate.invalidate()
+        seekTask?.cancel()
+        seekTask = nil
+        seekStatus = .idle
+    }
+
+    @discardableResult
+    func seek(to seconds: TimeInterval, context: MediaSeekContext) -> Task<Void, Never>? {
+        guard !seekStatus.isPending else { return nil }
+        guard seconds.isFinite, seconds >= 0, context == seekContext else {
+            seekStatus = .failed(context.identity == currentTrackIdentity ? .unavailable : .trackChanged)
+            return nil
+        }
+        let target = min(seconds, context.duration)
+        refreshLyricLine()
+        cancelSeek()
+        let generation = playbackGeneration
+        let startedAt = clock()
+        playbackSampleNotBefore = startedAt
+        hasAuthoritativePlaybackPosition = false
+        hasTrustedPausedPosition = false
+        stopProgressTimer()
+        seekStatus = .pending(target)
+        let provider = seekProvider
+        let task = Task { [weak self] in
+            let result = await provider(target, context)
+            guard !Task.isCancelled, let self, self.playbackGeneration == generation,
+                  self.currentTrackIdentity == context.identity else { return }
+            self.seekTask = nil
+            self.playbackGeneration &+= 1
+            self.infoFetchGate.invalidate()
+            switch result {
+            case .confirmed(let confirmation):
+                guard confirmation.identity == context.identity,
+                      confirmation.writeFinishedAt >= startedAt,
+                      self.clock().timeIntervalSince(confirmation.sampledAt) <= 5,
+                      confirmation.sampledAt <= self.clock().addingTimeInterval(1),
+                      confirmation.confirms(target, since: confirmation.writeFinishedAt) else {
+                    self.seekStatus = .failed(.unconfirmed)
+                    return
+                }
+                self.seekStatus = .idle
+                self.playbackSampleNotBefore = confirmation.sampledAt
+                // 只接收真实回读位置；不重新取歌词或封面，不向歌词缓存写入预览值。
+                self.isPlaying = confirmation.rate > 0
+                self.playbackRate = confirmation.rate
+                self.duration = confirmation.duration
+                self.syncedElapsedTime = confirmation.position
+                self.lastSyncTime = confirmation.sampledAt
+                self.elapsedTime = min(confirmation.duration, Self.compensatedElapsedTime(
+                    position: confirmation.position, sampledAt: confirmation.sampledAt,
+                    now: self.clock(), playbackRate: confirmation.rate))
+                self.hasAuthoritativePlaybackPosition = true
+                self.hasTrustedPausedPosition = !self.isPlaying
+                self.userActionDeadline = .distantPast
+                self.refreshLyricLine()
+                self.startProgressTimerIfNeeded()
+            case .failed(let failure):
+                self.seekStatus = .failed(failure)
+            }
+        }
+        seekTask = task
+        return task
+    }
+
     func play() {
+        cancelSeek()
+        playbackSampleNotBefore = clock()
         sendPlaybackCommand(.play, fallback: .play)
+        if !isPlaying {
+            hasAuthoritativePlaybackPosition = false
+            hasTrustedPausedPosition = false
+        }
         isPlaying = true
-        userActionDeadline = Date().addingTimeInterval(2.0) // 2s 保护期
+        userActionDeadline = clock().addingTimeInterval(2.0) // 2s 保护期
         startProgressTimerIfNeeded()
     }
 
     func pause() {
+        freezePlaybackPosition()
+        cancelSeek()
+        playbackSampleNotBefore = clock()
         sendPlaybackCommand(.pause, fallback: .pause)
         isPlaying = false
-        userActionDeadline = Date().addingTimeInterval(2.0)
+        userActionDeadline = clock().addingTimeInterval(2.0)
+        refreshLyricLine()
         startProgressTimerIfNeeded()
     }
 
     func togglePlayPause() {
-        MediaRemoteBridge.sendCommand(.togglePlayPause)
+        if isPlaying {
+            freezePlaybackPosition()
+        } else {
+            hasAuthoritativePlaybackPosition = false
+            hasTrustedPausedPosition = false
+        }
+        cancelSeek()
+        playbackSampleNotBefore = clock()
+        if let commandSender { commandSender(.togglePlayPause) }
+        else { MediaRemoteBridge.sendCommand(.togglePlayPause) }
         isPlaying.toggle()
-        userActionDeadline = Date().addingTimeInterval(2.0)
+        userActionDeadline = clock().addingTimeInterval(2.0)
+        refreshLyricLine()
         startProgressTimerIfNeeded()
     }
 
     func nextTrack() {
+        cancelSeek()
         sendPlaybackCommand(.nextTrack, fallback: .nextTrack)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.fetchNowPlayingInfo()
@@ -613,6 +789,7 @@ final class MediaManager {
     }
 
     func previousTrack() {
+        cancelSeek()
         sendPlaybackCommand(.previousTrack, fallback: .previousTrack)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.fetchNowPlayingInfo()
@@ -630,6 +807,10 @@ final class MediaManager {
         _ command: ScriptingBridgeHelper.PlaybackCommand,
         fallback: MediaRemoteCommand
     ) {
+        if let commandSender {
+            commandSender(fallback)
+            return
+        }
         guard let currentSource else {
             MediaRemoteBridge.sendCommand(fallback)
             return

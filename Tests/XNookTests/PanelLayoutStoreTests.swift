@@ -180,4 +180,58 @@ final class PanelLayoutStoreTests: XCTestCase {
         XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), encoded)
         XCTAssertNil(defaults.object(forKey: PanelLayoutStore.recoveryBackupKey))
     }
+    func testContentFittingRequiresAutomaticUnsavedOverviewAndNeverWritesDefaults() throws {
+        let store = PanelLayoutStore(defaults: defaults)
+        let before = defaults.persistentDomain(forName: suiteName) ?? [:]
+        XCTAssertFalse(store.hasSavedConfiguration)
+        for automatic in [false, true] {
+            for editing in [false, true] {
+                for overview in [false, true] {
+                    XCTAssertEqual(store.shouldFitDefaultContent(automaticallyFit: automatic,
+                        isEditing: editing, isOverview: overview), automatic && !editing && overview)
+                }
+            }
+        }
+        XCTAssertEqual(defaults.persistentDomain(forName: suiteName) as NSDictionary? ?? [:], before as NSDictionary)
+        XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
+        try store.save(.factoryDefault)
+        let saved = defaults.data(forKey: PanelLayoutStore.storageKey)
+        XCTAssertTrue(store.hasSavedConfiguration)
+        XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true))
+        store.reload()
+        XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true))
+        XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), saved)
+    }
+
+    func testEditingCancelRetainsDefaultContentFitWhileSaveAndResetExplicitlyDisableIt() throws {
+        let store = PanelLayoutStore(defaults: defaults)
+        let editor = PanelLayoutEditingSession()
+        editor.begin(from: store)
+        XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true, isEditing: editor.isEditing))
+        editor.draft.resize(.notes, columns: 12, rows: 8)
+        editor.cancel()
+        XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
+        XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
+        editor.begin(from: store)
+        XCTAssertTrue(editor.save(to: store))
+        XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true))
+        defaults.removeObject(forKey: PanelLayoutStore.storageKey)
+        store.reload()
+        XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
+        try store.reset()
+        XCTAssertTrue(store.hasSavedConfiguration)
+        XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true))
+    }
+
+    func testInvalidOrFutureSavedLayoutCannotEnableContentFit() {
+        for original: Any in [Data("damaged".utf8), "unexpected", Data(#"{"version":99,"items":[]}"#.utf8)] {
+            defaults.set(original, forKey: PanelLayoutStore.storageKey)
+            let store = PanelLayoutStore(defaults: defaults)
+            XCTAssertTrue(store.hasSavedConfiguration)
+            XCTAssertNotNil(store.loadError)
+            XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true))
+            XCTAssertEqual(defaults.object(forKey: PanelLayoutStore.storageKey) as? NSObject, original as? NSObject)
+            XCTAssertNil(defaults.object(forKey: PanelLayoutStore.recoveryBackupKey))
+        }
+    }
 }

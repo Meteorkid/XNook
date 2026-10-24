@@ -7,6 +7,13 @@ final class CalendarReminderManager {
     struct ReminderCandidate: Equatable {
         let identifier: String
         let startDate: Date
+        let title: String
+
+        init(identifier: String, startDate: Date, title: String = "") {
+            self.identifier = identifier
+            self.startDate = startDate
+            self.title = title
+        }
     }
 
     struct SoundOption: Identifiable, Equatable {
@@ -28,14 +35,29 @@ final class CalendarReminderManager {
 
     static let leadMinuteOptions: [Int] = [1, 5, 10, 15, 30]
 
+    var onReminder: (@MainActor (ReminderCandidate) -> Bool)?
+
+    private let defaults: UserDefaults
+    private let soundPlayer: @MainActor (String) -> Void
     private let eventStore = EKEventStore()
     private var timer: Timer?
     private var notifiedReminderKeys: Set<String>
 
     private static let notifiedReminderKeysKey = "calendarReminderNotifiedKeys"
 
-    private init() {
-        notifiedReminderKeys = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedReminderKeysKey) ?? [])
+    init(
+        defaults: UserDefaults = .standard,
+        soundPlayer: @escaping @MainActor (String) -> Void = { soundName in
+            if let sound = NSSound(named: NSSound.Name(soundName)) {
+                sound.play()
+            } else {
+                NSSound.beep()
+            }
+        }
+    ) {
+        self.defaults = defaults
+        self.soundPlayer = soundPlayer
+        notifiedReminderKeys = Set(defaults.stringArray(forKey: Self.notifiedReminderKeysKey) ?? [])
     }
 
     func startMonitoring() {
@@ -63,6 +85,32 @@ final class CalendarReminderManager {
 
     func playPreviewSound() {
         playSound(named: selectedSoundName)
+    }
+
+    func playDueReminderSound(now: Date = Date()) {
+        guard soundRemindersEnabled, !isQuietHoursActive(now: now) else { return }
+        playSound(named: selectedSoundName)
+    }
+
+    @discardableResult
+    func deliverReminder(_ reminder: ReminderCandidate, now: Date = Date()) -> Bool {
+        guard remindersEnabled, !isQuietHoursActive(now: now),
+              reminder.startDate >= now,
+              reminder.startDate <= now.addingTimeInterval(max(leadMinutes, 1) * 60) else {
+            return false
+        }
+
+        let reminderKey = Self.reminderKey(for: reminder.identifier, startDate: reminder.startDate)
+        guard !notifiedReminderKeys.contains(reminderKey) else { return false }
+        notifiedReminderKeys.insert(reminderKey)
+        persistNotifiedReminderKeys()
+
+        // 接管只表示本轮候选已消费；声响由实际展示时的回调决定。
+        if activityRemindersEnabled, onReminder?(reminder) == true {
+            return true
+        }
+        playDueReminderSound(now: now)
+        return true
     }
 
     static func isQuietHoursActive(
@@ -116,43 +164,56 @@ final class CalendarReminderManager {
     }
 
     private var remindersEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "calendarReminderSoundEnabled")
+        soundRemindersEnabled || activityRemindersEnabled
+    }
+
+    private var soundRemindersEnabled: Bool {
+        defaults.bool(forKey: "calendarReminderSoundEnabled")
+    }
+
+    private var activityRemindersEnabled: Bool {
+        defaults.bool(forKey: "activityNotificationsEnabled")
+            && defaults.bool(forKey: "calendarReminderActivityEnabled")
     }
 
     private var quietHoursEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "quietHoursEnabled")
+        defaults.bool(forKey: "quietHoursEnabled")
     }
 
     private var quietHoursStart: String {
-        UserDefaults.standard.string(forKey: "quietHoursStart") ?? "22:00"
+        defaults.string(forKey: "quietHoursStart") ?? "22:00"
     }
 
     private var quietHoursEnd: String {
-        UserDefaults.standard.string(forKey: "quietHoursEnd") ?? "07:00"
+        defaults.string(forKey: "quietHoursEnd") ?? "07:00"
     }
 
     private var leadMinutes: Double {
-        UserDefaults.standard.double(forKey: "calendarReminderLeadMinutes")
+        defaults.double(forKey: "calendarReminderLeadMinutes")
     }
 
     private var selectedSoundName: String {
-        let rawValue = UserDefaults.standard.string(forKey: "calendarReminderSoundName") ?? "Glass"
+        let rawValue = defaults.string(forKey: "calendarReminderSoundName") ?? "Glass"
         if Self.soundOptions.contains(where: { $0.rawValue == rawValue }) {
             return rawValue
         }
         return "Glass"
     }
 
-    private func checkForDueReminders(now: Date = Date()) {
-        pruneReminderKeys(referenceDate: now)
-
-        guard remindersEnabled else { return }
-        guard !Self.isQuietHoursActive(
+    private func isQuietHoursActive(now: Date) -> Bool {
+        Self.isQuietHoursActive(
             enabled: quietHoursEnabled,
             start: quietHoursStart,
             end: quietHoursEnd,
             now: now
-        ) else { return }
+        )
+    }
+
+    private func checkForDueReminders(now: Date = Date()) {
+        pruneReminderKeys(referenceDate: now)
+
+        guard remindersEnabled else { return }
+        guard !isQuietHoursActive(now: now) else { return }
         guard hasCalendarAccess else { return }
 
         let leadTime = max(leadMinutes, 1) * 60
@@ -160,7 +221,7 @@ final class CalendarReminderManager {
         let allCalendars = eventStore.calendars(for: .event)
         let selectedIdentifiers = CalendarManager.selectedCalendarIdentifiers(
             availableIdentifiers: Set(allCalendars.map(\.calendarIdentifier)),
-            storedIdentifiers: UserDefaults.standard.object(forKey: CalendarManager.selectedCalendarIdentifiersKey) as? [String]
+            storedIdentifiers: defaults.object(forKey: CalendarManager.selectedCalendarIdentifiersKey) as? [String]
         )
         let calendars = allCalendars.filter { selectedIdentifiers.contains($0.calendarIdentifier) }
         guard !calendars.isEmpty else { return }
@@ -173,7 +234,10 @@ final class CalendarReminderManager {
 
         let candidates = eventStore.events(matching: predicate)
             .filter { !$0.isAllDay }
-            .map { ReminderCandidate(identifier: $0.eventIdentifier, startDate: $0.startDate) }
+            .compactMap { event -> ReminderCandidate? in
+                guard let identifier = event.eventIdentifier, let startDate = event.startDate else { return nil }
+                return ReminderCandidate(identifier: identifier, startDate: startDate, title: event.title ?? "")
+            }
 
         guard let reminder = Self.nextReminder(
             candidates: candidates,
@@ -184,9 +248,7 @@ final class CalendarReminderManager {
             return
         }
 
-        notifiedReminderKeys.insert(Self.reminderKey(for: reminder.identifier, startDate: reminder.startDate))
-        persistNotifiedReminderKeys()
-        playSound(named: selectedSoundName)
+        deliverReminder(reminder, now: now)
     }
 
     private var hasCalendarAccess: Bool {
@@ -199,11 +261,7 @@ final class CalendarReminderManager {
     }
 
     private func playSound(named soundName: String) {
-        if let sound = NSSound(named: NSSound.Name(soundName)) {
-            sound.play()
-        } else {
-            NSSound.beep()
-        }
+        soundPlayer(soundName)
     }
 
     private func pruneReminderKeys(referenceDate: Date) {
@@ -218,7 +276,7 @@ final class CalendarReminderManager {
     }
 
     private func persistNotifiedReminderKeys() {
-        UserDefaults.standard.set(Array(notifiedReminderKeys).sorted(), forKey: Self.notifiedReminderKeysKey)
+        defaults.set(Array(notifiedReminderKeys).sorted(), forKey: Self.notifiedReminderKeysKey)
     }
 
     private static func reminderKey(for identifier: String, startDate: Date) -> String {

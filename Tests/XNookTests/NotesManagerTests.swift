@@ -516,6 +516,32 @@ final class NotesManagerTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: storageURL), storedNotes)
     }
 
+    func testCreateAndSelectRefuseToLeaveDraftWhenFlushFails() throws {
+        let first = NotesManager.Note(title: "First", content: "Before")
+        let second = NotesManager.Note(title: "Second", content: "Other")
+        try store([first, second])
+        var shouldFail = true
+        let manager = NotesManager(storageURL: storageURL, saveDelay: 60, writeData: { data, url in
+            if shouldFail { throw CocoaError(.fileWriteNoPermission) }
+            try data.write(to: url, options: .atomic)
+        })
+        XCTAssertTrue(manager.selectNote(id: first.id))
+        manager.updateCurrentNoteContent("Unsaved draft")
+
+        XCTAssertNil(manager.createNote(title: "Must not replace draft"))
+        XCTAssertFalse(manager.selectNote(id: second.id))
+        XCTAssertEqual(manager.notes.map(\.id), [first.id, second.id])
+        XCTAssertEqual(manager.currentNote?.id, first.id)
+        XCTAssertEqual(manager.currentNote?.content, "Unsaved draft")
+        XCTAssertTrue(manager.isEditing)
+        XCTAssertEqual(try savedNotes().first?.content, "Before")
+
+        shouldFail = false
+        XCTAssertTrue(manager.selectNote(id: second.id))
+        XCTAssertEqual(try savedNotes().first?.content, "Unsaved draft")
+        XCTAssertNotNil(manager.createNote(title: "Saved draft can be left"))
+    }
+
     private func store(_ notes: [NotesManager.Note]) throws {
         try JSONEncoder().encode(notes).write(to: storageURL, options: .atomic)
     }

@@ -64,7 +64,9 @@ struct NotesWidgetView: View {
             onInteractionChanged(isPresented)
         }
         .onDisappear {
-            notesManager.flushPendingChanges()
+            if AppDelegate.shared?.discardsPendingNotesOnTermination != true {
+                notesManager.flushPendingChanges()
+            }
             onInteractionChanged(false)
         }
         .alert(L10n.notesExportFailed, isPresented: Binding(

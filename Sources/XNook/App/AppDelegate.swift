@@ -6,6 +6,7 @@ extension Notification.Name {
     static let xnookScrollDown = Notification.Name("xnookScrollDown")
     static let xnookCollapse = Notification.Name("xnookCollapse")
     static let xnookWindowDidPresent = Notification.Name("xnookWindowDidPresent")
+    static let xnookRevealPanel = Notification.Name("xnookRevealPanel")
     static let islandDidCollapse = Notification.Name("islandDidCollapse")
 }
 
@@ -24,8 +25,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     var notchWindow: NotchWindow?
     weak var notesManagerForTermination: NotesManager?
+    private(set) var discardsPendingNotesOnTermination = false
     let themeManager = ThemeManager()
     let updateManager = UpdateManager()
+    let activityCoordinator = PanelActivityCoordinator(
+        onPresent: { event in
+            if event.source == "calendar" { CalendarReminderManager.shared.playDueReminderSound() }
+        },
+        onAction: { action in
+            if action == .openCalendar,
+               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    )
+    lazy var claudeCompletionReceiver = ClaudeCompletionReceiver { [weak self] event in
+        guard let self, UserDefaults.standard.bool(forKey: "claudeCompletionEnabled"),
+              UserDefaults.standard.bool(forKey: "activityNotificationsEnabled") else { return }
+        self.activityCoordinator.setEnabled(true)
+        self.activityCoordinator.enqueue(PanelActivityEvent(source: event.source, id: event.id,
+            title: L10n.claudeResponseEnded, kind: .completion,
+            createdAt: event.createdAt, expiresAt: event.expiresAt))
+    }
+    private var claudePreferencesObserver: NSObjectProtocol?
+    private var claudeWasEnabled: Bool?
+    lazy var globalPanelShortcut = GlobalPanelShortcutController { [weak self] in
+        self?.revealPanelFromShortcut()
+    }
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var scrollMonitor: Any?
@@ -65,12 +91,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsDefaults.register()
         IslandIntegrationSettings.registerDefaults()
         IslandIntegrationSettings.markProtocolAvailable(for: .xnook)
+        activityCoordinator.setEnabled(UserDefaults.standard.bool(forKey: "activityNotificationsEnabled"))
+        synchronizeClaudeCompletion()
+        claudePreferencesObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.synchronizeClaudeCompletion() }
+        }
+        CalendarReminderManager.shared.onReminder = { [weak activityCoordinator] reminder in
+            guard let activityCoordinator else { return false }
+            activityCoordinator.setEnabled(UserDefaults.standard.bool(forKey: "activityNotificationsEnabled"))
+            guard activityCoordinator.isEnabled else { return false }
+            activityCoordinator.enqueue(.calendarReminder(reminder))
+            // 已交给统一队列，不能在提示被门控时绕过队列发声。
+            return true
+        }
         CalendarReminderManager.shared.startMonitoring()
 
         setupNotchWindow()
         if let pendingIslandShowURL { handleIslandCommand(pendingIslandShowURL) }
         setupMenuBarItem()
         setupScrollMonitor()
+        globalPanelShortcut.activate()
 
         // 监听跨进程通知：对方应用请求本应用隐藏
         // 通知名格式：island.switch.hide.{targetAppName}
@@ -110,6 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        discardsPendingNotesOnTermination = false
         guard notesManagerForTermination?.prepareForTermination() != false else {
             let alert = NSAlert()
             alert.alertStyle = .warning
@@ -118,7 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: L10n.back)
             alert.addButton(withTitle: L10n.notesQuitWithoutSaving)
             sender.activate(ignoringOtherApps: true)
-            return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+            guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+            discardsPendingNotesOnTermination = true
+            return .terminateNow
         }
         return .terminateNow
     }
@@ -255,7 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hostView = NotchHostingView(
             rootView: NotchContentView(onSizeChange: { [weak window] w, h in
                 window?.resizeToFit(contentWidth: w, contentHeight: h)
-            })
+            }, activityCoordinator: activityCoordinator)
         )
         hostView.frame = window.contentView!.bounds
         hostView.autoresizingMask = [.width, .height]
@@ -417,6 +462,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        globalPanelShortcut.shutdown()
+        claudeCompletionReceiver.shutdown()
+        if let observer = claudePreferencesObserver {
+            NotificationCenter.default.removeObserver(observer)
+            claudePreferencesObserver = nil
+        }
+        CalendarReminderManager.shared.onReminder = nil
+        activityCoordinator.shutdown()
+        clearSwitchingAppsWorkItem?.cancel()
+        clearSwitchingAppsWorkItem = nil
+        notchWindow?.tearDown()
         CalendarReminderManager.shared.stopMonitoring()
         if let observer = islandHideObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
@@ -426,6 +482,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             scrollMonitor = nil
         }
+    }
+
+    private func synchronizeClaudeCompletion() {
+        guard ownsSharedData else { return }
+        let enabled = UserDefaults.standard.bool(forKey: "claudeCompletionEnabled")
+            && UserDefaults.standard.bool(forKey: "activityNotificationsEnabled")
+        guard claudeWasEnabled != enabled else { return }
+        claudeWasEnabled = enabled
+        claudeCompletionReceiver.setEnabled(enabled)
+    }
+
+    private func revealPanelFromShortcut() {
+        guard ownsSharedData, let window = notchWindow else { return }
+        showIsland(preferMouseScreen: true, hidePeers: true)
+        window.requestPanelReveal()
     }
 
     private func postHideNotification(_ name: String) {

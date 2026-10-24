@@ -4,6 +4,43 @@ import XCTest
 
 @MainActor
 final class NotchWindowVisibilityTests: XCTestCase {
+    func testCloseDiscardsPendingFullscreenRestore() async throws {
+        let started = expectation(description: "等待全屏回读")
+        let probe = FullscreenProbe(started: [started])
+        let fixture = try makeFixture(probe: { await probe.result() })
+        defer { fixture.close() }
+        fixture.window.showWindow()
+        let check = try XCTUnwrap(fixture.window.refreshFullscreenVisibility())
+        await fulfillment(of: [started], timeout: 1)
+        fixture.window.close()
+        await probe.complete(0, fullscreen: false)
+        await check.value
+        XCTAssertFalse(fixture.window.isVisible)
+        XCTAssertFalse(fixture.window.activityState.isActive)
+        XCTAssertNil(fixture.window.refreshFullscreenVisibility())
+    }
+
+    func testWorkspaceSleepAndWakePreserveIslandHiddenIntent() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        // fixture 为其他测试隔离了 Workspace 通知；本例单独注册本窗口的公开通知选择器。
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(fixture.window, selector: NSSelectorFromString("systemWillSleep:"),
+            name: NSWorkspace.willSleepNotification, object: nil)
+        center.addObserver(fixture.window, selector: NSSelectorFromString("systemDidWake:"),
+            name: NSWorkspace.didWakeNotification, object: nil)
+        defer { center.removeObserver(fixture.window) }
+        fixture.window.showWindow()
+        XCTAssertTrue(fixture.window.activityState.isActive)
+        center.post(name: NSWorkspace.willSleepNotification, object: nil)
+        XCTAssertFalse(fixture.window.activityState.isActive)
+        fixture.window.hideWindowForIslandSwitch(animated: false)
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        XCTAssertFalse(fixture.window.isVisible)
+        XCTAssertFalse(fixture.window.activityState.isActive)
+        XCTAssertTrue(fixture.window.isHiddenByIslandSwitch)
+    }
+
     func testExplicitShowsCancelPendingSwitchAndRecordShowTime() throws {
         var pendingSwitch = true
         var cancellationCount = 0

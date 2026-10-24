@@ -114,6 +114,7 @@ struct PanelDashboardGrid<Content: View>: View {
     let isEditing: Bool
     let summary: (PanelModuleID) -> String
     var moduleFill: Color? = nil
+    var fitsContent = false
     @ViewBuilder let content: (PanelModulePlacement, CGSize) -> Content
     @Environment(\.colorScheme) private var colorScheme
     @State private var drag: GridDrag?
@@ -127,7 +128,8 @@ struct PanelDashboardGrid<Content: View>: View {
 
     var body: some View {
         let frames = PanelGridGeometry.frames(for: configuration, width: width, isEditing: isEditing)
-        PanelDashboardLayout(frames: frames) {
+        let contentFit = fitsContent && !isEditing
+        PanelDashboardLayout(frames: frames, configuration: configuration, width: width, fitsContent: contentFit) {
             ForEach(configuration.items) { item in
                 let size = frames[item.id]?.size ?? CGSize(width: 248, height: 184)
                 ZStack(alignment: .topLeading) {
@@ -187,7 +189,9 @@ struct PanelDashboardGrid<Content: View>: View {
             }
         }
         .coordinateSpace(name: "panelGridEditor")
-        .frame(width: max(1, width), height: max(44, PanelGridGeometry.height(for: configuration, width: width, isEditing: isEditing)), alignment: .topLeading)
+        .frame(width: max(1, width),
+               height: contentFit ? nil : max(44, PanelGridGeometry.height(for: configuration, width: width, isEditing: isEditing)),
+               alignment: .topLeading)
         .overlay {
             if configuration.visibleItems.isEmpty {
                 Text(L10n.localized(zh: "组件已隐藏，可在编辑布局中重新显示。", en: "All modules are hidden. Edit the layout to show them again."))
@@ -219,12 +223,30 @@ private struct PanelDashboardModuleKey: LayoutValueKey {
 
 private struct PanelDashboardLayout: Layout {
     let frames: [PanelModuleID: CGRect]
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        CGSize(width: proposal.width ?? 800, height: frames.values.map(\.maxY).max() ?? 44)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let configuration: PanelLayoutConfiguration
+    let width: CGFloat
+    let fitsContent: Bool
+
+    private func displayedFrames(subviews: Subviews) -> [PanelModuleID: CGRect] {
+        guard fitsContent else { return frames }
+        var measuredHeights: [PanelModuleID: CGFloat] = [:]
         for view in subviews {
-            guard let id = view[PanelDashboardModuleKey.self], let frame = frames[id] else {
+            guard let id = view[PanelDashboardModuleKey.self], let frame = frames[id] else { continue }
+            // 同一视图树按既定内容预算测自然高度，不把测得高度反馈成新的条数预算。
+            measuredHeights[id] = view.sizeThatFits(ProposedViewSize(width: frame.width, height: nil)).height
+        }
+        return PanelGridGeometry.contentFittedFrames(for: configuration, width: width, measuredHeights: measuredHeights)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let displayed = displayedFrames(subviews: subviews)
+        return CGSize(width: proposal.width ?? width, height: max(44, displayed.values.map(\.maxY).max() ?? 44))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let displayed = displayedFrames(subviews: subviews)
+        for view in subviews {
+            guard let id = view[PanelDashboardModuleKey.self], let frame = displayed[id] else {
                 view.place(at: bounds.origin, anchor: .topLeading, proposal: .zero)
                 continue
             }

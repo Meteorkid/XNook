@@ -122,7 +122,7 @@ final class NotesManager {
 
     /// 创建新笔记并返回，便于调用方获取 id 等字段做关联
     func createNote(title: String = L10n.notesUntitled, content: String = "", isMarkdown: Bool = true) -> Note? {
-        guard !isStorageReadOnly else { return nil }
+        guard !isStorageReadOnly, !hasPendingChanges || flushPendingChanges() else { return nil }
         let note = Note(title: title, content: content, isMarkdown: isMarkdown)
         notes.insert(note, at: 0)
         currentNote = note
@@ -182,7 +182,7 @@ final class NotesManager {
     @discardableResult
     func selectNote(id: UUID) -> Bool {
         guard let latestNote = notes.first(where: { $0.id == id }) else { return false }
-        flushPendingChanges()
+        guard !hasPendingChanges || flushPendingChanges() else { return false }
         currentNote = latestNote
         isEditing = true
         return true

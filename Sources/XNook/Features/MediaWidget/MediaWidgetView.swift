@@ -6,6 +6,9 @@ struct MediaWidgetView: View {
     var isDetail = false
     var onShowAll: (() -> Void)?
     var availableHeight: CGFloat? = nil
+    @State private var showsLyricsDetails = false
+    @State private var seekInteraction = MediaSeekInteraction()
+    @Environment(\.mediaSeekInteractionEnabled) private var seekInteractionEnabled
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
@@ -20,6 +23,11 @@ struct MediaWidgetView: View {
         let elapsed = mediaManager.elapsedTime.isFinite ? max(0, mediaManager.elapsedTime) : 0
         return duration > 0 ? min(elapsed, duration) : elapsed
     }
+    private var displayedElapsedTime: TimeInterval {
+        if let preview = seekInteraction.previewTime { return preview }
+        if case .pending(let target) = mediaManager.seekStatus { return target }
+        return elapsedTime
+    }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -30,6 +38,13 @@ struct MediaWidgetView: View {
         .frame(maxWidth: .infinity)
         .foregroundStyle(.primary)
         .expandedPanelDebugFrame(id: "mediaWidgetRoot")
+        .onChange(of: mediaManager.seekContext) { _, context in
+            if seekInteraction.context != context { seekInteraction.invalidate() }
+        }
+        .onChange(of: seekInteractionEnabled) { _, enabled in
+            if !enabled { cancelSeekInteraction(preservingGesture: true) }
+        }
+        .onDisappear { if isDetail { cancelSeekInteraction() } }
     }
 
     private var overviewHeader: some View {
@@ -67,7 +82,11 @@ struct MediaWidgetView: View {
                         artworkButton
                         VStack(alignment: .leading, spacing: 8) {
                             trackInfo
-                            if !isDetail { playbackControls }
+                            if isDetail {
+                                lyricsDetailsButton
+                            } else {
+                                playbackControls
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .expandedPanelDebugFrame(id: "mediaWidgetTrackGroup")
@@ -178,21 +197,64 @@ struct MediaWidgetView: View {
 
     private var playbackProgress: some View {
         VStack(spacing: 5) {
-            // 使用进度条表达只读时间轴，不呈现尚无播放器接口支持的拖动控件。
-            ProgressView(value: elapsedTime, total: duration)
-                .progressViewStyle(.linear)
+            if mediaManager.seekContext != nil || mediaManager.seekStatus.isPending {
+                Slider(value: Binding(get: { displayedElapsedTime }, set: { value in
+                    guard seekInteractionEnabled, !mediaManager.seekStatus.isPending else { return }
+                    if !seekInteraction.isEditing {
+                        seekInteraction.begin(context: mediaManager.seekContext, elapsedTime: elapsedTime)
+                    }
+                    seekInteraction.update(to: value, currentContext: mediaManager.seekContext)
+                }), in: 0...duration, onEditingChanged: { editing in
+                    guard seekInteractionEnabled else {
+                        cancelSeekInteraction(preservingGesture: editing)
+                        return
+                    }
+                    if editing {
+                        if !seekInteraction.isEditing {
+                            seekInteraction.begin(context: mediaManager.seekContext, elapsedTime: elapsedTime)
+                        }
+                    } else if let request = seekInteraction.finish(currentContext: mediaManager.seekContext) {
+                        mediaManager.seek(to: request.seconds, context: request.context)
+                    }
+                })
                 .tint(Color.primary.opacity(0.8))
+                .disabled(!seekInteractionEnabled || mediaManager.seekStatus.isPending)
                 .accessibilityLabel(L10n.mediaPlaybackProgress)
-                .accessibilityValue("\(mediaManager.formatTime(elapsedTime)) / \(mediaManager.formatTime(duration))")
+                .accessibilityValue("\(mediaManager.formatTime(displayedElapsedTime)) / \(mediaManager.formatTime(duration))")
+                .accessibilityIdentifier("mediaWidgetSeekSlider")
+                .expandedPanelDebugFrame(id: "mediaWidgetSeekSlider")
+                .onExitCommand { cancelSeekInteraction(preservingGesture: true) }
+            } else {
+                ProgressView(value: elapsedTime, total: duration)
+                    .progressViewStyle(.linear)
+                    .tint(Color.primary.opacity(0.8))
+                    .help(L10n.mediaSeekUnavailable)
+                    .accessibilityLabel(L10n.mediaPlaybackProgress)
+                    .accessibilityValue("\(mediaManager.formatTime(elapsedTime)) / \(mediaManager.formatTime(duration))")
+            }
             HStack {
-                Text(mediaManager.formatTime(elapsedTime))
+                Text(mediaManager.formatTime(displayedElapsedTime))
                 Spacer(minLength: 8)
                 Text(mediaManager.formatTime(duration))
             }
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(Color.primary.opacity(0.6))
+            if mediaManager.seekStatus.isPending {
+                Text(L10n.mediaSeekPending).font(.caption2).foregroundStyle(.secondary)
+            } else if case .failed(let failure) = mediaManager.seekStatus {
+                Text(L10n.mediaSeekFailure(failure))
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("mediaWidgetSeekFailure")
+            }
         }
         .expandedPanelDebugFrame(id: "mediaWidgetProgress")
+    }
+
+    private func cancelSeekInteraction(preservingGesture: Bool = false) {
+        if preservingGesture { seekInteraction.invalidate() }
+        else { seekInteraction.cancel() }
+        if isDetail { mediaManager.cancelSeek() }
     }
 
     private var lyricsStatus: some View {
@@ -207,7 +269,7 @@ struct MediaWidgetView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(Color.primary.opacity(0.45))
             } else {
-                Text(mediaManager.lyricsManager.isFetching ? L10n.mediaLyricsLoading : L10n.mediaLyricsUnavailable)
+                Text(L10n.lyricsStatus(mediaManager.lyricsManager.status))
                     .foregroundStyle(Color.primary.opacity(0.45))
             }
         }
@@ -217,6 +279,24 @@ struct MediaWidgetView: View {
         .lineLimit(2)
         .frame(maxWidth: .infinity)
         .expandedPanelDebugFrame(id: "mediaWidgetLyrics")
+    }
+
+    private var lyricsDetailsButton: some View {
+        Button { showsLyricsDetails = true } label: {
+            Label(L10n.lyricsDetails, systemImage: "text.quote")
+                .font(.system(size: 11))
+                .frame(minHeight: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(L10n.lyricsDetails)
+        .accessibilityLabel(L10n.lyricsDetails)
+        .accessibilityIdentifier("mediaWidgetLyricsDetails")
+        .expandedPanelDebugFrame(id: "mediaWidgetLyricsDetails")
+        .popover(isPresented: $showsLyricsDetails) {
+            LyricsDetailsView(mediaManager: mediaManager, onClose: { showsLyricsDetails = false })
+        }
     }
 
     private var emptyState: some View {
@@ -261,6 +341,17 @@ struct MediaWidgetView: View {
                         .foregroundStyle(Color.primary.opacity(0.45))
                 )
         }
+    }
+}
+
+private struct MediaSeekInteractionEnabledKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var mediaSeekInteractionEnabled: Bool {
+        get { self[MediaSeekInteractionEnabledKey.self] }
+        set { self[MediaSeekInteractionEnabledKey.self] = newValue }
     }
 }
 

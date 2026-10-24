@@ -48,10 +48,19 @@
     "isolatedNativeMouseWidthPt": 800
   },
   "publicAssetVerification": {
-    "completed": false
+    "completed": true,
+    "releaseURL": "https://github.com/Meteorkid/XNook/releases/tag/v1.3.20",
+    "unauthenticatedPublicDownloadSHA256": "95cdbf79131c3222a7f4b96fbbbc48379cd448fe599dc2f7846e83e8e5716b32",
+    "matchesBuiltDMG": true
   },
   "localInstallation": {
-    "completed": false
+    "completed": true,
+    "version": "1.3.20",
+    "signatureAndHashMatched": true,
+    "settingsEntryPassed": true,
+    "cornerResizePassed": true,
+    "titleDragPassed": false,
+    "supersededBy": "1.3.21"
   },
   "notVerified": [
     "formal App Settings/editor/cold restart acceptance pending local update",
@@ -65,5 +74,6 @@
   "scope": {
     "uncommittedParallelVisualWorkIncluded": false,
     "windowsArtifactPublished": false
-  }
+  },
+  "knownIssue": "Title Button intercepted drag in production NSPanel; fixed and verified in 1.3.21."
 }

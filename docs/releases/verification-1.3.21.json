@@ -49,15 +49,44 @@
     "titleDragABPassed": true
   },
   "publicAssetVerification": {
-    "completed": false
+    "completed": true,
+    "releaseURL": "https://github.com/Meteorkid/XNook/releases/tag/v1.3.21",
+    "publishedAt": "2026-10-24T10:05:47Z",
+    "unauthenticatedPublicDownloadSHA256": "451e9b6cbb01bddaa4980eda74fd9eb61914b52bb048bd29fad2a177406051b4",
+    "matchesBuiltDMG": true
   },
   "localInstallation": {
-    "completed": false,
-    "candidateNativePanelAcceptance": true,
-    "candidateEvidence": ".build/release-1.3.20-evidence/native-title-drag-comparison.json"
+    "completed": true,
+    "installedPath": "/Applications/X Nook.app",
+    "version": "1.3.21",
+    "executableSHA256": "ff1ca446ca50ef8d4622a88826e2ad6ce86ab308b5b7b45fcdffe5b162309463",
+    "matchesPublicDMG": true,
+    "signatureVerified": true,
+    "launchVerified": true,
+    "aboutShowsLatestVersion": true,
+    "finalPID": 86936,
+    "realNativeWindowWidthPt": 800,
+    "settingsEntryPassed": true,
+    "titleDragPassed": true,
+    "cornerResizeTo6By6Passed": true,
+    "savePassed": true,
+    "actualColdRestartPreservedLayout": true,
+    "finalCancelWithoutChangesPassed": true,
+    "candidateAdditionalChecks": {
+      "sameGestureFix": true,
+      "clickSelection": true,
+      "hideDraftThenCancel": true,
+      "restoreDefaultAndSave": true,
+      "sourceEvidence": ".build/release-1.3.20-evidence/native-title-drag-comparison.json"
+    },
+    "originalLayoutAndVisibilityRestoredAfterTests": true,
+    "businessFileHashesAndSessionPayloadsPreserved": true,
+    "notesCount": 3,
+    "historyCount": 3,
+    "trayCount": 0,
+    "rollbackArchivesRetained": true
   },
   "notVerified": [
-    "exact final public package local installation pending",
     "Escape behavior",
     "600pt real mouse",
     "VoiceOver speech",
@@ -70,5 +99,7 @@
   "scope": {
     "uncommittedParallelVisualWorkIncluded": false,
     "windowsArtifactPublished": false
-  }
+  },
+  "releaseCommit": "de05bc192c6501b9238cd146b2d06ca8de0d4e53",
+  "completedAtUTC": "2026-10-24T10:10:44.299986+00:00"
 }

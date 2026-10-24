@@ -2,6 +2,8 @@ import XCTest
 @testable import XNook
 
 final class ExpandedPanelLayoutTests: XCTestCase {
+    private let enabledWidgets = NotchContentView.WidgetType.allCases
+
     func testNarrowPanelsUseOneColumnAndFourWidgetsUseTwoBalancedColumns() {
         XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 160, widgetCount: 4), 1)
         XCTAssertEqual(ExpandedPanelLayout.columnCount(width: 480, widgetCount: 4), 1)
@@ -87,30 +89,47 @@ final class ExpandedPanelLayoutTests: XCTestCase {
     }
 
     func testMeasurementRejectsPreviousWidthAndPreviousNavigationMode() {
-        let overview = ExpandedPanelMeasurement(width: 800, height: 520, selectedWidget: nil)
-        let detail = ExpandedPanelMeasurement(width: 800, height: 720, selectedWidget: .notes)
+        let overview = ExpandedPanelMeasurement(width: 800, height: 520, selectedWidget: nil, enabledWidgets: enabledWidgets)
+        let detail = ExpandedPanelMeasurement(width: 800, height: 720, selectedWidget: .notes, enabledWidgets: enabledWidgets)
 
-        XCTAssertTrue(overview.matches(width: 800.1, selectedWidget: nil))
-        XCTAssertFalse(overview.matches(width: 800.5, selectedWidget: nil))
-        XCTAssertFalse(overview.matches(width: 600, selectedWidget: nil))
-        XCTAssertFalse(overview.matches(width: 800, selectedWidget: .notes))
-        XCTAssertTrue(detail.matches(width: 800, selectedWidget: .notes))
-        XCTAssertFalse(detail.matches(width: 800, selectedWidget: .calendar))
+        XCTAssertTrue(overview.matches(width: 800.1, selectedWidget: nil, enabledWidgets: enabledWidgets))
+        XCTAssertFalse(overview.matches(width: 800.5, selectedWidget: nil, enabledWidgets: enabledWidgets))
+        XCTAssertFalse(overview.matches(width: 600, selectedWidget: nil, enabledWidgets: enabledWidgets))
+        XCTAssertFalse(overview.matches(width: 800, selectedWidget: .notes, enabledWidgets: enabledWidgets))
+        XCTAssertTrue(detail.matches(width: 800, selectedWidget: .notes, enabledWidgets: enabledWidgets))
+        XCTAssertFalse(detail.matches(width: 800, selectedWidget: .calendar, enabledWidgets: enabledWidgets))
+    }
+
+    func testMeasurementRejectsPreviousWidgetConfigurationEvenAtEqualHeight() {
+        let originalWidgets: [NotchContentView.WidgetType] = [.media, .calendar, .tray]
+        let previous = ExpandedPanelMeasurement(width: 800, height: 326, selectedWidget: nil,
+            enabledWidgets: originalWidgets)
+        let configurations: [[NotchContentView.WidgetType]] = [
+            [.media, .calendar], [.media, .calendar, .notes], [.tray, .calendar, .media], []
+        ]
+        for nextWidgets in configurations {
+            let next = ExpandedPanelMeasurement(width: 800, height: 326, selectedWidget: nil,
+                enabledWidgets: nextWidgets)
+            XCTAssertFalse(previous.matches(width: 800, selectedWidget: nil, enabledWidgets: nextWidgets))
+            XCTAssertTrue(next.matches(width: 800, selectedWidget: nil, enabledWidgets: nextWidgets))
+            XCTAssertTrue(next.differs(from: previous))
+            XCTAssertNotEqual(next, previous, "组件变化必须触发 SwiftUI preference 的新回调")
+        }
     }
 
     func testInvalidMeasurementsCannotReplaceValidDimensions() {
         let invalidValues: [CGFloat] = [.nan, .infinity, -.infinity, 0, -1]
         for value in invalidValues {
-            XCTAssertFalse(ExpandedPanelMeasurement(width: value, height: 520, selectedWidget: nil).matches(width: 800, selectedWidget: nil))
-            XCTAssertFalse(ExpandedPanelMeasurement(width: 800, height: value, selectedWidget: nil).matches(width: 800, selectedWidget: nil))
+            XCTAssertFalse(ExpandedPanelMeasurement(width: value, height: 520, selectedWidget: nil, enabledWidgets: enabledWidgets).matches(width: 800, selectedWidget: nil, enabledWidgets: enabledWidgets))
+            XCTAssertFalse(ExpandedPanelMeasurement(width: 800, height: value, selectedWidget: nil, enabledWidgets: enabledWidgets).matches(width: 800, selectedWidget: nil, enabledWidgets: enabledWidgets))
         }
     }
 
     func testMeasurementsIgnoreSubpixelNoiseButAcceptContentAndModeChanges() {
-        let previous = ExpandedPanelMeasurement(width: 800, height: 520, selectedWidget: nil)
-        XCTAssertFalse(ExpandedPanelMeasurement(width: 800, height: 520.4, selectedWidget: nil).differs(from: previous))
-        XCTAssertTrue(ExpandedPanelMeasurement(width: 800, height: 521, selectedWidget: nil).differs(from: previous))
-        XCTAssertTrue(ExpandedPanelMeasurement(width: 800, height: 520, selectedWidget: .notes).differs(from: previous))
+        let previous = ExpandedPanelMeasurement(width: 800, height: 520, selectedWidget: nil, enabledWidgets: enabledWidgets)
+        XCTAssertFalse(ExpandedPanelMeasurement(width: 800, height: 520.4, selectedWidget: nil, enabledWidgets: enabledWidgets).differs(from: previous))
+        XCTAssertTrue(ExpandedPanelMeasurement(width: 800, height: 521, selectedWidget: nil, enabledWidgets: enabledWidgets).differs(from: previous))
+        XCTAssertTrue(ExpandedPanelMeasurement(width: 800, height: 520, selectedWidget: .notes, enabledWidgets: enabledWidgets).differs(from: previous))
         XCTAssertTrue(previous.differs(from: nil))
     }
 }

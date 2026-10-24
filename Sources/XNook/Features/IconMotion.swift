@@ -184,7 +184,7 @@ extension View {
     }
 }
 
-/// 自带悬停 / 按下状态的图标，省去调用方管理多个 @State。
+/// 自带悬停状态的图标；点击和按压交由外层按钮处理。
 ///
 /// 指针进入时自动递增 `trigger` 重放一次扫出，因此调用方只需给出图标名。
 /// 指针离开不重放——来回移动指针时反复播放会显得躁动。
@@ -195,7 +195,6 @@ struct MotionIcon: View {
     var reduceMotion: Bool = false
 
     @State private var isHovering = false
-    @State private var isPressed = false
     @State private var drawTrigger = 0
 
     var body: some View {
@@ -204,7 +203,7 @@ struct MotionIcon: View {
             .iconMotion(
                 trigger: drawTrigger,
                 isHovering: isHovering,
-                isPressed: isPressed,
+                isPressed: false,
                 breathing: breathing,
                 reduceMotion: reduceMotion
             )
@@ -212,11 +211,6 @@ struct MotionIcon: View {
                 isHovering = hovering
                 if hovering && !reduceMotion { drawTrigger += 1 }
             }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in if !isPressed { isPressed = true } }
-                    .onEnded { _ in isPressed = false }
-            )
     }
 }
 

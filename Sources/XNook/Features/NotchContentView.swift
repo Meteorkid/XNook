@@ -175,7 +175,7 @@ struct NotchContentView: View {
 
     private var naturalExpandedHeight: CGFloat {
         let measurement = expandedMeasurement.flatMap {
-            $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget) ? $0.height : nil
+            $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets) ? $0.height : nil
         }
         return ExpandedPanelLayout.height(
             measuredContentHeight: measurement,
@@ -1048,7 +1048,7 @@ struct NotchContentView: View {
             onSettings: openSettingsWindow,
             onClose: { collapse(force: true) },
             onMeasurement: { measurement in
-                guard measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget),
+                guard measurement.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets),
                       measurement.differs(from: expandedMeasurement) else { return }
                 expandedMeasurement = measurement
             },

@@ -73,7 +73,8 @@ struct ExpandedPanelView: View {
                         Color.clear.preference(key: PanelContentHeightKey.self, value: ExpandedPanelMeasurement(
                             width: geometry.size.width,
                             height: geometry.size.height + ExpandedPanelLayout.headerHeight,
-                            selectedWidget: selectedWidget
+                            selectedWidget: selectedWidget,
+                            enabledWidgets: enabledWidgets
                         ))
                     }
                 }
@@ -112,6 +113,7 @@ struct ExpandedPanelView: View {
         Button(action: action) {
             MotionIcon(systemName: icon, fontSize: IslandTokens.Font.body, reduceMotion: shouldReduceMotion)
                 .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
@@ -289,7 +291,7 @@ private struct ExpandedPanelDebugGeometryModifier: ViewModifier {
 private struct PanelContentHeightKey: PreferenceKey {
     static var defaultValue: ExpandedPanelMeasurement? = nil
     static func reduce(value: inout ExpandedPanelMeasurement?, nextValue: () -> ExpandedPanelMeasurement?) {
-        if let next = nextValue(), next.matches(width: next.width, selectedWidget: next.selectedWidget) {
+        if let next = nextValue(), next.matches(width: next.width, selectedWidget: next.selectedWidget, enabledWidgets: next.enabledWidgets) {
             value = next
         }
     }

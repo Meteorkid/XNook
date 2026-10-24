@@ -9,6 +9,79 @@ import XCTest
 final class AdaptiveWorkflowPreviewTests: XCTestCase {
     private typealias Widget = NotchContentView.WidgetType
 
+    func testAllWidgetCombinationsFitWithoutVacantGridCells() throws {
+        try requireRendering()
+        let allWidgets: [Widget] = [.media, .calendar, .notes, .tray]
+        for width in [CGFloat(800), CGFloat(320)] {
+            for mask in 0..<16 {
+                let widgets = allWidgets.enumerated().compactMap { index, widget in
+                    mask & (1 << index) == 0 ? nil : widget
+                }
+                let fixture = try WorkflowPreviewFixture(historyCount: 3)
+                defer { fixture.cleanUp() }
+                try render(fixture, widgets: widgets, width: width, maximumHeight: 2000,
+                    name: "widget-matrix-\(Int(width))-mask-\(mask)") { result in
+                    try assertPackedWidgetGrid(result)
+                    try assertFixedControls(result)
+                    try assertTasksFollowWidgets(result)
+                    try assertContentFits(result)
+                }
+            }
+        }
+    }
+
+    func testWidgetCountChangesRemoveOldCardsAndRepackTheSameHost() throws {
+        try requireRendering()
+        let allWidgets: [Widget] = [.media, .calendar, .notes, .tray]
+        for width in [CGFloat(800), CGFloat(320)] {
+            let fixture = try WorkflowPreviewFixture(historyCount: 3)
+            defer { fixture.cleanUp() }
+            try render(fixture, widgets: [], width: width, maximumHeight: 2000,
+                name: "widget-switch-\(Int(width))-initial") { result in
+                for (step, count) in [1, 2, 3, 4, 3, 2, 1, 0].enumerated() {
+                    result.model.widgets = Array(allWidgets.prefix(count))
+                    try resizeToMeasurement(result)
+                    try writeEvidence(result, name: "widget-switch-\(Int(width))-step-\(step)-count-\(count)")
+                    try assertPackedWidgetGrid(result)
+                    try assertFixedControls(result)
+                    try assertTasksFollowWidgets(result)
+                    try assertContentFits(result)
+                }
+            }
+        }
+    }
+
+    func testEqualHeightWidgetConfigurationChangeRefreshesMeasurement() throws {
+        try requireRendering()
+        let fixture = try WorkflowPreviewFixture(historyCount: 3, trayFileCount: 0)
+        fixture.media.currentTitle = ""
+        fixture.media.currentArtist = ""
+        defer { fixture.cleanUp() }
+        try render(fixture, widgets: [.media, .calendar, .tray], name: "widget-measurement-initial") { result in
+            // onAppear 会刷新夹具日历，待视图挂载后再固定空态输入。
+            fixture.calendar.upcomingEvents = []
+            try resizeToMeasurement(result)
+            XCTAssertTrue(fixture.calendar.upcomingEvents.isEmpty)
+            try writeEvidence(result, name: "widget-measurement-before")
+            let previous = try XCTUnwrap(result.record.latest)
+            let previousCount = result.record.measurements.count
+            result.model.widgets = [.media, .calendar]
+            settle(result.host)
+            try writeEvidence(result, name: "widget-measurement-after")
+            try writeJSON([
+                "scenario": "remove empty tray while retaining the tallest calendar card",
+                "callbacksBefore": previousCount,
+                "callbacksAfter": result.record.measurements.count,
+                "heightBefore": previous.height,
+                "heightAfter": result.record.latest?.height ?? 0,
+                "parentClearsCachedMeasurementOnWidgetChange": true
+            ], name: "widget-measurement-callbacks")
+            XCTAssertEqual(try XCTUnwrap(result.record.latest).height, previous.height, accuracy: 1)
+            XCTAssertGreaterThan(result.record.measurements.count, previousCount,
+                "组件配置变化后即使自然高度相同，也必须回报测量，供父窗口恢复已清空的高度缓存")
+        }
+    }
+
     func testThreeWidgetsAndThreeHistoryRowsFitInBothLanguagesAndAppearances() throws {
         try requireRendering()
         for language in ["zh", "en"] {
@@ -236,16 +309,16 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
     private func render(_ fixture: WorkflowPreviewFixture, widgets: [Widget], width: CGFloat = 800,
                         maximumHeight: CGFloat = 1200, historyLimit: Int = 3, scheme: ColorScheme = .dark,
                         name: String, verify: (WorkflowRenderResult) throws -> Void) throws {
-        let model = WorkflowRenderModel(width: width, height: min(400, maximumHeight))
+        let model = WorkflowRenderModel(width: width, height: min(400, maximumHeight), widgets: widgets)
         let record = WorkflowMeasurementRecord()
-        let host = NSHostingView(rootView: WorkflowPanelPreview(fixture: fixture, widgets: widgets,
+        let host = NSHostingView(rootView: WorkflowPanelPreview(fixture: fixture,
             historyLimit: historyLimit, model: model, record: record, scheme: scheme))
         host.frame = NSRect(origin: .zero, size: model.size)
         let window = makeWindow(size: model.size, scheme: scheme)
         window.contentView = host
         defer { window.contentView = nil; window.close() }
         let result = WorkflowRenderResult(model: model, record: record, host: host, window: window,
-            widgets: widgets, maximumHeight: maximumHeight)
+            maximumHeight: maximumHeight)
         try resizeToMeasurement(result)
         XCTAssertFalse(window.isVisible)
         XCTAssertEqual(host.bounds.size, model.size)
@@ -258,6 +331,7 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         let measurement = try XCTUnwrap(result.record.latest)
         XCTAssertEqual(measurement.width, result.model.width, accuracy: 0.5)
         XCTAssertEqual(measurement.selectedWidget, result.model.selected)
+        XCTAssertEqual(measurement.enabledWidgets, result.model.widgets)
         XCTAssertTrue(measurement.height.isFinite && measurement.height > ExpandedPanelLayout.headerHeight)
         result.model.height = ExpandedPanelLayout.height(measuredContentHeight: measurement.height,
             maximumHeight: result.maximumHeight)
@@ -303,6 +377,47 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
             XCTAssertGreaterThan(tasks.minY, card.maxY)
         }
         XCTAssertGreaterThan(tasks.height, 40)
+    }
+
+    private func assertPackedWidgetGrid(_ result: WorkflowRenderResult) throws {
+        let identifiers = Set(result.record.frames.keys.filter { $0.hasPrefix("expandedPanelWidget-") })
+        XCTAssertEqual(identifiers, Set(result.widgets.map { "expandedPanelWidget-" + $0.rawValue }),
+            "关闭的组件不能留下旧卡片或占位格")
+        let tasks = try frame("expandedPanelRecentTasks", in: result)
+        guard !result.widgets.isEmpty else {
+            XCTAssertNil(result.record.frames["expandedPanelWidgets"])
+            let emptyStateMaximumHeight = ExpandedPanelLayout.outerPadding
+                + IslandTokens.Spacing.group * 2 + IslandTokens.Spacing.section + 24
+            XCTAssertLessThanOrEqual(tasks.minY - ExpandedPanelLayout.headerHeight, emptyStateMaximumHeight,
+                "全部关闭时只保留原有间距和单行空状态提示，不能继续占用组件网格高度")
+            return
+        }
+        let grid = try frame("expandedPanelWidgets", in: result)
+        let cards = try result.widgets.map { try frame("expandedPanelWidget-" + $0.rawValue, in: result) }
+        let columns = result.model.width == 800 ? [0, 1, 2, 3, 2][cards.count] : 1
+        let spacing = ExpandedPanelLayout.columnSpacing
+        let cellWidth = (grid.width - CGFloat(columns - 1) * spacing) / CGFloat(columns)
+        var expectedY = grid.minY
+        for rowStart in stride(from: 0, to: cards.count, by: columns) {
+            let row = Array(cards[rowStart..<min(rowStart + columns, cards.count)])
+            XCTAssertEqual(row.count, columns, "本轮0–4组件配置不应产生空白占位列")
+            for (column, card) in row.enumerated() {
+                XCTAssertEqual(card.minX, grid.minX + CGFloat(column) * (cellWidth + spacing), accuracy: 1)
+                XCTAssertEqual(card.minY, expectedY, accuracy: 1)
+                XCTAssertEqual(card.width, cellWidth, accuracy: 1)
+                XCTAssertGreaterThan(card.height, 0)
+            }
+            expectedY = try XCTUnwrap(row.map(\.maxY).max()) + spacing
+        }
+        XCTAssertEqual(grid.maxY, expectedY - spacing, accuracy: 1,
+            "网格高度应随最后一行收拢，不能保留旧行")
+        XCTAssertLessThanOrEqual(tasks.minY - grid.maxY, 32,
+            "最近任务应紧接组件网格，不能留下空白行")
+        for left in cards.indices {
+            for right in cards.indices where right > left {
+                XCTAssertTrue(cards[left].intersection(cards[right]).isEmpty, "组件卡片不得重叠")
+            }
+        }
     }
 
     private func assertContentFits(_ result: WorkflowRenderResult) throws {
@@ -352,7 +467,10 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
     }
 
     private var outputDirectory: URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        if let override = ProcessInfo.processInfo.environment["XNOOK_UI_EVIDENCE_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
             .appendingPathComponent(".build/reliability-adaptive-evidence/ui", isDirectory: true)
     }
 
@@ -377,10 +495,13 @@ final class AdaptiveWorkflowPreviewTests: XCTestCase {
         let geometry: [String: Any] = [
             "view": "ExpandedPanelView", "width": result.model.width, "height": result.model.height,
             "maximumHeight": result.maximumHeight, "windowVisible": result.window.isVisible,
+            "acceptanceScope": "isolated-offscreen-production-view", "realWindowAcceptance": false,
             "selectedWidget": result.model.selected?.rawValue ?? "overview",
+            "enabledWidgets": result.widgets.map(\.rawValue),
             "measurementHeight": result.record.latest?.height ?? 0,
             "measurementWidth": result.record.latest?.width ?? 0,
             "measurementMode": result.record.latest?.selectedWidget?.rawValue ?? "overview",
+            "measurementWidgets": result.record.latest?.enabledWidgets.map(\.rawValue) ?? [],
             "framesSource": "ExpandedPanelDebugGeometryKey",
             "frames": result.record.frames.mapValues(rectJSON), "scrollViews": scrolls,
             "nativeTextEditors": descendants(of: result.host).compactMap { $0 as? NSTextView }
@@ -399,12 +520,16 @@ private final class WorkflowRenderModel: ObservableObject {
     let width: CGFloat
     @Published var height: CGFloat
     @Published var selected: NotchContentView.WidgetType?
+    @Published var widgets: [NotchContentView.WidgetType]
     var size: CGSize { CGSize(width: width, height: height) }
-    init(width: CGFloat, height: CGFloat) { self.width = width; self.height = height }
+    init(width: CGFloat, height: CGFloat, widgets: [NotchContentView.WidgetType]) {
+        self.width = width; self.height = height; self.widgets = widgets
+    }
 }
 
 private final class WorkflowMeasurementRecord {
     var latest: ExpandedPanelMeasurement?
+    var measurements: [ExpandedPanelMeasurement] = []
     var frames: [String: CGRect] = [:]
 }
 
@@ -414,14 +539,13 @@ private struct WorkflowRenderResult {
     let record: WorkflowMeasurementRecord
     let host: NSView
     let window: NSWindow
-    let widgets: [NotchContentView.WidgetType]
+    var widgets: [NotchContentView.WidgetType] { model.widgets }
     let maximumHeight: CGFloat
 }
 
 @MainActor
 private struct WorkflowPanelPreview: View {
     let fixture: WorkflowPreviewFixture
-    let widgets: [NotchContentView.WidgetType]
     let historyLimit: Int
     @ObservedObject var model: WorkflowRenderModel
     let record: WorkflowMeasurementRecord
@@ -429,7 +553,7 @@ private struct WorkflowPanelPreview: View {
 
     var body: some View {
         ExpandedPanelView(selectedWidget: $model.selected, calendarRecenterTrigger: .constant(0),
-            enabledWidgets: widgets, panelWidth: model.width, mediaManager: fixture.media,
+            enabledWidgets: model.widgets, panelWidth: model.width, mediaManager: fixture.media,
             calendarManager: fixture.calendar, notesManager: fixture.notes, trayManager: fixture.tray,
             focusSessionManager: fixture.focus, showHistory: true, historyDisplayLimit: historyLimit,
             onCreateLinkedNote: { XCTFail("渲染不得创建笔记"); return false },
@@ -439,7 +563,7 @@ private struct WorkflowPanelPreview: View {
             onStartFocus: { _ in XCTFail("渲染不得从日历启动任务") },
             onInteractionChanged: { _ in }, onLinksPresentationChanged: { _ in },
             onSettings: { XCTFail("渲染不得打开设置") }, onClose: {},
-            onMeasurement: { record.latest = $0 })
+            onMeasurement: { record.latest = $0; record.measurements.append($0) })
             .frame(width: model.width, height: model.height)
             .background(IslandStyle.surface(for: scheme))
             .environment(\.colorScheme, scheme)

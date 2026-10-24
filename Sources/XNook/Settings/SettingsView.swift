@@ -47,6 +47,7 @@ struct SettingsView: View {
     @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
     @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
+    @AppStorage("enabledWidgets") private var enabledWidgetsData = Data()
 
     private var panelHeightRange: ClosedRange<Double> {
         let upper = max(1, Double(panelContentSizeLimit.height))
@@ -291,10 +292,9 @@ struct SettingsView: View {
 
     // MARK: - Display 面板
 
-    /// 每次访问都从 UserDefaults 读取，确保始终与实际值同步
+    /// 直接观察持久化数据，让同一设置页的开关随组件组合变化更新。
     private var enabledWidgets: Set<String> {
-        if let data = UserDefaults.standard.data(forKey: "enabledWidgets"),
-           let widgets = try? JSONDecoder().decode(Set<String>.self, from: data) {
+        if let widgets = try? JSONDecoder().decode(Set<String>.self, from: enabledWidgetsData) {
             return widgets
         }
         return ["media", "calendar", "notes", "tray"]
@@ -435,7 +435,7 @@ struct SettingsView: View {
                                         current.remove(widget.rawValue)
                                     }
                                     if let data = try? JSONEncoder().encode(current) {
-                                        UserDefaults.standard.set(data, forKey: "enabledWidgets")
+                                        enabledWidgetsData = data
                                     }
                                 }
                             ))

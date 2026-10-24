@@ -4,15 +4,19 @@ struct ExpandedPanelMeasurement: Equatable {
     let width: CGFloat
     let height: CGFloat
     let selectedWidget: NotchContentView.WidgetType?
+    /// 组合变化即使高度相同，也需要重新上报并拒绝旧组合的测量。
+    let enabledWidgets: [NotchContentView.WidgetType]
 
-    func matches(width: CGFloat, selectedWidget: NotchContentView.WidgetType?) -> Bool {
+    func matches(width: CGFloat, selectedWidget: NotchContentView.WidgetType?, enabledWidgets: [NotchContentView.WidgetType]) -> Bool {
         self.width.isFinite && self.width > 0 && abs(self.width - width) < 0.5
             && height.isFinite && height > 0 && self.selectedWidget == selectedWidget
+            && self.enabledWidgets == enabledWidgets
     }
 
     func differs(from previous: Self?) -> Bool {
         guard let previous else { return true }
         return selectedWidget != previous.selectedWidget
+            || enabledWidgets != previous.enabledWidgets
             || abs(width - previous.width) >= 0.5 || abs(height - previous.height) > 0.5
     }
 }

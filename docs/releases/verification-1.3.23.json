@@ -29,7 +29,19 @@
     "executableSHA256": "ad80af3d9e9939857a334c3bf345f1ed533f8d3a3d1266f025b68b86f3f1c78d",
     "claudeHookMatchesSource": true
   },
-  "publicArtifactVerification": "pending publication",
+  "publicArtifactVerification": {
+    "status": "verified",
+    "verifiedAtUTC": "2026-10-25T09:32:58.017482+00:00",
+    "releaseURL": "https://github.com/Meteorkid/XNook/releases/tag/v1.3.23",
+    "latestTag": "v1.3.23",
+    "releaseCommit": "b1016608b9e824e0bb6ce32ef1356495117a4de3",
+    "unauthenticatedHTTPSDownload": true,
+    "httpStatus": 200,
+    "dmgSHA256": "085fd701380f59bbbdd38adb132615424de4559b06b55a2c371d9b5bb32b6d67",
+    "dmgBytes": 5421864,
+    "checksumAssetMatches": true,
+    "dmgIntegrityVerified": true
+  },
   "realInstalledMouseAcceptance": false,
   "localInstallation": "not performed",
   "sourceInputs": {
@@ -41,5 +53,7 @@
     "Physical mouse acceptance in installed 1.3.23 is not included in isolated preview results",
     "Existing global hotkey issue remains outside this release scope",
     "Ad-hoc signing; no Apple notarization"
-  ]
+  ],
+  "publishedAtUTC": "2026-10-25T09:29:55Z",
+  "releaseURL": "https://github.com/Meteorkid/XNook/releases/tag/v1.3.23"
 }

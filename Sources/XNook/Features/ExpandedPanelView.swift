@@ -74,7 +74,7 @@ struct ExpandedPanelView: View {
             width: panelWidth,
             deadZoneWidth: deadZone.width,
             deadZoneHeight: deadZone.height,
-            toolbarWidth: showsLayoutEditorButton ? 94 : 60
+            toolbarWidth: max(showsLayoutEditorButton ? 94 : 60, selectedWidget == nil ? 0 : 100)
         )
     }
 
@@ -249,18 +249,39 @@ struct ExpandedPanelView: View {
     }
 
     private var navigation: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: IslandTokens.Spacing.compact) {
-                Text("Nook")
-                    .font(.system(size: IslandTokens.Font.title, weight: .semibold, design: .rounded))
-                navigationButtons(showsTitles: true)
+        Group {
+            if selectedWidget != nil {
+                Button {
+                    guard !notesManager.isEditing || notesManager.closeEditor() else { return }
+                    selectedWidget = nil
+                } label: {
+                    Label(L10n.panelOverview, systemImage: "square.grid.2x2")
+                        .font(.system(size: IslandTokens.Font.body, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .frame(minHeight: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help(L10n.panelBack)
+                .accessibilityLabel(L10n.panelOverview)
+                .accessibilityIdentifier("expandedPanelOverview")
+                .expandedPanelDebugFrame(id: "expandedPanelOverview")
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: IslandTokens.Spacing.compact) {
+                        Text("Nook")
+                            .font(.system(size: IslandTokens.Font.title, weight: .semibold, design: .rounded))
+                        navigationButtons(showsTitles: true)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    navigationButtons(showsTitles: true)
+                        .fixedSize(horizontal: true, vertical: false)
+                    navigationButtons(showsTitles: false)
+                        .fixedSize(horizontal: true, vertical: false)
+                    navigationMenu
+                }
             }
-            .fixedSize(horizontal: true, vertical: false)
-            navigationButtons(showsTitles: true)
-                .fixedSize(horizontal: true, vertical: false)
-            navigationButtons(showsTitles: false)
-                .fixedSize(horizontal: true, vertical: false)
-            navigationMenu
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)

@@ -96,24 +96,41 @@ final class PanelGridNativeTests: XCTestCase {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
         let store = PanelLayoutStore(defaults: fixture.defaults)
-        try withHost(fixture: fixture, store: store, scheme: .dark) { host, window, model, record in
-            model.deadZone = NotchDeadZone(width: 200, height: 32)
-            for width: CGFloat in [380, 400, 412, 800] {
-                for selection: NotchContentView.WidgetType? in [nil, .media] {
-                    model.selected = selection
-                    resizeForEvidence(host, window: window, model: model, record: record, width: width)
-                    let notch = CGRect(x: (width - 200) / 2, y: 0, width: 200, height: 32)
-                    let actions = selection == nil
-                        ? ["panelLayoutBegin", "expandedPanelSettings", "expandedPanelClose"]
-                        : ["expandedPanelSettings", "expandedPanelClose"]
-                    for id in actions {
-                        let frame = try XCTUnwrap(record.frames[id], id)
-                        XCTAssertFalse(frame.intersects(notch), "\(id) width=\(width)")
-                        assertContained(frame, in: try XCTUnwrap(record.frames["expandedPanelHeader"]), name: id)
-                        if width < 412, selection == nil { XCTAssertGreaterThanOrEqual(frame.minY, 32) }
-                        else { XCTAssertLessThan(frame.minY, 32) }
+        let originalLanguage = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(originalLanguage, forName: UserDefaults.argumentDomain) }
+        for language in ["zh", "en"] {
+            var arguments = originalLanguage
+            arguments["appLanguage"] = language
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+            try withHost(fixture: fixture, store: store, scheme: .dark) { host, window, model, record in
+                model.deadZone = NotchDeadZone(width: 200, height: 32)
+                for width: CGFloat in [320, 380, 400, 412, 460, 800] {
+                    for selection: NotchContentView.WidgetType? in [nil, .media] {
+                        model.selected = selection
+                        resizeForEvidence(host, window: window, model: model, record: record, width: width)
+                        let notch = CGRect(x: (width - 200) / 2, y: 0, width: 200, height: 32)
+                        let actions = selection == nil
+                            ? ["panelLayoutBegin", "expandedPanelSettings", "expandedPanelClose"]
+                            : ["expandedPanelOverview", "expandedPanelSettings", "expandedPanelClose"]
+                        for id in actions {
+                            let frame = try XCTUnwrap(record.frames[id], id)
+                            XCTAssertFalse(frame.intersects(notch), "\(id) width=\(width) language=\(language)")
+                            assertContained(frame, in: try XCTUnwrap(record.frames["expandedPanelHeader"]), name: id)
+                            if width < (selection == nil ? 412 : 424) { XCTAssertGreaterThanOrEqual(frame.minY, 32) }
+                            else { XCTAssertLessThan(frame.minY, 32) }
+                        }
+                        if selection != nil {
+                            XCTAssertNil(record.frames["panelLayoutBegin"])
+                            let overview = try XCTUnwrap(record.frames["expandedPanelOverview"])
+                            let settings = try XCTUnwrap(record.frames["expandedPanelSettings"])
+                            XCTAssertGreaterThan(overview.width, 40, "概览文字不能退化为单个图标")
+                            XCTAssertGreaterThanOrEqual(overview.height, 28)
+                            XCTAssertLessThanOrEqual(overview.maxX, settings.minX)
+                            if width == 460 {
+                                try writeDashboardEvidence(host, record: record, name: "media-overview-header-" + language)
+                            }
+                        }
                     }
-                    if selection != nil { XCTAssertNil(record.frames["panelLayoutBegin"]) }
                 }
             }
         }
@@ -136,7 +153,13 @@ final class PanelGridNativeTests: XCTestCase {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
         let store = PanelLayoutStore(defaults: fixture.defaults)
-        let model = PanelGridNativeModel(width: 800, height: 720, editRequest: 1)
+        let mediaDetail = ProcessInfo.processInfo.environment["XNOOK_GRID_LIVE_DETAIL"] == "media"
+        let model = PanelGridNativeModel(width: mediaDetail ? 460 : 800, height: 720,
+                                         editRequest: mediaDetail ? 0 : 1)
+        if mediaDetail {
+            model.selected = .media
+            model.deadZone = NotchDeadZone(width: 200, height: 32)
+        }
         let record = PanelGridNativeRecord()
         let app = NSApplication.shared
         let previousPolicy = app.activationPolicy()
@@ -370,6 +393,7 @@ final class PanelGridNativeTests: XCTestCase {
             "privateDefaultsSnapshotPath": defaultsSnapshot.path,
             "storeConfiguration": configuration, "storeLoadError": (store.loadError as Any?) ?? NSNull(),
             "isEditing": record.isEditing, "editRequest": model.editRequest,
+            "selectedWidget": model.selected?.rawValue ?? "overview",
             "panelWidth": model.width, "panelHeight": model.height, "frames": geometryJSON(record.frames),
             "activeTaskCount": fixture.focus.activeSession == nil ? 0 : 1,
             "activeTaskID": (fixture.focus.activeSession?.id.uuidString as Any?) ?? NSNull(),

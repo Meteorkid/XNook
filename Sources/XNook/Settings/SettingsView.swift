@@ -43,6 +43,7 @@ struct SettingsView: View {
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
     @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
     @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
+    @AppStorage("panelHeightMode") private var panelHeightMode = SettingsDefaults.string(for: "panelHeightMode")
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
     @AppStorage("enabledWidgets") private var enabledWidgetsData = Data()
     @AppStorage("lyricsOffset") private var lyricsOffset = SettingsDefaults.double(for: "lyricsOffset")
@@ -50,6 +51,22 @@ struct SettingsView: View {
     private var panelHeightRange: ClosedRange<Double> {
         let upper = max(1, Double(panelContentSizeLimit.height))
         return min(160, upper)...upper
+    }
+
+    private var selectedPanelHeightMode: PanelHeightMode {
+        PanelHeightMode.resolved(storedValue: panelHeightMode, legacyAutomaticallyFit: panelAutoSize)
+    }
+
+    /// 改宽度前先固定旧高度语义；升级后首次操作不会顺带切换高度模式。
+    static func widthAdaptationBinding(automaticallyFit: Binding<Bool>, heightMode: Binding<String>) -> Binding<Bool> {
+        Binding(get: { automaticallyFit.wrappedValue }, set: { enabled in
+            guard enabled != automaticallyFit.wrappedValue else { return }
+            if PanelHeightMode(rawValue: heightMode.wrappedValue) == nil {
+                heightMode.wrappedValue = PanelHeightMode.resolved(storedValue: heightMode.wrappedValue,
+                    legacyAutomaticallyFit: automaticallyFit.wrappedValue).rawValue
+            }
+            automaticallyFit.wrappedValue = enabled
+        })
     }
 
     private var panelWidthRange: ClosedRange<Double> {
@@ -486,14 +503,34 @@ struct SettingsView: View {
                     dividerLine
                     settingRow(L10n.panelAutoSize, id: "panelAutoSize",
                               description: L10n.panelAutoSizeDesc) {
-                        AppStorageToggle(key: "panelAutoSize")
+                        Toggle("", isOn: Self.widthAdaptationBinding(automaticallyFit: $panelAutoSize,
+                            heightMode: $panelHeightMode))
+                            .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                    }
+                    dividerLine
+                    settingRow(L10n.panelHeightMode, id: "panelHeightMode",
+                              description: L10n.panelHeightModeDesc) {
+                        Picker(L10n.panelHeightMode, selection: Binding(
+                            get: { selectedPanelHeightMode }, set: { panelHeightMode = $0.rawValue }
+                        )) {
+                            Text(L10n.panelHeightAutomatic).tag(PanelHeightMode.automatic)
+                            Text(L10n.panelHeightLimited).tag(PanelHeightMode.limited)
+                        }
+                        .labelsHidden().pickerStyle(.segmented).frame(width: 268)
                     }
                     dividerLine
                     settingRow(L10n.panelBaseHeight, id: "panelBaseHeight",
                               description: L10n.panelBaseHeightDesc) {
                         AppStorageSlider(key: "panelBaseHeight", range: panelHeightRange, format: "%.2fpt")
-                            .disabled(panelAutoSize)
+                            .disabled(selectedPanelHeightMode != .limited)
                     }
+                    Text(selectedPanelHeightMode == .automatic ? L10n.panelHeightAutomaticStatus
+                        : L10n.panelHeightLimitedStatus(panelBaseHeight))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 10)
+                        .accessibilityIdentifier("settingsPanelHeightStatus")
+                        .expandedPanelDebugFrame(id: "settingsPanelHeightStatus")
                 }
             }
 
@@ -520,6 +557,11 @@ struct SettingsView: View {
 
             section(L10n.sectionWidgets) {
                 card {
+                    Text(L10n.settingsModuleChangesHint)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 10)
+                    dividerLine
                     ForEach(PanelModuleID.allCases) { module in
                         if module != PanelModuleID.allCases.first { dividerLine }
                         settingRow(module.localizedName, id: "widget_\(module.rawValue)", description: "") {
@@ -529,12 +571,20 @@ struct SettingsView: View {
                         }
                     }
                     dividerLine
-                    Button(L10n.settingsLayoutEditor) {
+                    Button {
                         if let delegate = AppDelegate.shared { delegate.openLayoutEditor() }
                         else { NotificationCenter.default.post(name: .xnookEditPanelLayout, object: nil) }
+                    } label: {
+                        Label(L10n.settingsLayoutEditor, systemImage: "rectangle.3.group")
                     }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.vertical, 10)
                     .accessibilityIdentifier("settingsPanelLayoutEditor")
                     .settingsSearchTarget(id: "panelLayoutEditor", highlightedID: search.targetID)
+                    Text(L10n.settingsLayoutGuide)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 10)
                     if let message = layoutSaveError ?? panelLayoutStore.loadError {
                         Text(message).font(.caption).foregroundStyle(.secondary)
                     }

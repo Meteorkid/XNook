@@ -49,13 +49,15 @@ struct ExpandedPanelView: View {
     @State private var confirmsLayoutRecovery = false
     @State private var layoutRecoveryError: String?
     @State private var layoutEntryError: String?
+    @State private var editorToolbarHeight: CGFloat = 0
 
     private var dashboardConfiguration: PanelLayoutConfiguration {
         layoutEditor.isEditing ? layoutEditor.draft : layoutStore?.configuration
             ?? .legacy(enabledWidgetIDs: Set(enabledWidgets.map(\.rawValue)), showHistory: showHistory)
     }
     private var usesDefaultContentFit: Bool {
-        layoutStore?.shouldFitDefaultContent(automaticallyFit: panelAutoSize,
+        layoutStore?.shouldFitDefaultContent(automaticallyFit: PanelHeightMode.fitsDefaultContent(
+            storedValue: panelHeightMode, legacyAutomaticallyFit: panelAutoSize),
             isEditing: layoutEditor.isEditing, isOverview: selectedWidget == nil) == true
     }
     private var layoutSignature: String {
@@ -64,17 +66,22 @@ struct ExpandedPanelView: View {
     }
 
     @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
+    @AppStorage("panelHeightMode") private var panelHeightMode = SettingsDefaults.string(for: "panelHeightMode")
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
     @AppStorage("islandBackgroundStyle") private var backgroundStyle = SettingsDefaults.string(for: "islandBackgroundStyle")
 
     private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
-    private var showsLayoutEditorButton: Bool { layoutStore != nil && !layoutEditor.isEditing && selectedWidget == nil }
+    private var usesCompactDetailHeader: Bool { selectedWidget != nil && panelWidth < 240 }
+    private var showsLayoutEditorButton: Bool {
+        layoutStore != nil && !layoutEditor.isEditing && !usesCompactDetailHeader
+    }
     private var headerTopInset: CGFloat {
         ExpandedPanelLayout.headerTopInset(
             width: panelWidth,
             deadZoneWidth: deadZone.width,
             deadZoneHeight: deadZone.height,
-            toolbarWidth: max(showsLayoutEditorButton ? 94 : 60, selectedWidget == nil ? 0 : 100)
+            toolbarWidth: max(showsLayoutEditorButton ? 94 : 60,
+                selectedWidget == nil ? 0 : usesCompactDetailHeader ? 68 : 100)
         )
     }
 
@@ -86,6 +93,19 @@ struct ExpandedPanelView: View {
                 .expandedPanelDebugFrame(id: "expandedPanelHeader")
             Divider()
                 .frame(height: 1)
+            if layoutEditor.isEditing {
+                PanelLayoutEditorToolbar(editor: layoutEditor, selection: $layoutSelection,
+                    onSave: { if let layoutStore { _ = layoutEditor.save(to: layoutStore) } },
+                    onCancel: layoutEditor.cancel, availableWidth: panelWidth)
+                    .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
+                    .padding(.horizontal, ExpandedPanelLayout.outerPadding)
+                    .padding(.top, ExpandedPanelLayout.outerPadding)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(key: PanelEditorToolbarHeightKey.self, value: geometry.size.height)
+                        }
+                    }
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: IslandTokens.Spacing.compact) {
                     if let activityCoordinator, let event = activityCoordinator.current {
@@ -96,10 +116,7 @@ struct ExpandedPanelView: View {
                     }
                     if selectedWidget == nil, let layoutStore {
                         if let layoutEntryError { Text(layoutEntryError).font(.caption).foregroundStyle(.secondary) }
-                        if layoutEditor.isEditing {
-                            PanelLayoutEditorToolbar(editor: layoutEditor, selection: $layoutSelection,
-                                onSave: { _ = layoutEditor.save(to: layoutStore) }, onCancel: layoutEditor.cancel)
-                        } else if let issue = layoutRecoveryError ?? layoutStore.loadError {
+                        if !layoutEditor.isEditing, let issue = layoutRecoveryError ?? layoutStore.loadError {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(issue).font(.caption).foregroundStyle(.secondary)
                                 Button(L10n.localized(zh: "恢复默认布局…", en: "Restore Default Layout…")) { confirmsLayoutRecovery = true }
@@ -146,7 +163,8 @@ struct ExpandedPanelView: View {
                     GeometryReader { geometry in
                         Color.clear.preference(key: PanelContentHeightKey.self, value: ExpandedPanelMeasurement(
                             width: geometry.size.width,
-                            height: geometry.size.height + ExpandedPanelLayout.headerHeight + headerTopInset,
+                            height: geometry.size.height + ExpandedPanelLayout.headerHeight + headerTopInset
+                                + (layoutEditor.isEditing ? editorToolbarHeight : 0),
                             selectedWidget: selectedWidget,
                             enabledWidgets: enabledWidgets,
                             layoutSignature: layoutSignature,
@@ -163,6 +181,10 @@ struct ExpandedPanelView: View {
             }
         }
         .expandedPanelDebugCoordinateSpace()
+        .onPreferenceChange(PanelEditorToolbarHeightKey.self) { height in
+            guard height.isFinite, height >= 0, abs(editorToolbarHeight - height) > 0.5 else { return }
+            editorToolbarHeight = height
+        }
         .onAppear { handleEditRequest() }
         .onChange(of: editRequest) { _, _ in handleEditRequest() }
         .onChange(of: layoutEditor.isEditing) { _, editing in
@@ -231,21 +253,16 @@ struct ExpandedPanelView: View {
             }
             headerButton(icon: "gearshape", help: L10n.preferences, action: onSettings)
                 .expandedPanelDebugFrame(id: "expandedPanelSettings")
-            headerButton(icon: "xmark", help: L10n.panelClose, action: { layoutEditor.cancel(); onClose() })
+            headerButton(icon: "xmark", help: layoutEditor.hasChanges
+                ? L10n.localized(zh: "放弃布局更改并收起面板", en: "Discard layout changes and close panel")
+                : L10n.panelClose, action: { layoutEditor.cancel(); onClose() })
                 .expandedPanelDebugFrame(id: "expandedPanelClose")
         }
         .fixedSize()
     }
 
     private func headerButton(icon: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            MotionIcon(systemName: icon, fontSize: IslandTokens.Font.body, reduceMotion: shouldReduceMotion)
-                .frame(width: 26, height: 26)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(help)
+        PanelHeaderButton(icon: icon, title: help, reduceMotion: shouldReduceMotion, action: action)
     }
 
     private var navigation: some View {
@@ -255,9 +272,12 @@ struct ExpandedPanelView: View {
                     guard !notesManager.isEditing || notesManager.closeEditor() else { return }
                     selectedWidget = nil
                 } label: {
-                    Label(L10n.panelOverview, systemImage: "square.grid.2x2")
-                        .font(.system(size: IslandTokens.Font.body, weight: .medium))
-                        .padding(.horizontal, 8)
+                    HStack(spacing: usesCompactDetailHeader ? 4 : 8) {
+                        Image(systemName: "square.grid.2x2")
+                        Text(L10n.panelOverview).lineLimit(1)
+                    }
+                        .font(.system(size: usesCompactDetailHeader ? 12 : IslandTokens.Font.body, weight: .medium))
+                        .padding(.horizontal, usesCompactDetailHeader ? 4 : 8)
                         .frame(minHeight: 28)
                         .contentShape(Rectangle())
                 }
@@ -428,7 +448,12 @@ struct ExpandedPanelView: View {
         layoutEntryError = nil
         selectedWidget = nil
         layoutEditor.begin(from: layoutStore)
-        if layoutEditor.isEditing { NSApp.keyWindow?.makeFirstResponder(nil) }
+        if layoutEditor.isEditing {
+            if !layoutEditor.draft.visibleItems.contains(where: { $0.id == layoutSelection }) {
+                layoutSelection = layoutEditor.draft.visibleItems.first?.id ?? .media
+            }
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
     }
 
     private func handleEditRequest() {
@@ -548,6 +573,11 @@ private struct ExpandedPanelDebugGeometryModifier: ViewModifier {
     }
 }
 #endif
+
+private struct PanelEditorToolbarHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
 
 private struct PanelContentHeightKey: PreferenceKey {
     static var defaultValue: ExpandedPanelMeasurement? = nil

@@ -58,20 +58,7 @@ enum IslandCapabilities {
 
     // MARK: - 启用开关
 
-    /// 是否使用系统原生绘制效果替换遮罩扫出。
-    ///
-    /// **默认关闭，这是刻意的决定，不是遗漏。**
-    ///
-    /// 原生效果的 `isActive` 是状态而非触发：`true` 表示图标处于未绘制（不可见），
-    /// 切到 `false` 才绘制出现。要做"悬停时重放一次"，必须让状态在
-    /// `true → false` 之间切换；而一旦某条路径让它停在 `true`
-    /// （视图复用、onAppear 未触发、动画被中断），图标会**永久消失**。
-    ///
-    /// 对一个常驻屏幕顶部的应用，图标不可见属于可感知故障，代价高于收益。
-    /// 遮罩方案初始 `drawProgress = 1`，任何情况下图标都是可见的。
-    ///
-    /// 如需实测原生效果，把这里改成 `true` 即可；`IconMotionModifier`
-    /// 已实现完整的两段式触发与超时兜底。
+    /// 图标绘制效果保持关闭；按钮仅使用缩放反馈，避免擦除重绘。
     static var useNativeSymbolDraw: Bool { false }
 
     /// 玻璃实现的能力开关；用户仍需在显示设置中选择玻璃。
@@ -117,8 +104,8 @@ enum IslandCapabilities {
         }
         lines.append("玻璃材质：\(glassState)")
         let drawState = supportsNativeSymbolDraw
-            ? (useNativeSymbolDraw ? "启用" : "可用但已关闭（遮罩扫出）")
-            : "不可用（遮罩扫出）"
+            ? (useNativeSymbolDraw ? "启用" : "可用但已关闭（按钮仅缩放）")
+            : "不可用（按钮仅缩放）"
         lines.append("原生图标绘制：\(drawState)")
         return lines.joined(separator: "\n")
     }

@@ -55,13 +55,12 @@ struct MediaWidgetView: View {
                 .fontWeight(.semibold)
             Spacer(minLength: 4)
             if let onShowAll {
-                Button(action: onShowAll) {
-                    MotionIcon(systemName: "chevron.right", fontSize: 10, reduceMotion: shouldReduceMotion)
+                // 标题行保持24pt；固定命中轮廓外扩2pt，覆盖28pt高度。
+                ScaleOnlyButton(reduceMotion: shouldReduceMotion, hitPadding: 2, action: onShowAll) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
                         .frame(width: 28, height: 24)
-                        // 标题行保持24pt；点击轮廓上下各扩2pt，覆盖28pt高度。
-                        .contentShape(Rectangle().inset(by: -2))
                 }
-                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help(L10n.mediaShowDetails)
                 .accessibilityLabel(L10n.mediaShowDetails)
@@ -185,12 +184,11 @@ struct MediaWidgetView: View {
         label: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            MotionIcon(systemName: icon, fontSize: 16, reduceMotion: shouldReduceMotion)
+        ScaleOnlyButton(reduceMotion: shouldReduceMotion, action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
                 .frame(width: 37, height: 37)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .help(label)
         .accessibilityLabel(label)
     }

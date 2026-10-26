@@ -704,7 +704,7 @@ struct SettingsView: View {
                     settingRow(L10n.testSwitch, id: "testSwitch",
                               description: L10n.testSwitchDesc) {
                         Button(L10n.testSwitchButton) {
-                            AppSwitcher.shared.switchToIsland(named: counterpart.rawValue)
+                            AppSwitcher.shared.switchToIsland(named: counterpart.rawValue, direction: .left)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)

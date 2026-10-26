@@ -58,6 +58,7 @@ struct NotchContentView: View {
     @State private var collapseGeneration = 0
     @State private var preparedHandoffGeneration: UInt64?
     @State private var handoffContentVisible = true
+    @State private var handoffResizePending = false
     @State private var expandedByHover = false
     @State private var expandedAt: Date = .distantPast
     @State private var expandPending = false
@@ -96,6 +97,7 @@ struct NotchContentView: View {
     @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
     @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
     @AppStorage("panelHeightMode") private var panelHeightMode = SettingsDefaults.string(for: "panelHeightMode")
+    @AppStorage("islandBackgroundStyle") private var switchBackgroundStyle = SettingsDefaults.string(for: "islandBackgroundStyle")
     @AppStorage("jellyIntensity") private var jellyIntensity = SettingsDefaults.string(for: "jellyIntensity", fallback: "medium")
 
     /// 根据强度设置返回果冻缩放值
@@ -286,6 +288,11 @@ struct NotchContentView: View {
 
     private var pillStrokeOpacity: CGFloat { IslandStyle.strokeOpacity(for: colorScheme) }
 
+    private var switchBackgroundFill: NSColor {
+        IslandBackgroundPolicy.isDark(style: IslandBackgroundStyle.resolved(from: switchBackgroundStyle),
+            applicationIsDark: colorScheme == .dark) ? .black : NSColor(white: 0.965, alpha: 1)
+    }
+
     private var notchShapeOpenProgress: CGFloat {
         IslandSizeCalculator.openProgress(
             shapeHeight: shapeHeight,
@@ -325,24 +332,35 @@ struct NotchContentView: View {
     private var islandLayout: some View {
         ZStack(alignment: .top) {
             // 背景形状：macOS 26 走玻璃材质，低版本回退纯色填充
-            islandShape
-            .fill(Color.clear)
-            .background {
-                IslandGlassBackground(shape: islandShape, scheme: colorScheme, isExpanded: isExpanded)
-            }
-            .shadow(
-                color: IslandStyle.shadowColor(for: colorScheme)
-                    .opacity(IslandStyle.shadowOpacity(for: colorScheme) + 0.02 * notchShapeOpenProgress),
-                radius: 10 + 10 * notchShapeOpenProgress,
-                y: 3 + notchShapeOpenProgress
-            )
-            .overlay {
-                islandShape.strokeBorder(
-                    IslandStyle.strokeColor(for: colorScheme)
-                        .opacity(pillStrokeOpacity + (isHoveringPill ? 0.15 : 0)),
-                    lineWidth: 0.5
+            IslandSwitchBackground(topRadius: notchTopCornerRadius, bottomRadius: notchBottomCornerRadius,
+                fillColor: switchBackgroundFill,
+                allowsMorph: IslandBackgroundStyle.resolved(from: switchBackgroundStyle) != .glass,
+                shadowOpacity: IslandStyle.shadowOpacity(for: colorScheme) + 0.02 * notchShapeOpenProgress,
+                shadowRadius: 10 + 10 * notchShapeOpenProgress, shadowOffsetY: 3 + notchShapeOpenProgress,
+                strokeOpacity: pillStrokeOpacity + (isHoveringPill ? 0.15 : 0)) { style in
+                let shape = UnevenRoundedRectangle(topLeadingRadius: style.topRadius,
+                    bottomLeadingRadius: style.bottomRadius, bottomTrailingRadius: style.bottomRadius,
+                    topTrailingRadius: style.topRadius, style: .continuous)
+                shape
+                .fill(Color.clear)
+                .background {
+                    IslandGlassBackground(shape: shape, scheme: colorScheme, isExpanded: isExpanded)
+                }
+                .shadow(
+                    color: IslandStyle.shadowColor(for: colorScheme)
+                        .opacity(style.shadowOpacity),
+                    radius: style.shadowRadius,
+                    y: style.shadowOffsetY
                 )
+                .overlay {
+                    shape.strokeBorder(
+                        IslandStyle.strokeColor(for: colorScheme)
+                            .opacity(style.strokeOpacity),
+                        lineWidth: 0.5
+                    )
+                }
             }
+            // 弹簧在外层 SwiftUI 插值，避免跨原生宿主更新时直接跳到终值。
             .scaleEffect(
                 x: jellyTrigger ? (jellySettled ? jellyScale.xSettle : jellyScale.xPop) : 1.0,
                 y: jellyTrigger ? (jellySettled ? jellyScale.ySettle : jellyScale.yPop) : 1.0
@@ -478,6 +496,10 @@ struct NotchContentView: View {
             guard !isExpanded, !collapseAnimating else { return }
             // 入站准备已经按当前播放状态同步尺寸，不能再排入旧 ticker 收缩任务。
             guard notchWindow?.handoffState.pendingPreparation == nil else { return }
+            if notchWindow?.isHandoffLayoutLocked == true {
+                handoffResizePending = true
+                return
+            }
             let generation = collapseGeneration
             if newValue {
                 // Ticker 出现：先调大窗口，再让 SwiftUI 动画渲染
@@ -565,7 +587,12 @@ struct NotchContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookWindowDidPresent)) { notification in
             guard let window = notchWindow, notification.object as AnyObject? === window else { return }
+            flushHandoffWindowResize()
             restoreCancelledHandoffContentIfNeeded(window: window)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookHandoffLayoutDidUnlock)) { notification in
+            guard let window = notchWindow, notification.object as AnyObject? === window else { return }
+            flushHandoffWindowResize()
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             if let notchWindow { AppDelegate.shared?.updateWindowAppearance(notchWindow) }
@@ -615,6 +642,8 @@ struct NotchContentView: View {
         guard window.handoffState.pendingPreparation == generation,
               preparedHandoffGeneration != generation else { return }
         preparedHandoffGeneration = generation
+        handoffResizePending = false
+        let hasDirectionalMotion = window.inboundSwitchMotion != nil
         notesManager.flushPendingChanges()
         cancelExpandedAutoHide()
         var transaction = Transaction(animation: nil)
@@ -634,7 +663,7 @@ struct NotchContentView: View {
             lastCollapseAt = Date()
             resetHoverEffects()
             previousMouseY = NSEvent.mouseLocation.y
-            handoffContentVisible = shouldReduceMotion
+            handoffContentVisible = shouldReduceMotion || hasDirectionalMotion
             window.islandState = .collapsed
             window.resizeToFitCollapse(contentWidth: pillWidth, contentHeight: collapsedTotalHeight)
         }
@@ -645,7 +674,9 @@ struct NotchContentView: View {
                 restoreCancelledHandoffContentIfNeeded(window: window)
                 return
             }
-            let duration = IslandHandoffState.inboundContentDuration(reduceMotion: shouldReduceMotion)
+            let duration = IslandHandoffState.inboundContentDuration(
+                reduceMotion: shouldReduceMotion || hasDirectionalMotion
+            )
             if duration == 0 {
                 handoffContentVisible = true
             } else {
@@ -661,7 +692,7 @@ struct NotchContentView: View {
     }
 
     private func expand(to newState: IslandState) {
-        guard !expandPending else { return }
+        guard !expandPending, notchWindow?.isSwitchingApps != true else { return }
         collapseGeneration += 1
         let generation = collapseGeneration
         collapseAnimating = false
@@ -790,6 +821,10 @@ struct NotchContentView: View {
     }
 
     private func resizeCollapsedWindow() {
+        if notchWindow?.isHandoffLayoutLocked == true {
+            handoffResizePending = true
+            return
+        }
         if let window = notchWindow {
             window.resizeToFitCollapse(contentWidth: pillWidth, contentHeight: collapsedTotalHeight)
         } else {
@@ -798,14 +833,29 @@ struct NotchContentView: View {
     }
 
     private func scheduleExpandedWindowResize() {
+        if isExpanded, notchWindow?.isHandoffLayoutLocked == true {
+            handoffResizePending = true
+            return
+        }
         guard isExpanded, !expandedResizeScheduled else { return }
         expandedResizeScheduled = true
         // 宽度、偏好和实测高度可在同一轮更新，合并后使用最新值，避免窗口反馈重复布局。
         DispatchQueue.main.async {
             expandedResizeScheduled = false
             guard isExpanded else { return }
+            if notchWindow?.isHandoffLayoutLocked == true {
+                handoffResizePending = true
+                return
+            }
             onSizeChange?(effectivePanelWidth, naturalExpandedHeight)
         }
+    }
+
+    private func flushHandoffWindowResize() {
+        guard handoffResizePending, notchWindow?.isHandoffLayoutLocked != true,
+              notchWindow?.handoffState.pendingPreparation == nil else { return }
+        handoffResizePending = false
+        if isExpanded { scheduleExpandedWindowResize() } else { resizeCollapsedWindow() }
     }
 
     // MARK: - 鼠标悬停检测
@@ -977,6 +1027,7 @@ struct NotchContentView: View {
             if tier != motionTier { motionTier = tier }
         }
         guard visible else {
+            window.cancelIslandSwitchPreview(animated: false)
             cancelExpandedAutoHide()
             resetHoverEffects()
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
@@ -1002,6 +1053,7 @@ struct NotchContentView: View {
 
         let physicallyInside = hitFrame.contains(mouse)
         let handoffSuppressed = window.observeHandoffPointer(isInside: physicallyInside)
+        let switching = window.isSwitchingApps || window.swipeRecognizer.consumesHorizontalScroll
         var inside = physicallyInside
         let wasInside = wasPointerInsidePillHitFrame
 
@@ -1016,7 +1068,7 @@ struct NotchContentView: View {
             previousMouseY: previousMouseY,
             currentMouseY: mouse.y,
             isHandoffSuppressed: handoffSuppressed,
-            isSwitchingApps: window.isSwitchingApps
+            isSwitchingApps: switching
         ) {
             if !isHoveringPill {
                 isHoveringPill = true
@@ -1036,7 +1088,7 @@ struct NotchContentView: View {
                     }
                 }
             }
-        } else if !inside || isExpanded || collapseAnimating || handoffSuppressed || window.isSwitchingApps {
+        } else if !inside || isExpanded || collapseAnimating || handoffSuppressed || switching {
             if isHoveringPill {
                 isHoveringPill = false
                 jellyGeneration += 1  // 废弃所有进行中的果冻计时器
@@ -1055,7 +1107,7 @@ struct NotchContentView: View {
 
         // 吸附效果：鼠标靠近药丸时水平偏移
         if !shouldReduceMotion, !isExpanded, !collapseAnimating,
-           !handoffSuppressed, !window.isSwitchingApps {
+           !handoffSuppressed, !switching {
             let pillCenterX = window.frame.midX
             let pillCenterY = window.frame.minY + collapsedShapeHeight / 2
             let dx = mouse.x - pillCenterX
@@ -1090,7 +1142,7 @@ struct NotchContentView: View {
             isExpanded: isExpanded,
             hasPassedCollapseCooldown: Date().timeIntervalSince(lastCollapseAt) > 0.65,
             hoverToExpandPanel: hoverToExpandPanel,
-            isSwitchingApps: window.isSwitchingApps,
+            isSwitchingApps: switching,
             isHandoffSuppressed: handoffSuppressed
         ) {
             expandedByHover = true

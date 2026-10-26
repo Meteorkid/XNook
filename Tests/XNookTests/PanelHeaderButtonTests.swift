@@ -170,7 +170,7 @@ private struct HeaderHoverFixture: View {
                         .font(.system(size: IslandTokens.Font.body, weight: .medium))
                         .frame(width: 26, height: 26)
                 }
-                .buttonStyle(PanelHeaderButtonStyle(isHovering: state.hovering, reduceMotion: reduced))
+                .buttonStyle(ScaleOnlyButtonStyle(isHovering: state.hovering, reduceMotion: reduced))
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
             }

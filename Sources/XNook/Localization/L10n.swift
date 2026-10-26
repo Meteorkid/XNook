@@ -117,8 +117,8 @@ enum L10n {
 
     static var enableSwipeSwitch: String { localized(zh: "启用双指横滑切换", en: "Enable two-finger swipe switching") }
     static var enableSwipeSwitchDesc: String { localized(
-        zh: "仅在灵动岛收起时响应双指左右滑动，切换到另一个灵动岛应用。",
-        en: "When the island is collapsed, switch to the other island app with a two-finger horizontal swipe.") }
+        zh: "在收起的岛上双指横滑，内容跟手移动；松手后切换，未滑够会回弹。",
+        en: "Swipe horizontally with two fingers on the collapsed island. It follows the gesture and switches on release, or springs back if the swipe is too short.") }
 
     static var switchSensitivity: String { localized(zh: "切换灵敏度", en: "Switch sensitivity") }
     static var switchSensitivityDesc: String { localized(

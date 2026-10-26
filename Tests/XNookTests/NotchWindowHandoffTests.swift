@@ -258,7 +258,6 @@ final class NotchWindowHandoffTests: XCTestCase {
         window.showWindow()
         let generation = window.beginInboundHandoff { _ in }
         window.hideWindowForIslandSwitch()
-        fixture.harness.runNextScheduled()
 
         XCTAssertFalse(window.completeInboundHandoffPreparation(generation: generation))
         XCTAssertFalse(window.canRestoreHandoffContent(after: generation))
@@ -283,6 +282,9 @@ final class NotchWindowHandoffTests: XCTestCase {
         XCTAssertFalse(window.canRestoreHandoffContent(after: latest))
         XCTAssertTrue(window.completeInboundHandoffPreparation(generation: latest))
         XCTAssertFalse(window.canRestoreHandoffContent(after: latest), "当前代数的淡入由原完成回调负责")
+        XCTAssertFalse(window.canRestoreHandoffContent(after: first), "旧回调不能提亮已经准备但尚未展示的新一代")
+        window.showPreparedHandoff(generation: latest)
+        XCTAssertFalse(window.canRestoreHandoffContent(after: first), "旧回调不能干扰正在入站的新一代")
     }
 
     func testRepeatedFadeContinuesOriginalTransitionAndOrdersOutOnce() throws {
@@ -293,18 +295,13 @@ final class NotchWindowHandoffTests: XCTestCase {
         let generation = fixture.window.handoffState.generation
         let scheduledCount = fixture.harness.scheduled.count
         XCTAssertGreaterThan(scheduledCount, 0)
-        XCTAssertEqual(fixture.harness.scheduled.map(\.delay).max() ?? 0, 0.12, accuracy: 0.000_001)
         XCTAssertEqual(fixture.harness.orderOutCount, 0)
 
-        fixture.harness.runNextScheduled()
-        let alphaAfterFirstStep = fixture.window.alphaValue
-        XCTAssertGreaterThan(alphaAfterFirstStep, 0)
-        XCTAssertLessThan(alphaAfterFirstStep, 1)
         fixture.window.hideWindowForIslandSwitch()
 
         XCTAssertEqual(fixture.window.handoffState.generation, generation)
-        XCTAssertEqual(fixture.harness.scheduled.count, scheduledCount - 1)
-        XCTAssertEqual(fixture.window.alphaValue, alphaAfterFirstStep)
+        XCTAssertEqual(fixture.harness.scheduled.count, scheduledCount)
+        XCTAssertEqual(fixture.harness.outgoingMotions.count, 1, "重复让位不能重新启动动画")
         fixture.harness.runAllScheduled()
         XCTAssertEqual(fixture.harness.orderOutCount, 1)
         XCTAssertFalse(fixture.window.handoffState.isFadingOut)
@@ -317,8 +314,7 @@ final class NotchWindowHandoffTests: XCTestCase {
             defer { fixture.close() }
             fixture.window.showWindow()
             fixture.window.hideWindowForIslandSwitch()
-            fixture.harness.runNextScheduled()
-            XCTAssertLessThan(fixture.window.alphaValue, 1)
+            XCTAssertTrue(fixture.window.handoffState.isFadingOut)
 
             if showAtMouse {
                 fixture.window.showAtMouseScreen()
@@ -336,7 +332,7 @@ final class NotchWindowHandoffTests: XCTestCase {
         }
     }
 
-    func testRepeatedInboundDuringFadeRestoresAlphaOnlyAfterPreparation() throws {
+    func testRepeatedInboundDuringOutgoingAnimationWaitsForPreparation() throws {
         let fixture = try makeFixture()
         defer { fixture.close() }
         var requested: [UInt64] = []
@@ -348,12 +344,11 @@ final class NotchWindowHandoffTests: XCTestCase {
         let scheduledCount = fixture.harness.scheduled.count
         fixture.window.hideWindowForIslandSwitch()
         XCTAssertEqual(fixture.harness.scheduled.count, scheduledCount)
-        fixture.harness.runNextScheduled()
-        let fadingAlpha = fixture.window.alphaValue
-        XCTAssertLessThan(fadingAlpha, 1)
+        // 模拟已有层动画的展示状态，准备之前不能重置旧展开内容。
+        fixture.window.contentView?.layer?.opacity = 0.4
 
         let first = fixture.window.beginInboundHandoff { completed.append($0) }
-        XCTAssertEqual(fixture.window.alphaValue, fadingAlpha, "准备前不能把旧展开内容重新提亮")
+        XCTAssertEqual(fixture.window.contentView?.layer?.opacity, 0.4)
         let second = fixture.window.beginInboundHandoff { generation in
             completed.append(generation)
             fixture.window.showPreparedHandoff(generation: generation)
@@ -363,7 +358,7 @@ final class NotchWindowHandoffTests: XCTestCase {
         XCTAssertEqual(requested, [first, second])
         XCTAssertFalse(fixture.window.isCurrentHandoff(fadeGeneration))
         XCTAssertEqual(fixture.window.handoffState.pendingPreparation, second)
-        XCTAssertEqual(fixture.window.alphaValue, fadingAlpha, "旧淡出帧不能继续改写透明度")
+        XCTAssertEqual(fixture.window.contentView?.layer?.opacity, 0.4, "旧完成回调不能重置正在准备的内容")
         XCTAssertFalse(fixture.window.handoffState.isFadingOut)
         XCTAssertFalse(fixture.window.isHiddenByIslandSwitch)
         XCTAssertTrue(fixture.window.isSwitchingApps, "旧淡出不能解除新入站请求的切换保护")
@@ -381,7 +376,6 @@ final class NotchWindowHandoffTests: XCTestCase {
         defer { fixture.close() }
         fixture.window.showWindow()
         fixture.window.hideWindowForIslandSwitch()
-        fixture.harness.runNextScheduled()
 
         fixture.window.hideWindow()
         fixture.harness.runAllScheduled()
@@ -408,16 +402,246 @@ final class NotchWindowHandoffTests: XCTestCase {
         }
     }
 
-    private func makeFixture(reduceMotion: Bool = false) throws -> Fixture {
+    func testPreparedPresentationKeepsSwitchingUntilItsAnimationCompletes() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        let generation = window.beginInboundHandoff { _ in }
+
+        window.showPreparedHandoff(generation: generation)
+        XCTAssertEqual(fixture.harness.orderFrontCount, 0, "准备前不能启动入站展示")
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: generation))
+        window.showPreparedHandoff(generation: generation)
+        window.showPreparedHandoff(generation: generation)
+
+        XCTAssertEqual(fixture.harness.orderFrontCount, 1)
+        XCTAssertEqual(fixture.harness.incomingMotions.count, 1)
+        XCTAssertTrue(window.isSwitchingApps)
+        XCTAssertTrue(window.handoffState.isPresentingInbound)
+        let completion = try XCTUnwrap(fixture.harness.incomingCompletions.first)
+        completion()
+        completion()
+        XCTAssertFalse(window.isSwitchingApps)
+        XCTAssertFalse(window.handoffState.isPresentingInbound)
+    }
+
+    func testOldIncomingCompletionCannotClearNewPresentationProtection() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        let first = window.beginInboundHandoff { _ in }
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: first))
+        window.showPreparedHandoff(generation: first)
+        let staleCompletion = try XCTUnwrap(fixture.harness.incomingCompletions.first)
+        let latest = window.beginInboundHandoff { _ in }
+
+        staleCompletion()
+        XCTAssertTrue(window.isSwitchingApps)
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: latest))
+        window.showPreparedHandoff(generation: latest)
+        staleCompletion()
+
+        XCTAssertTrue(window.isSwitchingApps)
+        XCTAssertTrue(window.handoffState.isPresentingInbound)
+        try XCTUnwrap(fixture.harness.incomingCompletions.last)()
+        XCTAssertFalse(window.isSwitchingApps)
+    }
+
+    func testExplicitHideRejectsLateIncomingAnimationCompletion() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        let generation = window.beginInboundHandoff { _ in }
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: generation))
+        window.showPreparedHandoff(generation: generation)
+        let completion = try XCTUnwrap(fixture.harness.incomingCompletions.first)
+
+        window.hideWindow()
+        completion()
+
+        XCTAssertEqual(fixture.harness.orderFrontCount, 1)
+        XCTAssertEqual(fixture.harness.orderOutCount, 1)
+        XCTAssertTrue(window.isHiddenByUser)
+        XCTAssertFalse(window.isSwitchingApps)
+        XCTAssertFalse(window.handoffState.isPresentingInbound)
+    }
+
+    func testReducedMotionCompletesIncomingPresentationSynchronously() throws {
+        let fixture = try makeFixture(reduceMotion: true)
+        defer { fixture.close() }
+        let window = fixture.window
+        let generation = window.beginInboundHandoff { _ in }
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: generation))
+
+        window.showPreparedHandoff(generation: generation)
+
+        XCTAssertEqual(fixture.harness.orderFrontCount, 1)
+        XCTAssertFalse(window.isSwitchingApps)
+        XCTAssertFalse(window.handoffState.isPresentingInbound)
+        XCTAssertTrue(fixture.harness.incomingCompletions.isEmpty)
+    }
+
+    func testDirectionalMotionSurvivesPreparationAndReachesBothAnimations() throws {
+        for direction in [SwipeDirection.left, .right] {
+            let fixture = try makeFixture()
+            defer { fixture.close() }
+            let window = fixture.window
+            let motion = IslandSwitchMotion(direction: direction, reduceMotion: false)
+            let generation = window.beginInboundHandoff(motion: motion) { _ in }
+            XCTAssertEqual(window.inboundSwitchMotion, motion)
+            XCTAssertTrue(window.completeInboundHandoffPreparation(generation: generation))
+            window.showPreparedHandoff(generation: generation)
+
+            XCTAssertEqual(fixture.harness.incomingMotions, [motion])
+            XCTAssertEqual(window.inboundSwitchMotion, motion)
+            try XCTUnwrap(fixture.harness.incomingCompletions.last)()
+            XCTAssertNil(window.inboundSwitchMotion)
+
+            window.hideWindowForIslandSwitch(motion: motion)
+
+            XCTAssertEqual(fixture.harness.outgoingMotions, [motion])
+            XCTAssertTrue(window.isSwitchingApps)
+            fixture.harness.runAllScheduled()
+            XCTAssertFalse(window.isSwitchingApps)
+            XCTAssertEqual(fixture.harness.orderOutCount, 1)
+        }
+    }
+
+    func testMotionReductionDisablesBothAnimationsEvenWhenLocalSettingIsOff() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        let motion = IslandSwitchMotion(direction: .left, reduceMotion: true)
+        let generation = window.beginInboundHandoff(motion: motion) { _ in }
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: generation))
+        window.showPreparedHandoff(generation: generation)
+
+        XCTAssertFalse(window.isSwitchingApps)
+        XCTAssertTrue(fixture.harness.incomingCompletions.isEmpty)
+        window.hideWindowForIslandSwitch(motion: motion)
+        XCTAssertFalse(window.isSwitchingApps)
+        XCTAssertTrue(fixture.harness.scheduled.isEmpty)
+        XCTAssertEqual(fixture.harness.orderOutCount, 1)
+    }
+
+    func testRealReducedMotionCompletionPreservesContextCapturedBeforePresentation() throws {
+        let fixture = try makeFixture(useAnimationHarness: false)
+        defer { fixture.close() }
+        let window = fixture.window
+        let motion = IslandSwitchMotion(direction: .right, reduceMotion: true, issuedUptime: 100)
+        var capturedContext: IslandSwitchMotion?
+        let generation = window.beginInboundHandoff(motion: motion) { generation in
+            capturedContext = window.inboundSwitchMotion
+            let startedMotion = capturedContext?.starting(at: 100.1, reduceMotion: false)
+            window.showPreparedHandoff(generation: generation, motion: startedMotion)
+        }
+
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: generation))
+
+        XCTAssertEqual(capturedContext, motion, "接收回执必须在同步完成清理前捕获入站方向上下文")
+        XCTAssertNil(window.inboundSwitchMotion)
+        XCTAssertFalse(window.isSwitchingApps)
+        XCTAssertFalse(window.handoffState.isPresentingInbound)
+        XCTAssertEqual(fixture.harness.orderFrontCount, 1)
+        XCTAssertEqual(window.contentView?.layer?.opacity, 1)
+        XCTAssertEqual(window.contentView?.layer?.transform.m41, 0)
+    }
+
+    func testExpansionAndHideCancelSwipePreview() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        window.previewIslandSwitch(translation: 24)
+        XCTAssertTrue(window.isPreviewingIslandSwitch)
+
+        window.islandState = .expanded
+        XCTAssertFalse(window.isPreviewingIslandSwitch)
+        XCTAssertEqual(window.contentView?.layer?.transform.m41, 0)
+        window.islandState = .collapsed
+        window.previewIslandSwitch(translation: -24)
+        XCTAssertTrue(window.isPreviewingIslandSwitch)
+
+        window.hideWindow()
+        XCTAssertFalse(window.isPreviewingIslandSwitch)
+        XCTAssertEqual(window.contentView?.layer?.transform.m41, 0)
+    }
+
+    func testZeroTranslationStillCancelsAnInterruptedLayerPose() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        window.contentView?.wantsLayer = true
+        window.contentView?.layer?.setValue(20, forKeyPath: "transform.translation.x")
+        window.previewIslandSwitch(translation: 0)
+        XCTAssertTrue(window.isPreviewingIslandSwitch)
+        XCTAssertGreaterThan(try XCTUnwrap(window.contentView?.layer?.transform.m41), 0)
+        window.cancelIslandSwitchPreview(animated: false)
+        XCTAssertFalse(window.isPreviewingIslandSwitch)
+        XCTAssertEqual(window.contentView?.layer?.transform.m41, 0)
+    }
+
+    func testSwitchingIgnoresGestureTailWithoutReturningPreviewToRest() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        window.previewIslandSwitch(translation: 24)
+        let offset = try XCTUnwrap(window.contentView?.layer?.transform.m41)
+        XCTAssertGreaterThan(offset, 0)
+        window.isSwitchingApps = true
+        let cgEvent = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                            wheelCount: 2, wheel1: 0, wheel2: 12, wheel3: 0))
+        let event = try XCTUnwrap(NSEvent(cgEvent: cgEvent))
+
+        XCTAssertFalse(window.handleIslandSwipe(event))
+
+        XCTAssertTrue(window.isPreviewingIslandSwitch)
+        XCTAssertEqual(window.contentView?.layer?.transform.m41, offset)
+    }
+
+    func testHandoffLayoutLocksOnlyAnimationAndUnlocksEachCompletionOnce() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let window = fixture.window
+        var unlocks = 0
+        let observer = NotificationCenter.default.addObserver(forName: .xnookHandoffLayoutDidUnlock,
+            object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { unlocks += 1 }
+            }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let generation = window.beginInboundHandoff { _ in }
+        XCTAssertFalse(window.isHandoffLayoutLocked, "准备阶段仍需原子设置目标尺寸")
+        XCTAssertTrue(window.completeInboundHandoffPreparation(generation: generation))
+        window.showPreparedHandoff(generation: generation)
+        XCTAssertTrue(window.isHandoffLayoutLocked)
+        XCTAssertEqual(unlocks, 0)
+
+        let completion = try XCTUnwrap(fixture.harness.incomingCompletions.last)
+        completion()
+        completion()
+        XCTAssertFalse(window.isHandoffLayoutLocked)
+        XCTAssertEqual(unlocks, 1)
+        window.hideWindowForIslandSwitch()
+        XCTAssertTrue(window.isHandoffLayoutLocked)
+        fixture.harness.runAllScheduled()
+        XCTAssertFalse(window.isHandoffLayoutLocked)
+        XCTAssertEqual(unlocks, 2)
+    }
+
+    private func makeFixture(reduceMotion: Bool = false, useAnimationHarness: Bool = true) throws -> Fixture {
         _ = NSApplication.shared
         let suite = "XNookTests.NotchWindowHandoff.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let harness = Harness(reduceMotion: reduceMotion)
+        var environment = harness.environment()
+        if !useAnimationHarness {
+            environment.animateIncoming = nil
+            environment.animateOutgoing = nil
+        }
         let window = NotchWindow(
             defaults: defaults,
             markVisible: {},
             onExplicitShow: {},
-            handoffEnvironment: harness.environment()
+            handoffEnvironment: environment
         )
         NSWorkspace.shared.notificationCenter.removeObserver(window)
         return Fixture(window: window, harness: harness, defaults: defaults, suite: suite)
@@ -441,6 +665,9 @@ final class NotchWindowHandoffTests: XCTestCase {
         let reduceMotion: Bool
         var orderFrontCount = 0
         var orderOutCount = 0
+        var outgoingMotions: [IslandSwitchMotion?] = []
+        var incomingMotions: [IslandSwitchMotion?] = []
+        var incomingCompletions: [@MainActor () -> Void] = []
         var scheduled: [(delay: TimeInterval, action: @MainActor () -> Void)] = []
 
         init(reduceMotion: Bool) {
@@ -450,13 +677,19 @@ final class NotchWindowHandoffTests: XCTestCase {
         func environment() -> NotchWindow.HandoffEnvironment {
             .init(
                 reduceMotion: { [unowned self] in reduceMotion },
-                schedule: { [unowned self] delay, action in
-                    scheduled.append((delay, action))
-                    // 故意保留已取消任务，验证迟到回调不会影响新一轮显示。
-                    return {}
-                },
                 orderFront: { [unowned self] _ in orderFrontCount += 1 },
-                orderOut: { [unowned self] _ in orderOutCount += 1 }
+                orderOut: { [unowned self] _ in orderOutCount += 1 },
+                animateIncoming: { [unowned self] motion, reduceMotion, completion in
+                    incomingMotions.append(motion)
+                    if reduceMotion { completion() } else { incomingCompletions.append(completion) }
+                },
+                animateOutgoing: { [unowned self] motion, reduceMotion, completion in
+                    outgoingMotions.append(motion)
+                    if reduceMotion { completion() } else {
+                        // 故意保留已失效的完成回调，验证其不会接管后续显示。
+                        scheduled.append((0, completion))
+                    }
+                }
             )
         }
 

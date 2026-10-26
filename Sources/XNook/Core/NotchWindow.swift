@@ -1,6 +1,10 @@
 import AppKit
 import QuartzCore
 
+extension Notification.Name {
+    static let xnookHandoffLayoutDidUnlock = Notification.Name("xnookHandoffLayoutDidUnlock")
+}
+
 @MainActor
 final class NotchWindow: NSPanel {
     static let maxExpandedWidth: CGFloat = 1_600
@@ -75,15 +79,22 @@ final class NotchWindow: NSPanel {
     private let fullscreenProbe: (@Sendable () async -> Bool)?
     struct HandoffEnvironment {
         var reduceMotion: () -> Bool
-        var schedule: (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void
         var orderFront: (NotchWindow) -> Void
         var orderOut: (NotchWindow) -> Void
+        var animateIncoming: ((IslandSwitchMotion?, Bool, @escaping @MainActor () -> Void) -> Void)? = nil
+        var animateOutgoing: ((IslandSwitchMotion?, Bool, @escaping @MainActor () -> Void) -> Void)? = nil
+        /// 原生隐藏返回后的观测点，视觉复位尚未发生。
+        var didHide: ((NotchWindow) -> Void)? = nil
     }
     private let handoffEnvironment: HandoffEnvironment
     private(set) var handoffState = IslandHandoffState()
+    var isHandoffLayoutLocked: Bool { handoffState.isPresentingInbound || handoffState.isFadingOut }
     private var handoffPreparationHandler: (@MainActor (UInt64) -> Void)?
     private var handoffPrepared: (@MainActor (UInt64) -> Void)?
-    private var cancelHandoffFrames: [() -> Void] = []
+    private lazy var islandSlideAnimator = IslandSlideAnimator(viewProvider: { [weak self] in self?.contentView })
+    var switchGeometry: IslandSwitchGeometry? { IslandSlideAnimator.geometry(in: contentView) }
+    private(set) var inboundSwitchMotion: IslandSwitchMotion?
+    private(set) var isPreviewingIslandSwitch = false
     private var visibilityGeneration: UInt64 = 0
     let activityState = PanelActivityState()
     private var isTornDown = false
@@ -96,8 +107,13 @@ final class NotchWindow: NSPanel {
 
     /// 横滑切换手势识别器
     let swipeRecognizer = SwipeGestureRecognizer()
+    private var swipeOwnershipGate = IslandSwipeOwnershipGate()
     /// 灵动岛当前状态（由 NotchContentView 同步）
-    var islandState: IslandState = .collapsed
+    var islandState: IslandState = .collapsed {
+        didSet {
+            if islandState != .collapsed { cancelIslandSwitchPreview(animated: false) }
+        }
+    }
     /// 正在切换应用时临时禁用 activeSpaceDidChange 的自动显示
     var isSwitchingApps = false {
         didSet {
@@ -137,11 +153,6 @@ final class NotchWindow: NSPanel {
         self.handoffEnvironment = handoffEnvironment ?? HandoffEnvironment(
             reduceMotion: {
                 defaults.bool(forKey: "reduceMotion") || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            },
-            schedule: { delay, action in
-                let work = DispatchWorkItem { action() }
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
-                return { work.cancel() }
             },
             orderFront: { $0.orderFrontRegardless() },
             orderOut: { $0.orderOut(nil) }
@@ -225,7 +236,10 @@ final class NotchWindow: NSPanel {
     }
 
     override func orderOut(_ sender: Any?) {
+        cancelHandoffPresentation(resetVisuals: false)
         super.orderOut(sender)
+        handoffEnvironment.didHide?(self)
+        resetHandoffVisuals()
         synchronizeActivity()
     }
 
@@ -233,8 +247,10 @@ final class NotchWindow: NSPanel {
         hasPendingPanelReveal = false
         isClosed = true
         visibilityGeneration &+= 1
-        cancelHandoffPresentation()
+        cancelHandoffPresentation(resetVisuals: false)
         super.close()
+        handoffEnvironment.didHide?(self)
+        resetHandoffVisuals()
         synchronizeActivity()
     }
 
@@ -254,6 +270,7 @@ final class NotchWindow: NSPanel {
 
     @objc private func systemWillSleep(_ note: Notification) {
         visibilityGeneration &+= 1
+        cancelIslandSwitchPreview(animated: false)
         activityState.setSystemAwake(false)
         mouseTracking.setActive(false)
     }
@@ -278,37 +295,32 @@ final class NotchWindow: NSPanel {
     }
     func hideWindow() {
         hasPendingPanelReveal = false
-        cancelHandoffPresentation()
+        cancelHandoffPresentation(resetVisuals: false)
         visibilityGeneration &+= 1
         isHiddenByUser = true
         handoffEnvironment.orderOut(self)
+        resetHandoffVisuals()
     }
-    func hideWindowForIslandSwitch(animated: Bool = true) {
+    func hideWindowForIslandSwitch(animated: Bool = true, motion: IslandSwitchMotion? = nil) {
         hasPendingPanelReveal = false
         guard !isHiddenByIslandSwitch || handoffState.isFadingOut else { return }
         guard let generation = handoffState.beginFadeOut() else { return }
-        cancelScheduledHandoffFrames()
+        isPreviewingIslandSwitch = false
+        swipeRecognizer.reset()
+        swipeOwnershipGate.reset()
         handoffPrepared = nil
+        inboundSwitchMotion = nil
         visibilityGeneration &+= 1
         isHiddenByIslandSwitch = true
         isSwitchingApps = true
-        let duration = IslandHandoffState.outboundDuration(
-            reduceMotion: !animated || handoffEnvironment.reduceMotion()
-        )
-        guard duration > 0 else {
-            finishHandoffFade(generation: generation)
-            return
+        let reduceMotion = !animated || motion?.reduceMotion == true || handoffEnvironment.reduceMotion()
+        let completion: @MainActor () -> Void = { [weak self] in
+            self?.finishHandoffFade(generation: generation)
         }
-        let initialAlpha = alphaValue
-        // 每帧检查代数，显式重新显示后迟到的动画既不能改 alpha，也不能 orderOut。
-        for step in 1...8 {
-            let progress = Double(step) / 8
-            let cancel = handoffEnvironment.schedule(duration * progress) { [weak self] in
-                guard let self, self.isCurrentHandoff(generation), self.handoffState.isFadingOut else { return }
-                self.alphaValue = initialAlpha * (1 - progress)
-                if step == 8 { self.finishHandoffFade(generation: generation) }
-            }
-            cancelHandoffFrames.append(cancel)
+        if let animate = handoffEnvironment.animateOutgoing {
+            animate(motion, reduceMotion, completion)
+        } else {
+            islandSlideAnimator.animateOutgoing(motion: motion, reduceMotion: reduceMotion, completion: completion)
         }
     }
     func toggleVisibility() { isVisible ? hideWindow() : showWindow() }
@@ -332,7 +344,7 @@ final class NotchWindow: NSPanel {
         presentAtMouseScreen()
     }
 
-    private func presentAtMouseScreen(reposition: Bool = true) {
+    private func presentAtMouseScreen(reposition: Bool = true, beforeOrdering: (() -> Void)? = nil) {
         guard !isTornDown else { return }
         isClosed = false
         alphaValue = 1
@@ -343,6 +355,7 @@ final class NotchWindow: NSPanel {
         isHiddenByUser = false
         markVisible()
         if reposition { positionAtMouseScreen() }
+        beforeOrdering?()
         orderFrontForPresentation()
     }
 
@@ -359,16 +372,19 @@ final class NotchWindow: NSPanel {
     }
 
     @discardableResult
-    func beginInboundHandoff(onPrepared: @escaping @MainActor (UInt64) -> Void) -> UInt64 {
+    func beginInboundHandoff(motion: IslandSwitchMotion? = nil,
+                             onPrepared: @escaping @MainActor (UInt64) -> Void) -> UInt64 {
         guard !isTornDown else { return handoffState.generation }
         hasPendingPanelReveal = false
-        cancelScheduledHandoffFrames()
         let generation = handoffState.beginInbound()
+        inboundSwitchMotion = motion
+        isPreviewingIslandSwitch = false
         handoffPrepared = onPrepared
         visibilityGeneration &+= 1
         isHiddenByIslandSwitch = false
         isSwitchingApps = true
-        swipeRecognizer.suppress(for: 0.8)
+        swipeRecognizer.suppressUntilNextGesture()
+        swipeOwnershipGate.reset()
         handoffPreparationHandler?(generation)
         // 冷启动窗口尚未显示；强制建立 SwiftUI 树以安装准备处理器。
         contentView?.layoutSubtreeIfNeeded()
@@ -395,9 +411,25 @@ final class NotchWindow: NSPanel {
         return true
     }
 
-    func showPreparedHandoff(generation: UInt64) {
-        guard isCurrentHandoff(generation), handoffState.pendingPreparation == nil else { return }
-        presentAtMouseScreen(reposition: false)
+    func showPreparedHandoff(generation: UInt64, motion: IslandSwitchMotion? = nil) {
+        guard handoffState.beginPresentation(generation) else { return }
+        let motion = motion ?? inboundSwitchMotion
+        inboundSwitchMotion = motion
+        presentAtMouseScreen(reposition: false) { [self] in
+            self.isSwitchingApps = true
+            let reduceMotion = motion?.reduceMotion == true || self.handoffEnvironment.reduceMotion()
+            let completion: @MainActor () -> Void = { [weak self] in
+                guard let self, self.handoffState.finishPresentation(generation) else { return }
+                self.inboundSwitchMotion = nil
+                self.isSwitchingApps = false
+                NotificationCenter.default.post(name: .xnookHandoffLayoutDidUnlock, object: self)
+            }
+            if let animate = self.handoffEnvironment.animateIncoming {
+                animate(motion, reduceMotion, completion)
+            } else {
+                self.islandSlideAnimator.animateIncoming(motion: motion, reduceMotion: reduceMotion, completion: completion)
+            }
+        }
     }
 
     func isCurrentHandoff(_ generation: UInt64) -> Bool { handoffState.generation == generation }
@@ -406,34 +438,52 @@ final class NotchWindow: NSPanel {
     func canRestoreHandoffContent(after cancelledGeneration: UInt64) -> Bool {
         !isCurrentHandoff(cancelledGeneration)
             && handoffState.pendingPreparation == nil
+            && handoffState.pendingPresentation == nil
+            && !handoffState.isPresentingInbound
             && !handoffState.isFadingOut
             && !isHiddenByIslandSwitch
             && !isHiddenByUser
     }
 
     func observeHandoffPointer(isInside: Bool) -> Bool {
-        handoffState.observePointer(isInside: isInside)
+        if isPreviewingIslandSwitch || swipeRecognizer.isActive {
+            if !isInside || !isVisible {
+                cancelIslandSwitchPreview()
+            } else if isPreviewingIslandSwitch, swipeRecognizer.isActive,
+                      !swipeOwnershipGate.canContinuePreview(
+                        now: ProcessInfo.processInfo.systemUptime,
+                        probe: { isFrontmostIslandWindow() }
+                      ) {
+                cancelIslandSwitchPreview()
+            }
+        }
+        return handoffState.observePointer(isInside: isInside)
     }
 
-    private func cancelScheduledHandoffFrames() {
-        cancelHandoffFrames.forEach { $0() }
-        cancelHandoffFrames.removeAll()
-    }
-
-    private func cancelHandoffPresentation() {
-        cancelScheduledHandoffFrames()
+    /// 隐藏路径先淘汰事务，待原生窗口退出屏幕后再复位可见层。
+    private func cancelHandoffPresentation(resetVisuals: Bool = true) {
         handoffState.cancelPresentation()
         handoffPrepared = nil
-        alphaValue = 1
+        inboundSwitchMotion = nil
+        isPreviewingIslandSwitch = false
+        swipeRecognizer.reset()
+        swipeOwnershipGate.reset()
+        if resetVisuals { resetHandoffVisuals() }
         isSwitchingApps = false
+    }
+
+    private func resetHandoffVisuals() {
+        islandSlideAnimator.reset()
+        alphaValue = 1
     }
 
     private func finishHandoffFade(generation: UInt64) {
         guard handoffState.finishFadeOut(generation) else { return }
-        cancelScheduledHandoffFrames()
         handoffEnvironment.orderOut(self)
+        islandSlideAnimator.reset()
         alphaValue = 1
         isSwitchingApps = false
+        NotificationCenter.default.post(name: .xnookHandoffLayoutDidUnlock, object: self)
     }
 
     func isFrontmostIslandWindow() -> Bool {
@@ -441,6 +491,74 @@ final class NotchWindow: NSPanel {
             self,
             bundleIdentifiers: ["com.meteorkid.xnook", "dev.xisland.app"]
         )
+    }
+
+    func previewIslandSwitch(translation: CGFloat) {
+        guard translation.isFinite, islandState == .collapsed, !isSwitchingApps else { return }
+        isPreviewingIslandSwitch = true
+        islandSlideAnimator.preview(translation: translation, width: contentView?.bounds.width ?? frame.width,
+                                    reduceMotion: handoffEnvironment.reduceMotion())
+    }
+
+    func cancelIslandSwitchPreview(animated: Bool = true) {
+        guard !isSwitchingApps else { return }
+        swipeRecognizer.reset()
+        swipeOwnershipGate.reset()
+        guard isPreviewingIslandSwitch else { return }
+        isPreviewingIslandSwitch = false
+        if animated {
+            islandSlideAnimator.returnToRest(reduceMotion: handoffEnvironment.reduceMotion())
+        } else {
+            islandSlideAnimator.reset()
+        }
+    }
+
+    /// 本地和全局滚动共用所有权与命中检查，纵向滚动继续交给展开逻辑。
+    @discardableResult
+    func handleIslandSwipe(_ event: NSEvent) -> Bool {
+        guard !isSwitchingApps else {
+            swipeRecognizer.reset()
+            swipeOwnershipGate.reset()
+            return false
+        }
+        guard IslandIntegrationSettings.isSwipeSwitchEnabled,
+              !isTornDown, !isClosed, !isHiddenByIslandSwitch, !isHiddenByUser,
+              IslandWindowOwnership.canHandleGlobalSwipe(
+                isVisible: isVisible, isCollapsed: islandState == .collapsed,
+                windowFrame: frame, mouseLocation: pointerLocation()
+              ) else {
+            cancelIslandSwitchPreview()
+            return false
+        }
+        guard swipeOwnershipGate.canHandleEvent(
+            isNewGesture: event.phase.contains(.began),
+            isGestureActive: swipeRecognizer.isActive,
+            now: ProcessInfo.processInfo.systemUptime,
+            probe: { isFrontmostIslandWindow() }
+        ) else {
+            cancelIslandSwitchPreview()
+            return false
+        }
+        let wasConsuming = swipeRecognizer.consumesHorizontalScroll
+        switch swipeRecognizer.handleScroll(event: event) {
+        case .inProgress:
+            if !swipeRecognizer.isActive { swipeOwnershipGate.reset() }
+            return swipeRecognizer.consumesHorizontalScroll
+        case .progress(let translation):
+            previewIslandSwitch(translation: translation)
+            return true
+        case .cancelled:
+            cancelIslandSwitchPreview()
+            return wasConsuming
+        case .triggered(let direction):
+            swipeOwnershipGate.reset()
+            if AppSwitcher.shared.canSwitchToAnotherIsland {
+                AppSwitcher.shared.switchToNextIsland(direction: direction)
+            } else {
+                cancelIslandSwitchPreview()
+            }
+            return true
+        }
     }
 
     // MARK: - Screen Tracking
@@ -822,14 +940,7 @@ final class NotchWindow: NSPanel {
             }
 
         case .scrollWheel:
-            // 横滑切换手势（仅收起状态响应）
-            if islandState == .collapsed {
-                let result = swipeRecognizer.handleScroll(event: event)
-                if case .triggered(_) = result {
-                    AppSwitcher.shared.switchToNextIsland()
-                    return
-                }
-            }
+            if handleIslandSwipe(event) { return }
             // 触控板双指下滑展开面板（由 AppDelegate 的全局监听器处理）
             super.sendEvent(event)
 
@@ -878,7 +989,8 @@ private class FlippedView: NSView {
 
     override func scrollWheel(with event: NSEvent) {
         let scrollEnabled = UserDefaults.standard.bool(forKey: "scrollDownToExpandPanel")
-        if scrollEnabled, event.hasPreciseScrollingDeltas {
+        if scrollEnabled, event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty,
+           let notchWindow = window as? NotchWindow, !notchWindow.isSwitchingApps {
             let physicalDeltaY = event.isDirectionInvertedFromDevice
                 ? event.scrollingDeltaY
                 : -event.scrollingDeltaY

@@ -9,6 +9,7 @@ enum SettingsDefaults {
         "panelWidth": 800.0,
         "panelBaseHeight": 200.0,
         "panelAutoSize": true,
+        "panelHeightMode": "",
         "islandBackgroundStyle": IslandBackgroundStyle.solid.rawValue,
         "islandGlassDepth": IslandBackgroundPolicy.defaultGlassDepth,
         "islandWidth": 253.0,

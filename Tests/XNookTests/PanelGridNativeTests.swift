@@ -35,19 +35,26 @@ final class PanelGridNativeTests: XCTestCase {
         try requireRendering()
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
+        let originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain) }
         let store = PanelLayoutStore(defaults: fixture.defaults)
         let originalLayout = store.configuration
-        for scheme in [ColorScheme.light, .dark] {
-            try withHost(fixture: fixture, store: store, scheme: scheme) { host, window, model, record in
-                model.editRequest = 1
-                settle(host)
-                XCTAssertTrue(record.isEditing)
-                XCTAssertEqual(model.editRequest, 0, "编辑请求处理后应清零，避免重建时重复进入")
-                for width: CGFloat in [320, 600, 800, 1000] {
-                    resizeForEvidence(host, window: window, model: model, record: record, width: width)
-                    try assertGeometry(record, configuration: store.configuration, size: model.size, editing: true)
-                    try writeDashboardEvidence(host, record: record,
-                        name: "editing-\(Int(width))-\(scheme == .dark ? "dark" : "light")")
+        for language in ["zh", "en"] {
+            var arguments = originalArguments
+            arguments["appLanguage"] = language
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+            for scheme in [ColorScheme.light, .dark] {
+                try withHost(fixture: fixture, store: store, scheme: scheme) { host, window, model, record in
+                    model.editRequest = 1
+                    settle(host)
+                    XCTAssertTrue(record.isEditing)
+                    XCTAssertEqual(model.editRequest, 0, "编辑请求处理后应清零，避免重建时重复进入")
+                    for width: CGFloat in [320, 600, 800, 1000] {
+                        resizeForEvidence(host, window: window, model: model, record: record, width: width)
+                        try assertGeometry(record, configuration: store.configuration, size: model.size, editing: true)
+                        try writeDashboardEvidence(host, record: record,
+                            name: "editing-\(language)-\(Int(width))-\(scheme == .dark ? "dark" : "light")")
+                    }
                 }
             }
         }
@@ -111,7 +118,7 @@ final class PanelGridNativeTests: XCTestCase {
                         let notch = CGRect(x: (width - 200) / 2, y: 0, width: 200, height: 32)
                         let actions = selection == nil
                             ? ["panelLayoutBegin", "expandedPanelSettings", "expandedPanelClose"]
-                            : ["expandedPanelOverview", "expandedPanelSettings", "expandedPanelClose"]
+                            : ["expandedPanelOverview", "panelLayoutBegin", "expandedPanelSettings", "expandedPanelClose"]
                         for id in actions {
                             let frame = try XCTUnwrap(record.frames[id], id)
                             XCTAssertFalse(frame.intersects(notch), "\(id) width=\(width) language=\(language)")
@@ -120,7 +127,7 @@ final class PanelGridNativeTests: XCTestCase {
                             else { XCTAssertLessThan(frame.minY, 32) }
                         }
                         if selection != nil {
-                            XCTAssertNil(record.frames["panelLayoutBegin"])
+                            XCTAssertNotNil(record.frames["panelLayoutBegin"])
                             let overview = try XCTUnwrap(record.frames["expandedPanelOverview"])
                             let settings = try XCTUnwrap(record.frames["expandedPanelSettings"])
                             XCTAssertGreaterThan(overview.width, 40, "概览文字不能退化为单个图标")
@@ -134,6 +141,100 @@ final class PanelGridNativeTests: XCTestCase {
                 }
             }
         }
+    }
+
+    func testEditorToolbarStaysVisibleWhileItsCanvasScrolls() throws {
+        try requireRendering()
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let store = PanelLayoutStore(defaults: fixture.defaults)
+        let original = fixture.defaults.data(forKey: PanelLayoutStore.storageKey)
+        try withHost(fixture: fixture, store: store, scheme: .dark) { host, window, model, record in
+            model.editRequest = 1
+            settle(host)
+            model.deadZone = NotchDeadZone(width: 200, height: 32)
+            for width: CGFloat in [160, 320, 800] {
+                model.width = width
+                model.height = 560
+                window.setContentSize(model.size)
+                settle(host)
+                let toolbar = try XCTUnwrap(record.frames["panelLayoutEditor"])
+                let body = try XCTUnwrap(record.frames["expandedPanelBody"])
+                assertContained(toolbar, in: CGRect(origin: .zero, size: model.size), name: "pinned toolbar")
+                XCTAssertLessThanOrEqual(toolbar.maxY, body.minY + 0.5)
+                XCTAssertGreaterThan(body.height, 100, "工具栏不能挤走整个编辑画布")
+                let scroll = try XCTUnwrap(allViews(in: host).compactMap { $0 as? NSScrollView }.first {
+                    ($0.documentView?.bounds.height ?? 0) - $0.contentView.bounds.height > 100
+                })
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: 120))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                settle(host)
+                XCTAssertGreaterThan(scroll.contentView.bounds.origin.y, 50)
+                XCTAssertEqual(try XCTUnwrap(record.frames["panelLayoutEditor"]).minY, toolbar.minY, accuracy: 0.5)
+                XCTAssertEqual(try XCTUnwrap(record.frames["panelLayoutEditor"]).height, toolbar.height, accuracy: 0.5)
+                XCTAssertEqual(fixture.defaults.data(forKey: PanelLayoutStore.storageKey), original)
+                try writeDashboardEvidence(host, record: record, name: "pinned-editor-scrolled-\(Int(width))")
+            }
+        }
+    }
+
+    func testCompactDetailHeaderKeepsOverviewAndWindowActionsReachable() throws {
+        try requireRendering()
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain) }
+        let store = PanelLayoutStore(defaults: fixture.defaults)
+        for language in ["zh", "en"] {
+            var arguments = originalArguments
+            arguments["appLanguage"] = language
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+            try withHost(fixture: fixture, store: store, scheme: .dark) { host, window, model, record in
+                model.selected = .media
+                model.deadZone = NotchDeadZone(width: 200, height: 32)
+                for width: CGFloat in [160, 200] {
+                    resizeForEvidence(host, window: window, model: model, record: record, width: width)
+                    let header = try XCTUnwrap(record.frames["expandedPanelHeader"])
+                    let overview = try XCTUnwrap(record.frames["expandedPanelOverview"])
+                    let settings = try XCTUnwrap(record.frames["expandedPanelSettings"])
+                    let close = try XCTUnwrap(record.frames["expandedPanelClose"])
+                    for frame in [overview, settings, close] { assertContained(frame, in: header, name: "compact action") }
+                    XCTAssertGreaterThan(overview.width, 40, "极窄页仍显示概览文字")
+                    XCTAssertLessThanOrEqual(overview.maxX, settings.minX)
+                    XCTAssertLessThanOrEqual(settings.maxX, close.minX)
+                    XCTAssertNil(record.frames["panelLayoutBegin"], "极窄时保留核心操作，布局仍可从设置进入")
+                    try writeDashboardEvidence(host, record: record, name: "compact-detail-\(language)-\(Int(width))")
+                }
+            }
+        }
+    }
+
+    func testThreeWidgetEditorShowsHiddenRecoveryWithoutSavingLayout() throws {
+        try requireRendering()
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain) }
+        var arguments = originalArguments
+        arguments["appLanguage"] = "zh"
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        fixture.defaults.set(try JSONEncoder().encode(Set(["media", "calendar", "tray"])), forKey: "enabledWidgets")
+        let store = PanelLayoutStore(defaults: fixture.defaults)
+        try withHost(fixture: fixture, store: store, scheme: .dark) { host, window, model, record in
+            model.editRequest = 1
+            settle(host)
+            resizeForEvidence(host, window: window, model: model, record: record, width: 800)
+            XCTAssertNotNil(record.frames["panelLayoutHiddenModules"])
+            assertContained(try XCTUnwrap(record.frames["panelLayoutShow-notes"]),
+                in: try XCTUnwrap(record.frames["panelLayoutEditor"]), name: "show hidden notes")
+            XCTAssertFalse(store.configuration.visibleItems.contains { $0.id == .notes })
+            XCTAssertNil(fixture.defaults.object(forKey: PanelLayoutStore.storageKey))
+            try writeDashboardEvidence(host, record: record, name: "editor-three-widgets-dark")
+        }
+    }
+
+    private func allViews(in view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap { allViews(in: $0) }
     }
 
     /// 真实窗口只用于人工/CUA 操作；程序创建截图不代表任何点击验收通过。
@@ -329,7 +430,8 @@ final class PanelGridNativeTests: XCTestCase {
         }
         if editing {
             let toolbar = try XCTUnwrap(record.frames["panelLayoutEditor"])
-            assertContained(toolbar, in: body, name: "panelLayoutEditor")
+            assertContained(toolbar, in: CGRect(origin: .zero, size: size), name: "panelLayoutEditor")
+            XCTAssertLessThanOrEqual(toolbar.maxY, body.minY + 0.5, "编辑工具栏固定在正文视口上方")
             for id in ["Default", "Cancel", "Save", "Module", "Width", "Height", "Visible", "Earlier", "Later"] {
                 let key = "panelLayout\(id)"
                 assertContained(try XCTUnwrap(record.frames[key], key), in: toolbar, name: key)

@@ -203,7 +203,7 @@ final class PanelLayoutStoreTests: XCTestCase {
         XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), saved)
     }
 
-    func testEditingCancelRetainsDefaultContentFitWhileSaveAndResetExplicitlyDisableIt() throws {
+    func testEditingNoOpRetainsDefaultContentFitWhileChangesAndResetDisableIt() throws {
         let store = PanelLayoutStore(defaults: defaults)
         let editor = PanelLayoutEditingSession()
         editor.begin(from: store)
@@ -213,6 +213,11 @@ final class PanelLayoutStoreTests: XCTestCase {
         XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
         XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
         editor.begin(from: store)
+        XCTAssertTrue(editor.save(to: store))
+        XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
+        XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
+        editor.begin(from: store)
+        editor.draft.resize(.notes, columns: 12, rows: 8)
         XCTAssertTrue(editor.save(to: store))
         XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true))
         defaults.removeObject(forKey: PanelLayoutStore.storageKey)

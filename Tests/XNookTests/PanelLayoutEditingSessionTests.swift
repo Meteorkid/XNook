@@ -21,6 +21,71 @@ final class PanelLayoutEditingSessionTests: XCTestCase {
         XCTAssertNil(store.defaults.object(forKey: PanelLayoutStore.storageKey))
     }
 
+    func testCompletingUnchangedDefaultDoesNotPersistOrDisableContentFitting() {
+        let store = store(), editor = PanelLayoutEditingSession()
+        editor.begin(from: store)
+        XCTAssertFalse(editor.hasChanges)
+        XCTAssertTrue(editor.save(to: store))
+        XCTAssertFalse(editor.isEditing)
+        XCTAssertFalse(editor.hasChanges)
+        XCTAssertNil(store.defaults.object(forKey: PanelLayoutStore.storageKey))
+        XCTAssertFalse(store.hasSavedConfiguration)
+        XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
+    }
+
+    func testChangingThenRestoringOriginalDraftFinishesWithoutWriting() {
+        let store = store(), editor = PanelLayoutEditingSession()
+        editor.begin(from: store)
+        let initial = editor.draft
+        editor.draft.resize(.media, columns: 8, rows: 6)
+        XCTAssertTrue(editor.hasChanges)
+        editor.draft = initial
+        XCTAssertFalse(editor.hasChanges)
+        XCTAssertTrue(editor.save(to: store))
+        XCTAssertNil(store.defaults.object(forKey: PanelLayoutStore.storageKey))
+    }
+
+    func testCompletingUnchangedCustomLayoutPreservesStoredBytes() throws {
+        let store = store(), editor = PanelLayoutEditingSession()
+        var initial = store.configuration
+        initial.resize(.media, columns: 8, rows: 6)
+        try store.save(initial)
+        let originalBytes = try XCTUnwrap(store.defaults.data(forKey: PanelLayoutStore.storageKey))
+        editor.begin(from: store)
+        XCTAssertFalse(editor.hasChanges)
+        XCTAssertTrue(editor.save(to: store))
+        XCTAssertEqual(store.defaults.data(forKey: PanelLayoutStore.storageKey), originalBytes)
+        XCTAssertTrue(store.hasSavedConfiguration)
+    }
+
+    func testUnchangedCompletionRefreshesExternalChangesWithoutOverwritingThem() throws {
+        let store = store(), editor = PanelLayoutEditingSession()
+        editor.begin(from: store)
+        var elsewhere = store.configuration
+        elsewhere.setVisible(.calendar, visible: false)
+        try PanelLayoutStore(defaults: store.defaults).save(elsewhere)
+        let originalBytes = store.defaults.data(forKey: PanelLayoutStore.storageKey)
+        XCTAssertTrue(editor.save(to: store))
+        XCTAssertFalse(editor.isEditing)
+        XCTAssertEqual(store.configuration, elsewhere)
+        XCTAssertEqual(store.defaults.data(forKey: PanelLayoutStore.storageKey), originalBytes)
+    }
+
+    func testHideAndRestoreModuleRemainDraftOnlyUntilSaving() throws {
+        let store = store(), editor = PanelLayoutEditingSession()
+        editor.begin(from: store)
+        editor.draft.setVisible(.tray, visible: false)
+        XCTAssertTrue(editor.hasChanges)
+        XCTAssertFalse(editor.draft.visibleItems.contains { $0.id == .tray })
+        editor.draft.setVisible(.tray, visible: true)
+        XCTAssertTrue(editor.draft.visibleItems.contains { $0.id == .tray })
+        try editor.draft.validate()
+        XCTAssertNil(store.defaults.object(forKey: PanelLayoutStore.storageKey))
+        editor.cancel()
+        XCTAssertFalse(editor.hasChanges)
+        XCTAssertNil(store.defaults.object(forKey: PanelLayoutStore.storageKey))
+    }
+
     func testRepeatedBeginPreservesUncommittedDraft() {
         let store = store(), editor = PanelLayoutEditingSession()
         editor.begin(from: store)

@@ -38,7 +38,8 @@ struct NotchContentView: View {
     }
     private var panelMeasurementSignature: String {
         Self.normalPanelMeasurementSignature(layoutStore: panelLayoutStore,
-            automaticallyFit: panelAutoSize, selectedWidget: selectedWidget)
+            automaticallyFit: PanelHeightMode.fitsDefaultContent(storedValue: panelHeightMode,
+                legacyAutomaticallyFit: panelAutoSize), selectedWidget: selectedWidget)
     }
     @State private var expandedMeasurement: ExpandedPanelMeasurement?
     @State private var expandedResizeScheduled = false
@@ -57,6 +58,7 @@ struct NotchContentView: View {
     @State private var collapseGeneration = 0
     @State private var preparedHandoffGeneration: UInt64?
     @State private var handoffContentVisible = true
+    @State private var handoffResizePending = false
     @State private var expandedByHover = false
     @State private var expandedAt: Date = .distantPast
     @State private var expandPending = false
@@ -94,6 +96,8 @@ struct NotchContentView: View {
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
     @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
     @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
+    @AppStorage("panelHeightMode") private var panelHeightMode = SettingsDefaults.string(for: "panelHeightMode")
+    @AppStorage("islandBackgroundStyle") private var switchBackgroundStyle = SettingsDefaults.string(for: "islandBackgroundStyle")
     @AppStorage("jellyIntensity") private var jellyIntensity = SettingsDefaults.string(for: "jellyIntensity", fallback: "medium")
 
     /// 根据强度设置返回果冻缩放值
@@ -212,6 +216,14 @@ struct NotchContentView: View {
         collapsedShapeHeight + (showTicker ? tickerLineHeight + 4 : 0)
     }
 
+    private var isReadyForLinkedPreview: Bool {
+        state == .collapsed && !expandPending && !collapseAnimating
+    }
+
+    private func updateLinkedPreviewReadiness() {
+        notchWindow?.isCollapsedPreviewReady = isReadyForLinkedPreview
+    }
+
     private var isExpanded: Bool { state == .expanded }
 
     private var effectivePanelWidth: CGFloat {
@@ -234,7 +246,8 @@ struct NotchContentView: View {
             measuredContentHeight: measurement,
             maximumHeight: ExpandedPanelLayout.maximumHeight(
                 availableHeight: availablePanelSize.height,
-                automaticallyFit: panelAutoSize,
+                automaticallyFit: PanelHeightMode.resolved(storedValue: panelHeightMode,
+                    legacyAutomaticallyFit: panelAutoSize) == .automatic,
                 manualMaxHeight: panelBaseHeight
             )
         )
@@ -283,6 +296,11 @@ struct NotchContentView: View {
 
     private var pillStrokeOpacity: CGFloat { IslandStyle.strokeOpacity(for: colorScheme) }
 
+    private var switchBackgroundFill: NSColor {
+        IslandBackgroundPolicy.isDark(style: IslandBackgroundStyle.resolved(from: switchBackgroundStyle),
+            applicationIsDark: colorScheme == .dark) ? .black : NSColor(white: 0.965, alpha: 1)
+    }
+
     private var notchShapeOpenProgress: CGFloat {
         IslandSizeCalculator.openProgress(
             shapeHeight: shapeHeight,
@@ -322,24 +340,35 @@ struct NotchContentView: View {
     private var islandLayout: some View {
         ZStack(alignment: .top) {
             // 背景形状：macOS 26 走玻璃材质，低版本回退纯色填充
-            islandShape
-            .fill(Color.clear)
-            .background {
-                IslandGlassBackground(shape: islandShape, scheme: colorScheme, isExpanded: isExpanded)
-            }
-            .shadow(
-                color: IslandStyle.shadowColor(for: colorScheme)
-                    .opacity(IslandStyle.shadowOpacity(for: colorScheme) + 0.02 * notchShapeOpenProgress),
-                radius: 10 + 10 * notchShapeOpenProgress,
-                y: 3 + notchShapeOpenProgress
-            )
-            .overlay {
-                islandShape.strokeBorder(
-                    IslandStyle.strokeColor(for: colorScheme)
-                        .opacity(pillStrokeOpacity + (isHoveringPill ? 0.15 : 0)),
-                    lineWidth: 0.5
+            IslandSwitchBackground(topRadius: notchTopCornerRadius, bottomRadius: notchBottomCornerRadius,
+                fillColor: switchBackgroundFill,
+                allowsMorph: IslandBackgroundStyle.resolved(from: switchBackgroundStyle) != .glass,
+                shadowOpacity: IslandStyle.shadowOpacity(for: colorScheme) + 0.02 * notchShapeOpenProgress,
+                shadowRadius: 10 + 10 * notchShapeOpenProgress, shadowOffsetY: 3 + notchShapeOpenProgress,
+                strokeOpacity: pillStrokeOpacity + (isHoveringPill ? 0.15 : 0)) { style in
+                let shape = UnevenRoundedRectangle(topLeadingRadius: style.topRadius,
+                    bottomLeadingRadius: style.bottomRadius, bottomTrailingRadius: style.bottomRadius,
+                    topTrailingRadius: style.topRadius, style: .continuous)
+                shape
+                .fill(Color.clear)
+                .background {
+                    IslandGlassBackground(shape: shape, scheme: colorScheme, isExpanded: isExpanded)
+                }
+                .shadow(
+                    color: IslandStyle.shadowColor(for: colorScheme)
+                        .opacity(style.shadowOpacity),
+                    radius: style.shadowRadius,
+                    y: style.shadowOffsetY
                 )
+                .overlay {
+                    shape.strokeBorder(
+                        IslandStyle.strokeColor(for: colorScheme)
+                            .opacity(style.strokeOpacity),
+                        lineWidth: 0.5
+                    )
+                }
             }
+            // 弹簧在外层 SwiftUI 插值，避免跨原生宿主更新时直接跳到终值。
             .scaleEffect(
                 x: jellyTrigger ? (jellySettled ? jellyScale.xSettle : jellyScale.xPop) : 1.0,
                 y: jellyTrigger ? (jellySettled ? jellyScale.ySettle : jellyScale.yPop) : 1.0
@@ -427,18 +456,21 @@ struct NotchContentView: View {
 
     private var islandPresentationBody: some View {
         islandLayout
+        .onChange(of: isReadyForLinkedPreview, initial: true) { _, _ in
+            updateLinkedPreviewReadiness()
+        }
         .onChange(of: expandedHeight) { _, newHeight in
             guard isExpanded else { return }
             cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, newHeight)
             scheduleExpandedWindowResize()
         }
         .onChange(of: effectivePanelWidth) { _, _ in
-            expandedMeasurement = nil
+            reconcileExpandedMeasurement()
             scheduleExpandedWindowResize()
         }
-        .onChange(of: panelMeasurementSignature) { _, signature in
+        .onChange(of: panelMeasurementSignature) { _, _ in
             if let selectedWidget, !enabledWidgets.contains(selectedWidget) { self.selectedWidget = nil }
-            if expandedMeasurement?.layoutSignature != signature { expandedMeasurement = nil }
+            reconcileExpandedMeasurement()
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookEditPanelLayout)) { _ in
             guard !notesManager.isEditing || notesManager.closeEditor() else { return }
@@ -447,10 +479,10 @@ struct NotchContentView: View {
             layoutEditRequest += 1
         }
         .onChange(of: selectedWidget) { _, newWidget in
-            expandedMeasurement = nil
             if newWidget != .notes, notesManager.isEditing {
                 if !notesManager.closeEditor() { selectedWidget = .notes }
             }
+            reconcileExpandedMeasurement()
         }
         .onChange(of: notesManager.isEditing) { _, editing in
             if editing { selectedWidget = .notes }
@@ -475,6 +507,10 @@ struct NotchContentView: View {
             guard !isExpanded, !collapseAnimating else { return }
             // 入站准备已经按当前播放状态同步尺寸，不能再排入旧 ticker 收缩任务。
             guard notchWindow?.handoffState.pendingPreparation == nil else { return }
+            if notchWindow?.isHandoffLayoutLocked == true {
+                handoffResizePending = true
+                return
+            }
             let generation = collapseGeneration
             if newValue {
                 // Ticker 出现：先调大窗口，再让 SwiftUI 动画渲染
@@ -526,6 +562,7 @@ struct NotchContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name.NSSystemClockDidChange)) { _ in
             deadlineMonitor?.resynchronize()
         }
+        .onChange(of: notchWindow != nil) { _, _ in updateLinkedPreviewReadiness() }
         .onAppear(perform: handleAppearance)
         .task { await taskInbox?.prepare() }
     }
@@ -543,6 +580,11 @@ struct NotchContentView: View {
             }
             activityCoordinator.refreshPresentation()
             scheduleExpandedAutoHide()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookDidFinishInteractivePreview)) { notification in
+            guard let window = notchWindow, notification.object as AnyObject? === window else { return }
+            flushHandoffWindowResize()
+            startHoverPolling()
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookScrollDown)) { _ in
             // 双指下滑展开面板（由 scrollDownToExpandPanel 开关控制）
@@ -562,7 +604,12 @@ struct NotchContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookWindowDidPresent)) { notification in
             guard let window = notchWindow, notification.object as AnyObject? === window else { return }
+            flushHandoffWindowResize()
             restoreCancelledHandoffContentIfNeeded(window: window)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookHandoffLayoutDidUnlock)) { notification in
+            guard let window = notchWindow, notification.object as AnyObject? === window else { return }
+            flushHandoffWindowResize()
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             if let notchWindow { AppDelegate.shared?.updateWindowAppearance(notchWindow) }
@@ -612,6 +659,8 @@ struct NotchContentView: View {
         guard window.handoffState.pendingPreparation == generation,
               preparedHandoffGeneration != generation else { return }
         preparedHandoffGeneration = generation
+        handoffResizePending = false
+        let hasDirectionalMotion = window.inboundSwitchMotion != nil
         notesManager.flushPendingChanges()
         cancelExpandedAutoHide()
         var transaction = Transaction(animation: nil)
@@ -631,7 +680,7 @@ struct NotchContentView: View {
             lastCollapseAt = Date()
             resetHoverEffects()
             previousMouseY = NSEvent.mouseLocation.y
-            handoffContentVisible = shouldReduceMotion
+            handoffContentVisible = shouldReduceMotion || hasDirectionalMotion
             window.islandState = .collapsed
             window.resizeToFitCollapse(contentWidth: pillWidth, contentHeight: collapsedTotalHeight)
         }
@@ -642,7 +691,9 @@ struct NotchContentView: View {
                 restoreCancelledHandoffContentIfNeeded(window: window)
                 return
             }
-            let duration = IslandHandoffState.inboundContentDuration(reduceMotion: shouldReduceMotion)
+            let duration = IslandHandoffState.inboundContentDuration(
+                reduceMotion: shouldReduceMotion || hasDirectionalMotion
+            )
             if duration == 0 {
                 handoffContentVisible = true
             } else {
@@ -658,7 +709,8 @@ struct NotchContentView: View {
     }
 
     private func expand(to newState: IslandState) {
-        guard !expandPending else { return }
+        guard !expandPending, notchWindow?.isSwitchingApps != true else { return }
+        notchWindow?.isCollapsedPreviewReady = false
         collapseGeneration += 1
         let generation = collapseGeneration
         collapseAnimating = false
@@ -719,8 +771,13 @@ struct NotchContentView: View {
     }
 
     private func collapse(force: Bool = false) {
+        if notchWindow?.isInteractiveSwitchPreviewActive == true {
+            notchWindow?.cancelIslandSwitchPreview()
+            return
+        }
         guard !isEditingPanelLayout || force else { return }
         guard Self.allowsCollapse(isTaskLinksPresented: isTaskLinksPresented, forced: force) else { return }
+        notchWindow?.isCollapsedPreviewReady = false
         expandPending = false
         expandedByHover = false
         cancelExpandedAutoHide()
@@ -787,6 +844,11 @@ struct NotchContentView: View {
     }
 
     private func resizeCollapsedWindow() {
+        updateLinkedPreviewReadiness()
+        if notchWindow?.isHandoffLayoutLocked == true {
+            handoffResizePending = true
+            return
+        }
         if let window = notchWindow {
             window.resizeToFitCollapse(contentWidth: pillWidth, contentHeight: collapsedTotalHeight)
         } else {
@@ -795,14 +857,29 @@ struct NotchContentView: View {
     }
 
     private func scheduleExpandedWindowResize() {
+        if isExpanded, notchWindow?.isHandoffLayoutLocked == true {
+            handoffResizePending = true
+            return
+        }
         guard isExpanded, !expandedResizeScheduled else { return }
         expandedResizeScheduled = true
         // 宽度、偏好和实测高度可在同一轮更新，合并后使用最新值，避免窗口反馈重复布局。
         DispatchQueue.main.async {
             expandedResizeScheduled = false
             guard isExpanded else { return }
+            if notchWindow?.isHandoffLayoutLocked == true {
+                handoffResizePending = true
+                return
+            }
             onSizeChange?(effectivePanelWidth, naturalExpandedHeight)
         }
+    }
+
+    private func flushHandoffWindowResize() {
+        guard handoffResizePending, notchWindow?.isHandoffLayoutLocked != true,
+              notchWindow?.handoffState.pendingPreparation == nil else { return }
+        handoffResizePending = false
+        if isExpanded { scheduleExpandedWindowResize() } else { resizeCollapsedWindow() }
     }
 
     // MARK: - 鼠标悬停检测
@@ -963,6 +1040,11 @@ struct NotchContentView: View {
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
             return
         }
+        if window.isInteractiveSwitchPreviewActive {
+            cancelExpandedAutoHide()
+            scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
+            return
+        }
         let visible = window.isVisible && window.occlusionState.contains(.visible)
         let panelSize = window.maximumExpandedContentSize()
         if availablePanelSize != panelSize { availablePanelSize = panelSize }
@@ -974,6 +1056,7 @@ struct NotchContentView: View {
             if tier != motionTier { motionTier = tier }
         }
         guard visible else {
+            window.cancelIslandSwitchPreview(animated: false)
             cancelExpandedAutoHide()
             resetHoverEffects()
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
@@ -999,6 +1082,7 @@ struct NotchContentView: View {
 
         let physicallyInside = hitFrame.contains(mouse)
         let handoffSuppressed = window.observeHandoffPointer(isInside: physicallyInside)
+        let switching = window.isSwitchingApps || window.swipeRecognizer.consumesHorizontalScroll
         var inside = physicallyInside
         let wasInside = wasPointerInsidePillHitFrame
 
@@ -1013,7 +1097,7 @@ struct NotchContentView: View {
             previousMouseY: previousMouseY,
             currentMouseY: mouse.y,
             isHandoffSuppressed: handoffSuppressed,
-            isSwitchingApps: window.isSwitchingApps
+            isSwitchingApps: switching
         ) {
             if !isHoveringPill {
                 isHoveringPill = true
@@ -1033,7 +1117,7 @@ struct NotchContentView: View {
                     }
                 }
             }
-        } else if !inside || isExpanded || collapseAnimating || handoffSuppressed || window.isSwitchingApps {
+        } else if !inside || isExpanded || collapseAnimating || handoffSuppressed || switching {
             if isHoveringPill {
                 isHoveringPill = false
                 jellyGeneration += 1  // 废弃所有进行中的果冻计时器
@@ -1052,7 +1136,7 @@ struct NotchContentView: View {
 
         // 吸附效果：鼠标靠近药丸时水平偏移
         if !shouldReduceMotion, !isExpanded, !collapseAnimating,
-           !handoffSuppressed, !window.isSwitchingApps {
+           !handoffSuppressed, !switching {
             let pillCenterX = window.frame.midX
             let pillCenterY = window.frame.minY + collapsedShapeHeight / 2
             let dx = mouse.x - pillCenterX
@@ -1087,7 +1171,7 @@ struct NotchContentView: View {
             isExpanded: isExpanded,
             hasPassedCollapseCooldown: Date().timeIntervalSince(lastCollapseAt) > 0.65,
             hoverToExpandPanel: hoverToExpandPanel,
-            isSwitchingApps: window.isSwitchingApps,
+            isSwitchingApps: switching,
             isHandoffSuppressed: handoffSuppressed
         ) {
             expandedByHover = true
@@ -1202,6 +1286,20 @@ struct NotchContentView: View {
         return measurement
     }
 
+    /// 子视图可能先报告新尺寸；导航、宽度或布局回调随后到达时仅丢弃旧上下文。
+    static func reconcilePanelMeasurement(
+        _ measurement: inout ExpandedPanelMeasurement?, width: CGFloat, selectedWidget: WidgetType?,
+        enabledWidgets: [WidgetType], layoutSignature: String
+    ) {
+        measurement = acceptedPanelMeasurement(measurement, width: width, selectedWidget: selectedWidget,
+            enabledWidgets: enabledWidgets, layoutSignature: layoutSignature)
+    }
+
+    private func reconcileExpandedMeasurement() {
+        Self.reconcilePanelMeasurement(&expandedMeasurement, width: effectivePanelWidth,
+            selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature)
+    }
+
     /// 面板顶部的物理刘海死区。窗口不在刘海正下方时为空，不影响无刘海屏幕。
     private var panelDeadZone: NotchDeadZone {
         guard isExpanded, let window = notchWindow else { return .none }
@@ -1251,16 +1349,14 @@ struct NotchContentView: View {
             activityCoordinator: activityCoordinator,
             onEditingChanged: { editing in
                 if editing && !isEditingPanelLayout {
-                    editingViewportHeight = min(availablePanelSize.height, max(460, naturalExpandedHeight))
+                    editingViewportHeight = min(availablePanelSize.height, max(560, naturalExpandedHeight))
                 }
                 isEditingPanelLayout = editing
                 if editing { cancelExpandedAutoHide() }
                 else {
                     editingViewportHeight = nil
                     // 结束编辑的测量可能先于这个回调到达，不能清掉已收到的正常布局高度。
-                    expandedMeasurement = Self.acceptedPanelMeasurement(expandedMeasurement,
-                        width: effectivePanelWidth, selectedWidget: selectedWidget,
-                        enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature)
+                    reconcileExpandedMeasurement()
                     if isExpanded { scheduleExpandedAutoHide() }
                 }
             }

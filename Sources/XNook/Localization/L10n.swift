@@ -117,8 +117,8 @@ enum L10n {
 
     static var enableSwipeSwitch: String { localized(zh: "启用双指横滑切换", en: "Enable two-finger swipe switching") }
     static var enableSwipeSwitchDesc: String { localized(
-        zh: "仅在灵动岛收起时响应双指左右滑动，切换到另一个灵动岛应用。",
-        en: "When the island is collapsed, switch to the other island app with a two-finger horizontal swipe.") }
+        zh: "在收起的岛上双指横滑，预览并排连接的两款岛；松手切换，短滑回弹。对方未运行或暂不能预览时，松手后再显示。",
+        en: "Swipe with two fingers on the collapsed island to reveal the other island alongside it. Release to switch, or release a short swipe to return. If a preview is unavailable, the other app opens after release.") }
 
     static var switchSensitivity: String { localized(zh: "切换灵敏度", en: "Switch sensitivity") }
     static var switchSensitivityDesc: String { localized(
@@ -160,18 +160,18 @@ enum L10n {
 
     static var panelWidth: String { localized(zh: "面板宽度", en: "Panel width") }
     static var panelWidthDesc: String { localized(
-        zh: "展开面板的宽度（单位：点）；开启自动适配时作为宽度上限。",
-        en: "Expanded panel width in points; used as the maximum when automatic sizing is on.") }
+        zh: "展开面板的宽度（单位：点）；开启自动调整宽度时作为宽度上限。",
+        en: "Expanded panel width in points; used as the maximum when automatic width fitting is on.") }
 
-    static var panelAutoSize: String { localized(zh: "自动适配窗口", en: "Fit window to content") }
+    static var panelAutoSize: String { localized(zh: "自动调整宽度", en: "Fit panel width") }
     static var panelAutoSizeDesc: String { localized(
-        zh: "按内容调整高度，少量组件和媒体详情自动收窄；超出屏幕时可滚动查看。",
-        en: "Fit content height and narrow the window for fewer widgets or media details; scroll beyond the screen limit.") }
+        zh: "少量组件和媒体详情自动收窄；关闭后使用设置的宽度。展开高度由下方的高度模式单独控制。",
+        en: "Narrow the panel for fewer widgets or media details. When off, use the configured width. Height is controlled separately below.") }
 
-    static var panelBaseHeight: String { localized(zh: "手动高度上限", en: "Manual height limit") }
+    static var panelBaseHeight: String { localized(zh: "高度上限", en: "Height limit") }
     static var panelBaseHeightDesc: String { localized(
-        zh: "关闭自动适配后生效；内容较少时按实际高度展开，超出时可滚动查看。",
-        en: "Applies when automatic sizing is off. Fits shorter content and scrolls beyond this limit.") }
+        zh: "选择“自定义高度上限”后生效。它限制窗口最高能展开多高，不会给较少内容补空白；超出上限时滚动查看。",
+        en: "Applies in Custom limit mode. This caps the expanded height without adding blank space to shorter content; longer content scrolls.") }
 
     static var nookFlowHistoryDisplayLimit: String { localized(zh: "最近任务显示条数", en: "Recent tasks shown") }
     static var nookFlowHistoryDisplayLimitDesc: String { localized(

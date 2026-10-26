@@ -40,10 +40,84 @@ final class PanelMeasurementTransitionTests: XCTestCase {
 
         // 随后才收到退出编辑回调，复核缓存时无需等待第二次测量或重新展开。
         editor.cancel()
-        cached = accept(cached, signature: normalSignature(store))
+        reconcile(&cached, signature: normalSignature(store))
         XCTAssertEqual(cached, normal)
         XCTAssertEqual(ExpandedPanelLayout.height(measuredContentHeight: cached?.height, maximumHeight: 900), 295)
         XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
+    }
+
+    func testDetailMeasurementArrivingBeforeNavigationAndWidthCallbacksIsRetained() {
+        let store = PanelLayoutStore(defaults: defaults)
+        let signature = store.configuration.signature
+        let detail = measurement(signature: signature, height: 295, width: 460, selection: .media)
+        // Binding 已指向媒体；子视图先布局并上报，父级 onChange 才依次执行。
+        var cached = NotchContentView.acceptedPanelMeasurement(detail, width: 460, selectedWidget: .media,
+            enabledWidgets: widgets, layoutSignature: signature)
+        reconcile(&cached, signature: signature, width: 460, selection: .media)
+        reconcile(&cached, signature: signature, width: 460, selection: .media)
+
+        XCTAssertEqual(cached, detail)
+        XCTAssertEqual(ExpandedPanelLayout.height(measuredContentHeight: cached?.height, maximumHeight: 900), 295,
+            "先到的真实高度不应被后到回调抹掉并长期回退到 400pt")
+        XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
+    }
+
+    func testContextCallbacksBeforeMeasurementRejectOnlyThePreviousPage() {
+        let store = PanelLayoutStore(defaults: defaults)
+        let previous = measurement(signature: normalSignature(store), height: 380)
+        let signature = store.configuration.signature
+        var cached: ExpandedPanelMeasurement? = previous
+        reconcile(&cached, signature: signature, width: 460, selection: .media)
+        XCTAssertNil(cached)
+
+        let detail = measurement(signature: signature, height: 310, width: 460, selection: .media)
+        cached = NotchContentView.acceptedPanelMeasurement(detail, width: 460, selectedWidget: .media,
+            enabledWidgets: widgets, layoutSignature: signature)
+        reconcile(&cached, signature: signature, width: 460, selection: .media)
+        let lateOverview = NotchContentView.acceptedPanelMeasurement(previous, width: 460, selectedWidget: .media,
+            enabledWidgets: widgets, layoutSignature: signature)
+        XCTAssertNil(lateOverview, "旧页迟到测量不能进入生产接收路径")
+        XCTAssertEqual(cached, detail)
+    }
+
+    func testRapidPageAndWidthChangesKeepOnlyTheLatestMatchingMeasurement() {
+        let store = PanelLayoutStore(defaults: defaults)
+        let contexts: [(NotchContentView.WidgetType?, CGFloat, CGFloat)] = [
+            (.media, 460, 295), (nil, 800, 344), (.calendar, 800, 300), (nil, 320, 380), (.media, 460, 299)
+        ]
+        var cached: ExpandedPanelMeasurement?
+        for (index, context) in contexts.enumerated() {
+            let (selection, width, height) = context
+            let signature = NotchContentView.normalPanelMeasurementSignature(layoutStore: store,
+                automaticallyFit: true, selectedWidget: selection)
+            let previous = cached
+            if index.isMultiple(of: 2) {
+                reconcile(&cached, signature: signature, width: width, selection: selection)
+                XCTAssertNil(cached)
+            }
+            let next = measurement(signature: signature, height: height, width: width, selection: selection)
+            cached = NotchContentView.acceptedPanelMeasurement(next, width: width, selectedWidget: selection,
+                enabledWidgets: widgets, layoutSignature: signature)
+            reconcile(&cached, signature: signature, width: width, selection: selection)
+            XCTAssertEqual(cached, next)
+            XCTAssertEqual(ExpandedPanelLayout.height(measuredContentHeight: cached?.height, maximumHeight: 900), height)
+            if let previous {
+                XCTAssertNil(NotchContentView.acceptedPanelMeasurement(previous, width: width, selectedWidget: selection,
+                    enabledWidgets: widgets, layoutSignature: signature))
+            }
+        }
+    }
+
+    func testNotesCloseRollbackUsesTheFinalSelectionForReconciliation() {
+        let signature = PanelLayoutStore(defaults: defaults).configuration.signature
+        let notes = measurement(signature: signature, height: 350, width: 800, selection: .notes)
+        var cached: ExpandedPanelMeasurement? = notes
+        // 用户请求媒体但笔记未能保存，生产回调先退回笔记，再用最终选择校验。
+        reconcile(&cached, signature: signature, width: 800, selection: .notes)
+        XCTAssertEqual(cached, notes)
+        let requestedPage = measurement(signature: signature, height: 295, width: 460, selection: .media)
+        XCTAssertNil(NotchContentView.acceptedPanelMeasurement(requestedPage, width: 800, selectedWidget: .notes,
+            enabledWidgets: widgets, layoutSignature: signature))
     }
 
     func testEditingMeasurementCannotReplaceNormalContentHeight() {
@@ -69,6 +143,9 @@ final class PanelMeasurementTransitionTests: XCTestCase {
         XCTAssertFalse(currentSignature.hasSuffix("|contentFit=1"))
         XCTAssertNil(accept(old, signature: currentSignature))
         XCTAssertNotNil(accept(measurement(signature: currentSignature), signature: currentSignature))
+        var cached = accept(measurement(signature: currentSignature), signature: currentSignature)
+        reconcile(&cached, signature: currentSignature)
+        XCTAssertNotNil(cached, "新布局测量先到时，随后签名回调不应清除它")
         XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), saved)
     }
 
@@ -102,7 +179,7 @@ final class PanelMeasurementTransitionTests: XCTestCase {
         editor.draft.setVisible(.calendar, visible: false)
         var cached = accept(normal, signature: normalSignature(store))
         editor.cancel()
-        cached = accept(cached, signature: normalSignature(store))
+        reconcile(&cached, signature: normalSignature(store))
 
         XCTAssertEqual(cached, normal)
         XCTAssertFalse(signature.hasSuffix("|contentFit=1"))
@@ -127,8 +204,15 @@ final class PanelMeasurementTransitionTests: XCTestCase {
             automaticallyFit: true, selectedWidget: nil)
     }
 
-    private func measurement(signature: String, height: CGFloat = 295) -> ExpandedPanelMeasurement {
-        ExpandedPanelMeasurement(width: 800, height: height, selectedWidget: nil,
+    private func measurement(signature: String, height: CGFloat = 295, width: CGFloat = 800,
+                             selection: NotchContentView.WidgetType? = nil) -> ExpandedPanelMeasurement {
+        ExpandedPanelMeasurement(width: width, height: height, selectedWidget: selection,
+            enabledWidgets: widgets, layoutSignature: signature)
+    }
+
+    private func reconcile(_ measurement: inout ExpandedPanelMeasurement?, signature: String,
+                           width: CGFloat = 800, selection: NotchContentView.WidgetType? = nil) {
+        NotchContentView.reconcilePanelMeasurement(&measurement, width: width, selectedWidget: selection,
             enabledWidgets: widgets, layoutSignature: signature)
     }
 

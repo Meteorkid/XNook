@@ -4,12 +4,16 @@ import Foundation
 struct IslandHandoffState {
     private(set) var generation: UInt64 = 0
     private(set) var pendingPreparation: UInt64?
+    private(set) var pendingPresentation: UInt64?
+    private(set) var isPresentingInbound = false
     private(set) var isHoverSuppressed = false
     private(set) var isFadingOut = false
 
     mutating func beginInbound() -> UInt64 {
         generation &+= 1
         pendingPreparation = generation
+        pendingPresentation = nil
+        isPresentingInbound = false
         isHoverSuppressed = true
         isFadingOut = false
         return generation
@@ -18,12 +22,28 @@ struct IslandHandoffState {
     mutating func consumePreparation(_ generation: UInt64) -> Bool {
         guard pendingPreparation == generation, self.generation == generation else { return false }
         pendingPreparation = nil
+        pendingPresentation = generation
+        return true
+    }
+
+    mutating func beginPresentation(_ generation: UInt64) -> Bool {
+        guard self.generation == generation, pendingPresentation == generation else { return false }
+        pendingPresentation = nil
+        isPresentingInbound = true
+        return true
+    }
+
+    mutating func finishPresentation(_ generation: UInt64) -> Bool {
+        guard self.generation == generation, isPresentingInbound else { return false }
+        isPresentingInbound = false
         return true
     }
 
     mutating func cancelPresentation() {
         generation &+= 1
         pendingPreparation = nil
+        pendingPresentation = nil
+        isPresentingInbound = false
         isFadingOut = false
     }
 
@@ -31,6 +51,8 @@ struct IslandHandoffState {
         guard !isFadingOut else { return nil }
         generation &+= 1
         pendingPreparation = nil
+        pendingPresentation = nil
+        isPresentingInbound = false
         isFadingOut = true
         return generation
     }

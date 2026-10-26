@@ -54,6 +54,8 @@ struct PanelLayoutConfiguration: Codable, Equatable {
 
     var version: Int = currentVersion
     var items: [PanelModulePlacement]
+    /// 旧版已保存布局缺少此字段，仍按固定网格显示；模板显式启用内容适配。
+    var fitsContent: Bool? = nil
 
     static var factoryDefault: Self {
         legacy(enabledWidgetIDs: defaultWidgetIDs,
@@ -99,11 +101,19 @@ struct PanelLayoutConfiguration: Codable, Equatable {
         items.filter(\.isVisible).sorted(by: Self.visualOrder)
     }
 
+    /// 起始行错开的模块仍可能并排占位，需要一起计入自动宽度。
+    var maximumModulesPerRow: Int {
+        let visible = visibleItems
+        return visible.map { item in
+            visible.filter { $0.row <= item.row && item.row < $0.row + $0.rows }.count
+        }.max() ?? 0
+    }
+
     var signature: String {
         let components = items.sorted { $0.id.rawValue < $1.id.rawValue }.map {
             "\($0.id.rawValue):\($0.column),\($0.row),\($0.columns),\($0.rows),\($0.isVisible)"
         }
-        return "\(version)|" + components.joined(separator: "|")
+        return "\(version)|" + components.joined(separator: "|") + (fitsContent == true ? "|fitsContent=1" : "")
     }
 
     /// 持久化边界严格拒绝非法布局；编辑操作才会进行尺寸修正和避碰。
@@ -142,6 +152,7 @@ struct PanelLayoutConfiguration: Codable, Equatable {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].columns = columns
         items[index].rows = rows
+        fitsContent = false
         self = normalized(priority: id)
     }
 
@@ -237,7 +248,7 @@ struct PanelLayoutConfiguration: Codable, Equatable {
             let index = unique.firstIndex { $0.id == item.id }!
             unique[index] = item
         }
-        return Self(version: version, items: unique)
+        return Self(version: version, items: unique, fitsContent: fitsContent)
     }
 
     /// 按视觉顺序投影时，后续模块不能回填到前一模块起点之前。
@@ -303,6 +314,7 @@ enum PanelLayoutError: LocalizedError, Equatable {
     case invalidConfiguration
     case unreadableStorage
     case recoveryRequired
+    case changedSincePreview
 
     var errorDescription: String? {
         switch self {
@@ -315,6 +327,9 @@ enum PanelLayoutError: LocalizedError, Equatable {
             return L10n.localized(zh: "无法读取布局配置，原配置已保留。", en: "The saved layout could not be read and is preserved.")
         case .recoveryRequired:
             return L10n.localized(zh: "请先显式恢复默认布局，再保存新配置。", en: "Explicitly restore the default layout before saving changes.")
+        case .changedSincePreview:
+            return L10n.localized(zh: "布局已在其他窗口中更改。请关闭并重新打开布局方案库，避免覆盖最新改动。",
+                                  en: "The layout changed in another window. Close and reopen the layout library to preserve the latest changes.")
         }
     }
 }

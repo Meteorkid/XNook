@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var scrollMonitor: Any?
     private var islandHideObserver: NSObjectProtocol?
+    private var linkedIslandPreviewService: LinkedIslandPreviewService?
     private var pendingIslandShowURL: URL?
     private var lastInboundMotionUptime: TimeInterval = -.infinity
     private var hasExplicitIslandVisibilityRequest = false
@@ -113,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let pendingIslandShowURL { handleIslandCommand(pendingIslandShowURL) }
         setupMenuBarItem()
         setupScrollMonitor()
+        setupLinkedIslandPreviewService()
         globalPanelShortcut.activate()
 
         // 监听跨进程通知：对方应用请求本应用隐藏
@@ -290,6 +292,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
     }
 
+    private func setupLinkedIslandPreviewService() {
+        let service = LinkedIslandPreviewService(app: .xnook) { [weak self] in
+            self?.captureLinkedIslandPreview()
+        }
+        linkedIslandPreviewService = service
+        service.start()
+    }
+
+    private func captureLinkedIslandPreview() -> IslandPreviewSnapshot? {
+        guard let window = notchWindow, Self.canCaptureLinkedIslandPreview(window),
+              let content = window.contentView, content.window === window,
+              let background = IslandSlideAnimator.background(in: content), background.window === window,
+              window.switchGeometry != nil else { return nil }
+        content.layoutSubtreeIfNeeded()
+        guard Self.canCaptureLinkedIslandPreview(window), let outline = window.switchGeometry else { return nil }
+        do {
+            let snapshot = try LinkedIslandPreviewCanvas.capture(view: content, outline: outline)
+            guard Self.canCaptureLinkedIslandPreview(window), window.switchGeometry == outline else { return nil }
+            return snapshot
+        } catch is LinkedIslandPreviewCanvas.CaptureError {
+            // 当前视图不适合捕获，私有连接返回 unavailable，提交仍走原 /show。
+            return nil
+        } catch {
+            NSLog("Linked island preview capture failed (%@)", String(reflecting: type(of: error)))
+            return nil
+        }
+    }
+
+    private static func canCaptureLinkedIslandPreview(_ window: NotchWindow) -> Bool {
+        !window.isVisible && window.islandState == .collapsed && window.isCollapsedPreviewReady
+            && !window.isInteractiveSwitchPreviewActive && !window.isSwitchingApps
+            && !window.isHandoffLayoutLocked && !window.isPreviewingIslandSwitch && !window.isDragging
+            && !window.swipeRecognizer.isActive && window.handoffState.pendingPreparation == nil
+            && window.handoffState.pendingPresentation == nil
+    }
+
     private func setupNotchWindow() {
         let window = NotchWindow()
         notchWindow = window
@@ -462,6 +500,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        linkedIslandPreviewService?.stop()
+        linkedIslandPreviewService = nil
         globalPanelShortcut.shutdown()
         claudeCompletionReceiver.shutdown()
         if let observer = claudePreferencesObserver {

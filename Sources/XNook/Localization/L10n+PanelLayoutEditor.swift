@@ -15,7 +15,7 @@ extension L10n {
         en: "Click to select, drag a header to move, or drag its corner to resize. No double-click or hold needed.") }
     static var layoutEditorNarrowGuide: String { localized(
         zh: "单击选中；拖动标题调顺序，拖动右下角调高度。无需双击或长按。窄窗口自动换行，布局宽度在宽窗口生效。",
-        en: "Click to select; drag a header to reorder or its corner to change height. No double-click or hold. Narrow windows wrap modules; widths apply in wider panels.") }
+        en: "Click to select. Drag header: order; corner: height. No hold/double-click. Narrow panels wrap.") }
     static var layoutEditorVeryNarrowGuide: String { localized(
         zh: "单击选中；拖标题排序，拖右下角调高度。不需双击或长按。窄窗自动换行，宽度在宽窗生效。",
         en: "Click to select. Drag header: order; corner: height. No hold or double-click. Narrow panels wrap; width applies when wider.") }

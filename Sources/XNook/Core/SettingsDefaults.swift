@@ -12,6 +12,7 @@ enum SettingsDefaults {
         "panelHeightMode": "",
         "islandBackgroundStyle": IslandBackgroundStyle.solid.rawValue,
         "islandGlassDepth": IslandBackgroundPolicy.defaultGlassDepth,
+        "mediaAmbientStyle": "glow",
         "islandWidth": 253.0,
         "islandHeight": 40.0,
         "islandWidthWithLyrics": 263.0,

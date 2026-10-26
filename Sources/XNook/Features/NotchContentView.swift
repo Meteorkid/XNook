@@ -216,11 +216,21 @@ struct NotchContentView: View {
         collapsedShapeHeight + (showTicker ? tickerLineHeight + 4 : 0)
     }
 
+    private var isReadyForLinkedPreview: Bool {
+        state == .collapsed && !expandPending && !collapseAnimating
+    }
+
+    private func updateLinkedPreviewReadiness() {
+        notchWindow?.isCollapsedPreviewReady = isReadyForLinkedPreview
+    }
+
     private var isExpanded: Bool { state == .expanded }
 
     private var effectivePanelWidth: CGFloat {
-        ExpandedPanelLayout.width(preferred: panelWidth, available: availablePanelSize.width,
-            automaticallyFit: panelAutoSize, widgetCount: enabledWidgets.count, selectedWidget: selectedWidget)
+        let widgetCount = ExpandedPanelLayout.overviewWidgetCount(primaryWidgetCount: enabledWidgets.count,
+            configuration: enabledWidgetsOverride == nil ? panelLayoutStore.configuration : nil)
+        return ExpandedPanelLayout.width(preferred: panelWidth, available: availablePanelSize.width,
+            automaticallyFit: panelAutoSize, widgetCount: widgetCount, selectedWidget: selectedWidget)
     }
 
     private var expandedWidth: CGFloat {
@@ -448,6 +458,9 @@ struct NotchContentView: View {
 
     private var islandPresentationBody: some View {
         islandLayout
+        .onChange(of: isReadyForLinkedPreview, initial: true) { _, _ in
+            updateLinkedPreviewReadiness()
+        }
         .onChange(of: expandedHeight) { _, newHeight in
             guard isExpanded else { return }
             cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, newHeight)
@@ -551,6 +564,7 @@ struct NotchContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name.NSSystemClockDidChange)) { _ in
             deadlineMonitor?.resynchronize()
         }
+        .onChange(of: notchWindow != nil) { _, _ in updateLinkedPreviewReadiness() }
         .onAppear(perform: handleAppearance)
         .task { await taskInbox?.prepare() }
     }
@@ -568,6 +582,11 @@ struct NotchContentView: View {
             }
             activityCoordinator.refreshPresentation()
             scheduleExpandedAutoHide()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookDidFinishInteractivePreview)) { notification in
+            guard let window = notchWindow, notification.object as AnyObject? === window else { return }
+            flushHandoffWindowResize()
+            startHoverPolling()
         }
         .onReceive(NotificationCenter.default.publisher(for: .xnookScrollDown)) { _ in
             // 双指下滑展开面板（由 scrollDownToExpandPanel 开关控制）
@@ -693,6 +712,7 @@ struct NotchContentView: View {
 
     private func expand(to newState: IslandState) {
         guard !expandPending, notchWindow?.isSwitchingApps != true else { return }
+        notchWindow?.isCollapsedPreviewReady = false
         collapseGeneration += 1
         let generation = collapseGeneration
         collapseAnimating = false
@@ -753,8 +773,13 @@ struct NotchContentView: View {
     }
 
     private func collapse(force: Bool = false) {
+        if notchWindow?.isInteractiveSwitchPreviewActive == true {
+            notchWindow?.cancelIslandSwitchPreview()
+            return
+        }
         guard !isEditingPanelLayout || force else { return }
         guard Self.allowsCollapse(isTaskLinksPresented: isTaskLinksPresented, forced: force) else { return }
+        notchWindow?.isCollapsedPreviewReady = false
         expandPending = false
         expandedByHover = false
         cancelExpandedAutoHide()
@@ -821,6 +846,7 @@ struct NotchContentView: View {
     }
 
     private func resizeCollapsedWindow() {
+        updateLinkedPreviewReadiness()
         if notchWindow?.isHandoffLayoutLocked == true {
             handoffResizePending = true
             return
@@ -1013,6 +1039,11 @@ struct NotchContentView: View {
             activityCoordinator.refreshPresentation()
         }
         guard let window = resolveNotchWindow() else {
+            scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
+            return
+        }
+        if window.isInteractiveSwitchPreviewActive {
+            cancelExpandedAutoHide()
             scheduleHoverPoll(interval: Self.hoverPollIntervalSlow)
             return
         }
@@ -1334,6 +1365,8 @@ struct NotchContentView: View {
         )
         .environment(\.mediaSeekInteractionEnabled,
             expandedContentOnly || (isExpanded && showContent && isWindowVisible && !isEditingPanelLayout))
+        .environment(\.mediaAmbientAnimationEnabled,
+            !expandedContentOnly && isExpanded && showContent && isWindowVisible && !isEditingPanelLayout)
     }
 
     private func handleAppearance() {

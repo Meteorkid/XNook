@@ -30,6 +30,10 @@ enum ExpandedPanelLayout {
     static let cardPadding: CGFloat = 12
     static let columnSpacing: CGFloat = 8
 
+    static func overviewWidgetCount(primaryWidgetCount: Int, configuration: PanelLayoutConfiguration?) -> Int {
+        max(primaryWidgetCount, configuration?.maximumModulesPerRow ?? 0)
+    }
+
     /// 自动模式将设置宽度视为上限，少量组件与媒体详情不再撑满整条面板。
     static func width(preferred: CGFloat, available: CGFloat, automaticallyFit: Bool,
                       widgetCount: Int, selectedWidget: NotchContentView.WidgetType?) -> CGFloat {

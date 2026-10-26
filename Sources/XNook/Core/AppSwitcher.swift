@@ -45,6 +45,7 @@ final class AppSwitcher {
         var reduceMotion: () -> Bool = { false }
         var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
         var sourceGeometry: () -> IslandSwitchGeometry? = { nil }
+        var startInteractiveSwitch: ((SwipeDirection) -> Bool)? = nil
     }
 
     private let environment: Environment
@@ -105,7 +106,8 @@ final class AppSwitcher {
             hideSourceWithMotion: { AppDelegate.shared?.notchWindow?.hideWindowForIslandSwitch(motion: $0) },
             cancelPreview: { AppDelegate.shared?.notchWindow?.cancelIslandSwitchPreview() },
             reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || UserDefaults.standard.bool(forKey: "reduceMotion") || UserDefaults.standard.bool(forKey: "disableAnimations") },
-            sourceGeometry: { AppDelegate.shared?.notchWindow?.switchGeometry }
+            sourceGeometry: { AppDelegate.shared?.notchWindow?.switchGeometry },
+            startInteractiveSwitch: { AppDelegate.shared?.notchWindow?.startLinkedIslandSwitch(direction: $0) ?? false }
         )
     }
 
@@ -144,12 +146,22 @@ final class AppSwitcher {
         // 没有其他已安装的应用，不做任何操作
     }
 
+    func switchToIslandWithPreview(named targetName: String, direction: SwipeDirection = .left) {
+        guard targetName != currentAppName, islandApps[targetName] != nil else { return }
+        if environment.startInteractiveSwitch?(direction) == true { return }
+        switchToIsland(named: targetName, direction: direction)
+    }
+
     /// 切换到指定的灵动岛
-    func switchToIsland(named targetName: String, direction: SwipeDirection? = nil) {
+    func switchToIsland(named targetName: String, direction: SwipeDirection? = nil,
+                        animationAlreadyPresented: Bool = false) {
         guard targetName != currentAppName, let bundleID = islandApps[targetName] else {
+            if animationAlreadyPresented { environment.setSwitching(false) }
             environment.cancelPreview(); return
         }
         guard let appURL = environment.applicationURL(bundleID) else {
+            // 画布阶段已阻止交互，但此时尚无requestID，clearSwitchState不会替它解除阻止。
+            if animationAlreadyPresented { environment.setSwitching(false) }
             cancelSwitch()
             lastSwitchFailed = true
             environment.restoreSource()
@@ -159,9 +171,10 @@ final class AppSwitcher {
         clearSwitchState()
         let id = UUID()
         let motion = direction.map { IslandSwitchMotion(requestID: id, direction: $0,
-            reduceMotion: environment.reduceMotion(), issuedUptime: environment.uptime(),
+            reduceMotion: animationAlreadyPresented || environment.reduceMotion(), issuedUptime: environment.uptime(),
             sourceGeometry: environment.sourceGeometry()) }
         guard let url = switchURL(for: targetName, motion: motion) else {
+            if animationAlreadyPresented { environment.setSwitching(false) }
             environment.cancelPreview(); return
         }
         requestID = id

@@ -124,6 +124,7 @@ final class SwipeGestureRecognizer {
 
     /// 包括尚未锁轴的开始阶段，供事件入口保留本次手势的所有权。
     var isActive: Bool { axis != nil }
+    var hasLockedVerticalAxis: Bool { axis == .vertical }
 
     /// 判轴前先保留横向意图，避免轻微纵向分量提前展开面板。
     var consumesHorizontalScroll: Bool {

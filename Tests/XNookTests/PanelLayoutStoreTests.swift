@@ -239,4 +239,126 @@ final class PanelLayoutStoreTests: XCTestCase {
             XCTAssertNil(defaults.object(forKey: PanelLayoutStore.recoveryBackupKey))
         }
     }
+
+    func testApplyingSameConfigurationPreservesUnsavedDefaultContentFit() throws {
+        let store = PanelLayoutStore(defaults: defaults)
+        let original = store.configuration
+        var reordered = original
+        reordered.items.reverse()
+        try store.apply(reordered, replacingSignature: original.signature)
+        XCTAssertEqual(store.configuration, original)
+        XCTAssertFalse(store.hasSavedConfiguration)
+        XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
+        XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
+        XCTAssertTrue(defaults.persistentDomain(forName: suiteName)?.isEmpty ?? true)
+    }
+
+    func testApplyingNewConfigurationPersistsWhenPreviewIsCurrent() throws {
+        let store = PanelLayoutStore(defaults: defaults)
+        let originalSignature = store.configuration.signature
+        let replacement = PanelLayoutTemplate.focus.configuration
+        try store.apply(replacement, replacingSignature: originalSignature)
+        XCTAssertEqual(store.configuration, replacement)
+        XCTAssertEqual(PanelLayoutStore(defaults: defaults).configuration, replacement)
+        XCTAssertTrue(store.hasSavedConfiguration)
+        XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
+        let saved = defaults.data(forKey: PanelLayoutStore.storageKey)
+        try store.apply(replacement, replacingSignature: replacement.signature)
+        XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), saved)
+    }
+
+    func testApplyingOutdatedPreviewPreservesOtherWindowConfigurationAndBytes() throws {
+        let firstWindow = PanelLayoutStore(defaults: defaults)
+        let previewSignature = firstWindow.configuration.signature
+        let secondWindow = PanelLayoutStore(defaults: try XCTUnwrap(UserDefaults(suiteName: suiteName)))
+        let newest = PanelLayoutTemplate.media.configuration
+        try secondWindow.save(newest)
+        let saved = defaults.data(forKey: PanelLayoutStore.storageKey)
+        XCTAssertThrowsError(try firstWindow.apply(PanelLayoutTemplate.focus.configuration,
+                                                  replacingSignature: previewSignature)) {
+            XCTAssertEqual($0 as? PanelLayoutError, .changedSincePreview)
+        }
+        XCTAssertEqual(firstWindow.configuration, newest)
+        XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), saved)
+        XCTAssertTrue(firstWindow.canEdit)
+        XCTAssertNil(defaults.object(forKey: PanelLayoutStore.recoveryBackupKey))
+    }
+
+    func testApplyingDetectsExternalDamageBeforeWritingAndPreservesIt() {
+        for original: Any in [Data("damaged".utf8), "unexpected", Data(#"{"version":99,"items":[]}"#.utf8)] {
+            defaults.removeObject(forKey: PanelLayoutStore.storageKey)
+            let store = PanelLayoutStore(defaults: defaults)
+            let previewSignature = store.configuration.signature
+            defaults.set(original, forKey: PanelLayoutStore.storageKey)
+            XCTAssertThrowsError(try store.apply(PanelLayoutTemplate.focus.configuration,
+                                                 replacingSignature: previewSignature)) {
+                XCTAssertEqual($0 as? PanelLayoutError, .recoveryRequired)
+            }
+            XCTAssertFalse(store.canEdit)
+            XCTAssertNotNil(store.loadError)
+            XCTAssertEqual(defaults.object(forKey: PanelLayoutStore.storageKey) as? NSObject, original as? NSObject)
+            XCTAssertNil(defaults.object(forKey: PanelLayoutStore.recoveryBackupKey))
+        }
+    }
+
+    func testApplyingInvalidConfigurationPreservesCurrentLayoutAndBytes() throws {
+        let store = PanelLayoutStore(defaults: defaults)
+        try store.save(PanelLayoutTemplate.standard.configuration)
+        let current = store.configuration
+        let saved = defaults.data(forKey: PanelLayoutStore.storageKey)
+        var invalid = current
+        invalid.items.removeLast()
+        XCTAssertThrowsError(try store.apply(invalid, replacingSignature: current.signature)) {
+            XCTAssertEqual($0 as? PanelLayoutError, .invalidConfiguration)
+        }
+        XCTAssertEqual(store.configuration, current)
+        XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), saved)
+    }
+
+    func testSavedTemplatesKeepContentFitAfterReloadWithExistingModeGates() throws {
+        let store = PanelLayoutStore(defaults: defaults)
+        for template in PanelLayoutTemplate.allCases {
+            try store.save(template.configuration)
+            let saved = defaults.data(forKey: PanelLayoutStore.storageKey)
+            let reloaded = PanelLayoutStore(defaults: defaults)
+            XCTAssertTrue(reloaded.hasSavedConfiguration)
+            XCTAssertEqual(reloaded.configuration.fitsContent, true)
+            for automatic in [false, true] {
+                for editing in [false, true] {
+                    for overview in [false, true] {
+                        XCTAssertEqual(reloaded.shouldFitDefaultContent(automaticallyFit: automatic,
+                            isEditing: editing, isOverview: overview), automatic && !editing && overview)
+                    }
+                }
+            }
+            XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), saved)
+        }
+    }
+
+    func testResizedTemplateStaysFixedAfterSaveAndReload() throws {
+        let store = PanelLayoutStore(defaults: defaults)
+        try store.save(PanelLayoutTemplate.focus.configuration)
+        XCTAssertTrue(store.shouldFitDefaultContent(automaticallyFit: true))
+        var resized = store.configuration
+        resized.resize(.notes, columns: 6, rows: 8)
+        try store.save(resized)
+        let reloaded = PanelLayoutStore(defaults: defaults)
+        XCTAssertEqual(reloaded.configuration.fitsContent, false)
+        XCTAssertEqual(reloaded.configuration, resized)
+        XCTAssertFalse(reloaded.shouldFitDefaultContent(automaticallyFit: true))
+    }
+
+    func testOldSavedLayoutKeepsFixedContentModeAndBytes() throws {
+        let original = PanelLayoutConfiguration.legacy(enabledWidgetIDs: ["media"], showHistory: false)
+        let encoded = try JSONEncoder().encode(original)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNil(object["fitsContent"])
+        defaults.set(encoded, forKey: PanelLayoutStore.storageKey)
+        let store = PanelLayoutStore(defaults: defaults)
+        XCTAssertNil(store.configuration.fitsContent)
+        XCTAssertFalse(store.shouldFitDefaultContent(automaticallyFit: true))
+        store.reload()
+        XCTAssertEqual(store.configuration.signature, original.signature)
+        XCTAssertEqual(defaults.data(forKey: PanelLayoutStore.storageKey), encoded)
+    }
 }

@@ -35,7 +35,8 @@ final class PanelLayoutEditorUXTests: XCTestCase {
         editor.begin(from: store)
         let record = ToolbarGeometryRecord()
         let content = PanelLayoutEditorToolbar(editor: editor, selection: .constant(.media),
-            onSave: { XCTFail("渲染不应保存") }, onCancel: { XCTFail("渲染不应取消") }, availableWidth: width)
+            onSave: { XCTFail("渲染不应保存") }, onCancel: { XCTFail("渲染不应取消") }, availableWidth: width,
+            onShowLibrary: { XCTFail("渲染不应打开方案库") })
             .padding(8)
             .frame(width: width, alignment: .topLeading)
             .background(IslandStyle.surface(for: scheme))
@@ -59,7 +60,7 @@ final class PanelLayoutEditorUXTests: XCTestCase {
         host.frame = NSRect(x: 0, y: 0, width: width, height: initialHeight)
         settle(host)
         let toolbar = try XCTUnwrap(record.frames["panelLayoutEditor"])
-        for key in ["panelLayoutHelp", "panelLayoutDefault", "panelLayoutCancel", "panelLayoutSave",
+        for key in ["panelLayoutHelp", "panelLayoutLibrary", "panelLayoutDefault", "panelLayoutCancel", "panelLayoutSave",
                     "panelLayoutModule", "panelLayoutWidth", "panelLayoutHeight", "panelLayoutVisible",
                     "panelLayoutEarlier", "panelLayoutLater", "panelLayoutHiddenModules"] {
             let frame = try XCTUnwrap(record.frames[key], key)

@@ -9,9 +9,11 @@ struct MediaWidgetView: View {
     @State private var showsLyricsDetails = false
     @State private var seekInteraction = MediaSeekInteraction()
     @Environment(\.mediaSeekInteractionEnabled) private var seekInteractionEnabled
+    @Environment(\.mediaAmbientAnimationEnabled) private var ambientAnimationEnabled
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
+    @AppStorage("mediaAmbientStyle") private var ambientStyle = SettingsDefaults.string(for: "mediaAmbientStyle")
 
     private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
     private var title: String { mediaManager.currentTitle.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -37,6 +39,20 @@ struct MediaWidgetView: View {
         }
         .frame(maxWidth: .infinity)
         .foregroundStyle(.primary)
+        .background {
+            GeometryReader { geometry in
+                let padding = ExpandedPanelLayout.cardPadding
+                MediaAmbientBackground(style: MediaAmbientStyle.resolved(ambientStyle),
+                    palette: hasTrack ? mediaManager.artworkPalette : nil,
+                    isPlaying: mediaManager.isPlaying, isVisible: ambientAnimationEnabled,
+                    reduceMotion: shouldReduceMotion)
+                    .frame(width: geometry.size.width + padding * 2, height: geometry.size.height + padding * 2)
+                    .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
+                    .offset(x: -padding, y: -padding)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .expandedPanelDebugFrame(id: "mediaWidgetRoot")
         .onChange(of: mediaManager.seekContext) { _, context in
             if seekInteraction.context != context { seekInteraction.invalidate() }
@@ -346,7 +362,17 @@ private struct MediaSeekInteractionEnabledKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+private struct MediaAmbientAnimationEnabledKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
+    /// 截图宿主和不可见卡片保持静态，只有实际展开的媒体才刷新氛围动画。
+    var mediaAmbientAnimationEnabled: Bool {
+        get { self[MediaAmbientAnimationEnabledKey.self] }
+        set { self[MediaAmbientAnimationEnabledKey.self] = newValue }
+    }
+
     var mediaSeekInteractionEnabled: Bool {
         get { self[MediaSeekInteractionEnabledKey.self] }
         set { self[MediaSeekInteractionEnabledKey.self] = newValue }

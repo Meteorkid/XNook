@@ -189,6 +189,41 @@ final class SwipeGestureRecognizerTests: XCTestCase {
         XCTAssertEqual(scroll(recognizer, x: 90), .inProgress)
     }
 
+    func testZeroBeganRemainsUndecidedUntilHorizontalMovementArrives() {
+        let recognizer = SwipeGestureRecognizer()
+        XCTAssertEqual(scroll(recognizer, phase: .began), .inProgress)
+        XCTAssertTrue(recognizer.isActive)
+        XCTAssertFalse(recognizer.hasLockedVerticalAxis)
+        XCTAssertFalse(recognizer.consumesHorizontalScroll)
+        XCTAssertEqual(scroll(recognizer), .inProgress)
+        XCTAssertFalse(recognizer.hasLockedVerticalAxis)
+        XCTAssertEqual(scroll(recognizer, x: 2), .inProgress)
+        XCTAssertTrue(recognizer.consumesHorizontalScroll)
+        XCTAssertFalse(recognizer.hasLockedVerticalAxis)
+        XCTAssertEqual(scroll(recognizer, x: 8), .progress(10))
+        XCTAssertFalse(recognizer.hasLockedVerticalAxis)
+        XCTAssertEqual(scroll(recognizer, phase: .ended), .cancelled)
+        XCTAssertFalse(recognizer.isActive)
+    }
+
+    func testZeroBeganDoesNotReportVerticalLockUntilVerticalAxisIsDecided() {
+        let recognizer = SwipeGestureRecognizer()
+        XCTAssertEqual(scroll(recognizer, phase: .began), .inProgress)
+        XCTAssertFalse(recognizer.hasLockedVerticalAxis)
+        XCTAssertEqual(scroll(recognizer, y: 2), .inProgress)
+        XCTAssertTrue(recognizer.isActive)
+        XCTAssertFalse(recognizer.hasLockedVerticalAxis, "尚未判轴不能当成纵向拒绝")
+        XCTAssertFalse(recognizer.consumesHorizontalScroll)
+        XCTAssertEqual(scroll(recognizer, y: 8), .inProgress)
+        XCTAssertTrue(recognizer.hasLockedVerticalAxis)
+        XCTAssertFalse(recognizer.consumesHorizontalScroll)
+        XCTAssertEqual(scroll(recognizer, x: 100), .inProgress)
+        XCTAssertTrue(recognizer.hasLockedVerticalAxis)
+        XCTAssertEqual(scroll(recognizer, phase: .ended), .inProgress)
+        XCTAssertFalse(recognizer.hasLockedVerticalAxis)
+        XCTAssertFalse(recognizer.isActive)
+    }
+
     private func scroll(
         _ recognizer: SwipeGestureRecognizer,
         x: CGFloat = 0,

@@ -1,0 +1,76 @@
+{
+  "version": "1.3.28",
+  "date": "2026-10-27",
+  "status": "verified_for_publication",
+  "source_commit": "738203f87ee0254666ca673b8976955d9be7af19",
+  "source_worktree": "/Users/meteor/.codex/worktrees/xnook-overview-header",
+  "source_inputs_unchanged": true,
+  "app_path": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook-1.3.28/X Nook.app",
+  "dmg_path": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook-1.3.28/XNook-1.3.28.dmg",
+  "sha256sums_path": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook-1.3.28/SHA256SUMS.txt",
+  "dmg_sha256": "bcd0857c00cb1977a53c61389fd570bc69f8842e1eae9a67de4ff78e82a4b72a",
+  "dmg_bytes": 5923056,
+  "binary_bytes": 13728720,
+  "binary_sha256": "81a6e431f55f1eefe33df2f34d4ca745ea00b82805e0661de96b45d8c85a1502",
+  "architecture": "arm64",
+  "minimum_macos": "14.0",
+  "bundle_identifier": "com.meteorkid.xnook",
+  "public_key_sha256": "feea02bdbb70c8aad874eb326b3ba601f825a3ceaf039254aaa1091288ca424e",
+  "public_key_matches_production_file": true,
+  "public_key_differs_from_test_fixture": true,
+  "api_origin": "https://www.imagentx.top",
+  "signature": "ad-hoc",
+  "hardened_runtime": true,
+  "developer_id_available": false,
+  "notarized": false,
+  "strict_signature_verified": true,
+  "dmg_checksum_verified": true,
+  "readonly_mount_verified": true,
+  "mounted_app_identical": true,
+  "mounted_app_file_count": 5,
+  "core_symbols_present": true,
+  "entitlements": {
+    "com.apple.security.automation.apple-events": true,
+    "com.apple.security.files.bookmarks.app-scope": true
+  },
+  "tests": {
+    "xnook": {
+      "executed": 1215,
+      "skipped": 95,
+      "failed": 0
+    },
+    "shared_core": {
+      "executed": 31,
+      "failed": 0
+    }
+  },
+  "installed": false,
+  "pushed": false,
+  "tag_created": false,
+  "published": false,
+  "validation_scope": "Source tests and release artifact validation; website live payment and physical-device acceptance remain separate.",
+  "merged_remote_commit": "38117ea2638e29353740af04926b87c5a7d30908",
+  "audit_fix_commit": "46fffb9",
+  "full_test_log": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook-1.3.28/full-tests.log",
+  "build_log": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook-1.3.28/build.log",
+  "source_input_manifest": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook-1.3.28/source-input-manifest.json",
+  "product_build_input_count": 142,
+  "prior_debug_release_targeted_tests": {
+    "debug": 46,
+    "release": 46,
+    "failed": 0,
+    "skipped": 0
+  },
+  "terminology_targeted_tests": {
+    "executed": 46,
+    "failed": 0,
+    "bilingual_paid_term_checks": true
+  },
+  "preserved_1_3_27_product_files": {
+    "Sources/XNook/Core/SettingsDefaults.swift": "972e7df4fd40103a7b23fa5aa62d84db99ad896b4a6db0a02223690d80c76ca6",
+    "Sources/XNook/Features/ExpandedPanelView.swift": "993d906a668a53cb4178138310c327316547de40d6c136ce4d286b14f766754a",
+    "Sources/XNook/Localization/L10n+TaskInbox.swift": "9b7dff566dcb608b45a8312a8a534ab8d3cf5e30b3bd826fb9ca9489aba95a87",
+    "Sources/XNook/Settings/SettingsSearch.swift": "196aa6d28b30ed19c969f64576fcc68d550f54c97781888af20dcbdbed170614",
+    "Sources/XNook/Settings/SettingsView.swift": "ed7ff143576b0f0eeaae0c1666d272b7479288d69ddd02b5554f7dc605123284"
+  }
+}

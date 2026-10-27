@@ -1,0 +1,54 @@
+{
+  "version": "1.3.25",
+  "date": "2026-10-27",
+  "status": "prepared_for_root_release",
+  "source_commit": "65257bd78048605bdda8f27cd404fb4da84e14c6",
+  "source_worktree": "/Users/meteor/.codex/worktrees/xnook-overview-header",
+  "source_inputs_unchanged": true,
+  "app_path": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook/X Nook.app",
+  "dmg_path": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook/XNook-1.3.25.dmg",
+  "sha256sums_path": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook/SHA256SUMS.txt",
+  "dmg_sha256": "e4585964a3e3007d5836db3b211bda23dd45bdac3b9f0dcbebd8b195ca0fcffa",
+  "binary_sha256": "b5f46810e5b3caa72ae1cbf78ffb5972fe384412fc070f0aec208e425503f993",
+  "architecture": "arm64",
+  "minimum_macos": "14.0",
+  "bundle_identifier": "com.meteorkid.xnook",
+  "public_key_sha256": "feea02bdbb70c8aad874eb326b3ba601f825a3ceaf039254aaa1091288ca424e",
+  "public_key_matches_production_file": true,
+  "public_key_differs_from_test_fixture": true,
+  "api_origin": "https://www.imagentx.top",
+  "signature": "ad-hoc",
+  "hardened_runtime": true,
+  "developer_id_available": false,
+  "notarized": false,
+  "strict_signature_verified": true,
+  "dmg_checksum_verified": true,
+  "readonly_mount_verified": true,
+  "mounted_app_identical": true,
+  "mounted_app_file_count": 5,
+  "core_symbols_present": true,
+  "entitlements": {
+    "com.apple.security.automation.apple-events": true,
+    "com.apple.security.files.bookmarks.app-scope": true
+  },
+  "tests": {
+    "xnook": {
+      "executed": 1148,
+      "skipped": 88,
+      "failed": 0
+    },
+    "shared_core": {
+      "executed": 17,
+      "failed": 0
+    },
+    "final_runtime_targeted": {
+      "executed": 19,
+      "failed": 0
+    }
+  },
+  "installed": false,
+  "pushed": false,
+  "tag_created": false,
+  "published": false,
+  "validation_scope": "Source tests and release artifact validation; website live payment and physical-device acceptance remain separate."
+}

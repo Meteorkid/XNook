@@ -37,6 +37,8 @@ struct SettingsSearchEntry: Identifiable, Equatable {
         .init(id: "applicationAppearance", pane: .display, title: L10n.applicationAppearance, keywords: "应用外观 系统 深色 浅色 appearance system dark light theme"),
         .init(id: "islandBackgroundStyle", pane: .display, title: L10n.islandBackgroundStyle, keywords: "岛背景 跟随外观 黑色 浅色 玻璃 island background black light glass preset"),
         .init(id: "islandGlassDepth", pane: .display, title: L10n.islandGlassDepth, keywords: "玻璃深浅 玻璃 深浅 透明度 glass depth tint transparency"),
+        .init(id: "mediaAmbientStyle", pane: .display, title: L10n.localized(zh: "媒体氛围", en: "Media Ambience"), keywords: "音乐 封面柔光 高亮 动态模糊 背景 media music artwork glow ambient moving blur background"),
+        .init(id: "panelLayoutLibrary", pane: .display, title: L10n.localized(zh: "布局方案", en: "Layouts"), keywords: "默认布局 内置布局 预设 自定义布局 保存 重命名 方案 templates presets custom layouts save rename profiles"),
         .init(id: "panelLayoutEditor", pane: .display, title: L10n.settingsLayoutEditor, keywords: "网格 布局 编辑 组件 组合 grid layout editor widget modules"),
         .init(id: "panelAutoSize", pane: .display, title: L10n.panelAutoSize, keywords: "面板 自动 尺寸 宽度 收窄 panel automatic auto size width narrow"),
         .init(id: "panelHeightMode", pane: .display, title: L10n.panelHeightMode, keywords: "面板 高度 自动 手动 自定义 上限 最大 最大高度 贴合 内容 留白 panel height automatic manual custom limit maximum max fit content blank space"),

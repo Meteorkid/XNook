@@ -11,6 +11,7 @@ struct PanelLayoutEditorToolbar: View {
     let onSave: () -> Void
     let onCancel: () -> Void
     var availableWidth: CGFloat = 800
+    var onShowLibrary: (() -> Void)? = nil
 
     private var item: PanelModulePlacement? { editor.draft.items.first { $0.id == selection } }
     private var selectedIndex: Int? { editor.draft.visibleItems.firstIndex { $0.id == selection } }
@@ -111,11 +112,29 @@ struct PanelLayoutEditorToolbar: View {
     private var actions: some View {
         if isVeryNarrow {
             VStack(alignment: .leading, spacing: 6) {
+                libraryAction
                 defaultAction
                 HStack(spacing: 8) { cancelAction; saveAction }
             }
         } else {
-            HStack(spacing: 8) { defaultAction; cancelAction; saveAction }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { libraryAction; defaultAction; cancelAction; saveAction }
+                    .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) { libraryAction; defaultAction }
+                    HStack(spacing: 8) { cancelAction; saveAction }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var libraryAction: some View {
+        if let onShowLibrary {
+            Button(L10n.localized(zh: "布局方案…", en: "Layouts…"), action: onShowLibrary)
+                .help(L10n.localized(zh: "选择内置布局，或保存、管理自己的布局", en: "Choose a template or save and manage your layouts"))
+                .accessibilityIdentifier("panelLayoutLibrary")
+                .expandedPanelDebugFrame(id: "panelLayoutLibrary")
         }
     }
 
@@ -185,6 +204,7 @@ struct PanelLayoutEditorToolbar: View {
                 }
             }
             .accessibilityLabel(L10n.layoutEditorWidth)
+            .help(L10n.localized(zh: "窄窗口自动换行；组件宽度在较宽窗口中生效。", en: "Narrow panels wrap; widget widths apply when the panel is wider."))
             .accessibilityIdentifier("panelLayoutWidth")
             .expandedPanelDebugFrame(id: "panelLayoutWidth")
         }

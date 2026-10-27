@@ -16,7 +16,8 @@ final class PanelLayoutStore {
     func shouldFitDefaultContent(
         automaticallyFit: Bool, isEditing: Bool = false, isOverview: Bool = true
     ) -> Bool {
-        automaticallyFit && !hasSavedConfiguration && loadError == nil && !isEditing && isOverview
+        automaticallyFit && (!hasSavedConfiguration || configuration.fitsContent == true)
+            && loadError == nil && !isEditing && isOverview
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -57,6 +58,15 @@ final class PanelLayoutStore {
     func save(_ configuration: PanelLayoutConfiguration) throws {
         guard canEdit else { throw PanelLayoutError.recoveryRequired }
         try persist(configuration)
+    }
+
+    func apply(_ configuration: PanelLayoutConfiguration, replacingSignature expectedSignature: String) throws {
+        reload()
+        guard canEdit else { throw PanelLayoutError.recoveryRequired }
+        try configuration.validate()
+        guard self.configuration.signature == expectedSignature else { throw PanelLayoutError.changedSincePreview }
+        guard self.configuration.signature != configuration.signature else { return }
+        try save(configuration)
     }
 
     /// 仅由用户明确选择恢复默认布局触发，允许替换损坏或未来版本的数据。

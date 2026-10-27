@@ -64,6 +64,48 @@ final class ExpandedPanelLayoutTests: XCTestCase {
             automaticallyFit: true, widgetCount: 3, selectedWidget: nil), 800)
     }
 
+    func testTemplateAutomaticWidthsIncludeTaskModules() throws {
+        let cases: [(PanelLayoutTemplate, Int, CGFloat)] = [(.focus, 1, 640), (.standard, 3, 800), (.media, 1, 400)]
+        for (template, primaryCount, expectedWidth) in cases {
+            let configuration = template.configuration
+            let count = ExpandedPanelLayout.overviewWidgetCount(primaryWidgetCount: primaryCount, configuration: configuration)
+            let width = ExpandedPanelLayout.width(preferred: 800, available: 1200,
+                automaticallyFit: true, widgetCount: count, selectedWidget: nil)
+            XCTAssertEqual(width, expectedWidth, template.rawValue)
+            if template == .focus {
+                let frames = PanelGridGeometry.frames(for: configuration, width: width - ExpandedPanelLayout.outerPadding * 2)
+                let task = try XCTUnwrap(frames[.currentTask])
+                let notes = try XCTUnwrap(frames[.notes])
+                XCTAssertEqual(task.minY, notes.minY)
+                XCTAssertLessThan(task.minX, notes.minX)
+                XCTAssertFalse(task.intersects(notes))
+            }
+        }
+    }
+
+    func testOverviewWidthKeepsLegacyPrimaryCountsAndExplicitOverrides() {
+        let configuration = PanelLayoutConfiguration.factoryDefault
+        XCTAssertEqual(configuration.maximumModulesPerRow, 2)
+        let count = ExpandedPanelLayout.overviewWidgetCount(primaryWidgetCount: 4, configuration: configuration)
+        XCTAssertEqual(count, 4)
+        XCTAssertEqual(ExpandedPanelLayout.width(preferred: 800, available: 1200,
+            automaticallyFit: true, widgetCount: count, selectedWidget: nil), 800)
+        for primaryCount in 0...4 {
+            XCTAssertEqual(ExpandedPanelLayout.overviewWidgetCount(primaryWidgetCount: primaryCount,
+                configuration: nil), primaryCount)
+        }
+    }
+
+    func testResizedFocusLayoutKeepsTwoModuleAutomaticWidth() {
+        var configuration = PanelLayoutTemplate.focus.configuration
+        configuration.resize(.notes, columns: 6, rows: 8)
+        XCTAssertEqual(configuration.fitsContent, false)
+        let count = ExpandedPanelLayout.overviewWidgetCount(primaryWidgetCount: 1, configuration: configuration)
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(ExpandedPanelLayout.width(preferred: 800, available: 1200,
+            automaticallyFit: true, widgetCount: count, selectedWidget: nil), 640)
+    }
+
     func testMediaReceivesExtraSpaceWithoutSqueezingOtherColumns() {
         for mediaColumn in 0..<3 {
             let widths = ExpandedPanelLayout.columnWidths(contentWidth: 784, columns: 3,

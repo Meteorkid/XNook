@@ -9,6 +9,7 @@ struct ExpandedPanelView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.mediaAmbientAnimationEnabled) private var ambientAnimationEnabled
     @Binding var selectedWidget: Widget?
     @Binding var calendarRecenterTrigger: Int
     let enabledWidgets: [Widget]
@@ -50,6 +51,8 @@ struct ExpandedPanelView: View {
     @State private var layoutRecoveryError: String?
     @State private var layoutEntryError: String?
     @State private var editorToolbarHeight: CGFloat = 0
+    @State private var showsLayoutLibrary = false
+    @State private var layoutProfiles: PanelLayoutProfileStore?
 
     private var dashboardConfiguration: PanelLayoutConfiguration {
         layoutEditor.isEditing ? layoutEditor.draft : layoutStore?.configuration
@@ -96,7 +99,13 @@ struct ExpandedPanelView: View {
             if layoutEditor.isEditing {
                 PanelLayoutEditorToolbar(editor: layoutEditor, selection: $layoutSelection,
                     onSave: { if let layoutStore { _ = layoutEditor.save(to: layoutStore) } },
-                    onCancel: layoutEditor.cancel, availableWidth: panelWidth)
+                    onCancel: layoutEditor.cancel, availableWidth: panelWidth,
+                    onShowLibrary: {
+                        if let layoutStore {
+                            layoutProfiles = PanelLayoutProfileStore(defaults: layoutStore.defaults)
+                            showsLayoutLibrary = true
+                        }
+                    })
                     .clipShape(RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
                     .padding(.horizontal, ExpandedPanelLayout.outerPadding)
                     .padding(.top, ExpandedPanelLayout.outerPadding)
@@ -193,11 +202,24 @@ struct ExpandedPanelView: View {
         }
         .onChange(of: confirmsLayoutRecovery) { _, _ in reportInteractions() }
         .onChange(of: showsFallbackInbox) { _, _ in reportInteractions() }
+        .onChange(of: showsLayoutLibrary) { _, _ in reportInteractions() }
         .onChange(of: dashboardConfiguration.signature) { _, _ in
             reportInteractions()
             onLinksPresentationChanged(!linkingModules.intersection(visibleModuleIDs).isEmpty)
         }
         .onDisappear { onEditingChanged(false); onInteractionChanged(false); onLinksPresentationChanged(false) }
+        .popover(isPresented: $showsLayoutLibrary) {
+            if let layoutProfiles {
+                PanelLayoutLibraryView(store: layoutProfiles, currentLayout: layoutEditor.draft,
+                    isEditing: true, hasUnsavedChanges: layoutEditor.hasChanges,
+                    onApply: { configuration in
+                        try configuration.validate()
+                        layoutEditor.draft = configuration
+                        layoutSelection = configuration.visibleItems.first?.id ?? .media
+                        showsLayoutLibrary = false
+                    }, onClose: { showsLayoutLibrary = false })
+            }
+        }
         .alert(L10n.localized(zh: "恢复默认布局？", en: "Restore Default Layout?"), isPresented: $confirmsLayoutRecovery) {
             Button(L10n.localized(zh: "取消", en: "Cancel"), role: .cancel) {}
             Button(L10n.localized(zh: "恢复默认", en: "Restore")) {
@@ -208,7 +230,8 @@ struct ExpandedPanelView: View {
             Text(L10n.localized(zh: "只重置组件排列，原布局会留作备份；笔记、文件和任务不受影响。", en: "Only the layout is reset and backed up. Notes, files and tasks are retained."))
         }
         .onExitCommand {
-            if layoutEditor.isEditing { layoutEditor.cancel() }
+            if showsLayoutLibrary { showsLayoutLibrary = false }
+            else if layoutEditor.isEditing { layoutEditor.cancel() }
             else if selectedWidget != nil { selectedWidget = nil }
             else { onClose() }
         }
@@ -473,7 +496,7 @@ struct ExpandedPanelView: View {
         onLinksPresentationChanged(!linkingModules.intersection(visibleModuleIDs).isEmpty)
     }
     private func reportInteractions() {
-        onInteractionChanged(layoutEditor.isEditing || confirmsLayoutRecovery || showsFallbackInbox
+        onInteractionChanged(layoutEditor.isEditing || confirmsLayoutRecovery || showsFallbackInbox || showsLayoutLibrary
             || !interactingModules.intersection(visibleModuleIDs).isEmpty)
     }
 
@@ -493,6 +516,8 @@ struct ExpandedPanelView: View {
         switch id {
         case .media:
             MediaWidgetView(mediaManager: mediaManager, isDetail: false, onShowAll: { selectedWidget = .media }, availableHeight: size.height)
+                .environment(\.mediaAmbientAnimationEnabled,
+                    ambientAnimationEnabled && visibleModuleIDs.contains(.media) && !layoutEditor.isEditing)
         case .calendar:
             CalendarWidgetView(calendarManager: calendarManager, recenterTrigger: $calendarRecenterTrigger,
                 onStartFocus: onStartFocus, isDetail: false, onShowAll: { selectedWidget = .calendar }, availableHeight: size.height)

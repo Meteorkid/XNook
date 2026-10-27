@@ -19,6 +19,8 @@ final class SettingsDiscoveryTests: XCTestCase {
                 ("背景", "islandBackgroundStyle"), ("background glass", "islandBackgroundStyle"),
                 ("玻璃深浅", "islandGlassDepth"), ("glass depth", "islandGlassDepth"),
                 ("网格", "panelLayoutEditor"), ("grid layout", "panelLayoutEditor"),
+                ("自定义布局", "panelLayoutLibrary"), ("layout profiles", "panelLayoutLibrary"),
+                ("封面柔光", "mediaAmbientStyle"), ("moving blur", "mediaAmbientStyle"),
                 ("auto size", "panelAutoSize"), ("全局快捷唤出", "globalPanelShortcut"),
                 ("global hotkey", "globalPanelShortcut")] {
                 XCTAssertTrue(SettingsSearchEntry.matches(query).contains { $0.id == target }, "\(language) \(query)")
@@ -120,6 +122,7 @@ final class SettingsDiscoveryTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "islandBackgroundStyle"), IslandBackgroundStyle.solid.rawValue)
         XCTAssertEqual(defaults.double(forKey: "islandGlassDepth"), IslandBackgroundPolicy.defaultGlassDepth)
         XCTAssertTrue(defaults.bool(forKey: "panelAutoSize"))
+        XCTAssertEqual(defaults.string(forKey: "mediaAmbientStyle"), MediaAmbientStyle.glow.rawValue)
     }
 
     func testSignedLyricsOffsetInputPreservesDirectionAndFormatSuffix() {

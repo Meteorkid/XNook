@@ -227,8 +227,10 @@ struct NotchContentView: View {
     private var isExpanded: Bool { state == .expanded }
 
     private var effectivePanelWidth: CGFloat {
-        ExpandedPanelLayout.width(preferred: panelWidth, available: availablePanelSize.width,
-            automaticallyFit: panelAutoSize, widgetCount: enabledWidgets.count, selectedWidget: selectedWidget)
+        let widgetCount = ExpandedPanelLayout.overviewWidgetCount(primaryWidgetCount: enabledWidgets.count,
+            configuration: enabledWidgetsOverride == nil ? panelLayoutStore.configuration : nil)
+        return ExpandedPanelLayout.width(preferred: panelWidth, available: availablePanelSize.width,
+            automaticallyFit: panelAutoSize, widgetCount: widgetCount, selectedWidget: selectedWidget)
     }
 
     private var expandedWidth: CGFloat {
@@ -1371,6 +1373,8 @@ struct NotchContentView: View {
         )
         .environment(\.mediaSeekInteractionEnabled,
             expandedContentOnly || (isExpanded && showContent && isWindowVisible && !isEditingPanelLayout))
+        .environment(\.mediaAmbientAnimationEnabled,
+            !expandedContentOnly && isExpanded && showContent && isWindowVisible && !isEditingPanelLayout)
     }
 
     private func handleAppearance() {

@@ -347,6 +347,95 @@ final class PanelLayoutConfigurationTests: XCTestCase {
         XCTAssertNotEqual(edited.signature, original.signature)
     }
 
+    func testVersionOneJSONWithoutContentFitKeepsLegacySignatureAndEncoding() throws {
+        let original = Data(#"""
+        {"version":1,"items":[
+          {"id":"media","column":0,"row":0,"columns":12,"rows":4,"isVisible":true},
+          {"id":"calendar","column":0,"row":0,"columns":4,"rows":4,"isVisible":false},
+          {"id":"notes","column":0,"row":0,"columns":4,"rows":4,"isVisible":false},
+          {"id":"tray","column":0,"row":0,"columns":4,"rows":4,"isVisible":false},
+          {"id":"currentTask","column":0,"row":4,"columns":12,"rows":3,"isVisible":true},
+          {"id":"recentTasks","column":0,"row":7,"columns":12,"rows":3,"isVisible":false}
+        ]}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(PanelLayoutConfiguration.self, from: original)
+        try decoded.validate()
+        XCTAssertNil(decoded.fitsContent)
+        XCTAssertNil(decoded.normalized().fitsContent)
+        let signature = "1|calendar:0,0,4,4,false|currentTask:0,4,12,3,true|media:0,0,12,4,true"
+            + "|notes:0,0,4,4,false|recentTasks:0,7,12,3,false|tray:0,0,4,4,false"
+        XCTAssertEqual(decoded.signature, signature)
+        let encoded = try JSONEncoder().encode(decoded)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNil(object["fitsContent"])
+        var fixed = decoded
+        fixed.fitsContent = false
+        XCTAssertEqual(fixed.signature, signature)
+        var fitting = decoded
+        fitting.fitsContent = true
+        XCTAssertEqual(fitting.signature, signature + "|fitsContent=1")
+        XCTAssertEqual(fitting.version, 1)
+    }
+
+    func testNormalizationMoveReorderAndVisibilityKeepContentFit() throws {
+        for template in PanelLayoutTemplate.allCases {
+            var configuration = template.configuration.normalized()
+            XCTAssertEqual(configuration.fitsContent, true)
+            configuration.move(.currentTask, column: 0, row: 20)
+            XCTAssertEqual(configuration.fitsContent, true)
+            configuration.reorder(.recentTasks, offset: -1)
+            XCTAssertEqual(configuration.fitsContent, true)
+            configuration.setVisible(.notes, visible: false)
+            XCTAssertEqual(configuration.fitsContent, true)
+            configuration.setVisible(.notes, visible: true)
+            XCTAssertEqual(configuration.fitsContent, true)
+            try configuration.validate()
+        }
+        var automatic = PanelLayoutTemplate.standard.configuration
+        automatic.setVisible(.notes, visible: true)
+        XCTAssertEqual(automatic.fitsContent, true)
+        try automatic.validate()
+    }
+
+    func testManualResizeDisablesContentFitAndNormalizationKeepsItDisabled() throws {
+        var configuration = PanelLayoutTemplate.focus.configuration
+        configuration.resize(.notes, columns: 6, rows: 8)
+        XCTAssertEqual(configuration.fitsContent, false)
+        XCTAssertEqual(configuration.normalized().fitsContent, false)
+        XCTAssertEqual(item(.notes, in: configuration).rows, 8)
+        XCTAssertFalse(configuration.signature.contains("|fitsContent=1"))
+        try configuration.validate()
+        let decoded = try JSONDecoder().decode(PanelLayoutConfiguration.self, from: JSONEncoder().encode(configuration))
+        XCTAssertEqual(decoded, configuration)
+        XCTAssertEqual(decoded.fitsContent, false)
+    }
+
+    func testMaximumModulesPerRowCountsStaggeredVisibleModules() throws {
+        var configuration = PanelLayoutConfiguration(items: [
+            .init(id: .currentTask, column: 0, row: 0, columns: 4, rows: 4, isVisible: true),
+            .init(id: .notes, column: 4, row: 1, columns: 4, rows: 4, isVisible: true),
+            .init(id: .calendar, column: 8, row: 2, columns: 4, rows: 4, isVisible: true),
+            .init(id: .media, column: 0, row: 0, columns: 4, rows: 4, isVisible: false),
+            .init(id: .tray, column: 0, row: 0, columns: 4, rows: 4, isVisible: false),
+            .init(id: .recentTasks, column: 0, row: 6, columns: 12, rows: 3, isVisible: true),
+        ])
+        try configuration.validate()
+        XCTAssertEqual(configuration.maximumModulesPerRow, 3)
+        configuration.items[2].isVisible = false
+        XCTAssertEqual(configuration.maximumModulesPerRow, 2)
+        configuration.items[1].isVisible = false
+        XCTAssertEqual(configuration.maximumModulesPerRow, 1)
+        for index in configuration.items.indices { configuration.items[index].isVisible = false }
+        XCTAssertEqual(configuration.maximumModulesPerRow, 0)
+    }
+
+    func testMaximumModulesPerRowDoesNotCombineAdjacentVerticalCards() throws {
+        let configuration = PanelLayoutConfiguration.legacy(enabledWidgetIDs: ["media"], showHistory: true)
+        try configuration.validate()
+        XCTAssertEqual(configuration.visibleItems.map(\.row), [0, 4, 7])
+        XCTAssertEqual(configuration.maximumModulesPerRow, 1)
+    }
+
     private func item(_ id: PanelModuleID, in configuration: PanelLayoutConfiguration) -> PanelModulePlacement {
         configuration.items.first { $0.id == id }!
     }

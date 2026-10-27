@@ -18,6 +18,9 @@ struct SettingsView: View {
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
     @AppStorage("launchAtLogin") private var launchAtLogin = SettingsDefaults.bool(for: "launchAtLogin")
     @State private var panelLayoutStore: PanelLayoutStore
+    @State private var layoutProfiles: PanelLayoutProfileStore
+    @State private var showsLayoutLibrary = false
+    @State private var layoutLibraryBaseSignature = ""
     @State private var layoutSaveError: String?
     @AppStorage("panelLayout.v1") private var panelLayoutData = Data()
 
@@ -25,6 +28,7 @@ struct SettingsView: View {
          permissions: SettingsPermissions? = nil, claudeReceiver: ClaudeCompletionReceiver? = nil,
          claudeConfiguration: String? = nil, globalPanelShortcut: GlobalPanelShortcutController? = nil) {
         _panelLayoutStore = State(initialValue: PanelLayoutStore(defaults: layoutDefaults))
+        _layoutProfiles = State(initialValue: PanelLayoutProfileStore(defaults: layoutDefaults))
         _search = State(initialValue: search ?? SettingsSearchState())
         _permissions = State(initialValue: permissions ?? SettingsPermissions())
         _globalPanelShortcut = State(initialValue: globalPanelShortcut ?? AppDelegate.shared?.globalPanelShortcut
@@ -47,6 +51,7 @@ struct SettingsView: View {
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
     @AppStorage("enabledWidgets") private var enabledWidgetsData = Data()
     @AppStorage("lyricsOffset") private var lyricsOffset = SettingsDefaults.double(for: "lyricsOffset")
+    @AppStorage("mediaAmbientStyle") private var mediaAmbientStyle = SettingsDefaults.string(for: "mediaAmbientStyle")
 
     private var panelHeightRange: ClosedRange<Double> {
         let upper = max(1, Double(panelContentSizeLimit.height))
@@ -425,6 +430,20 @@ struct SettingsView: View {
                     dividerLine
                     IslandBackgroundSettingsView(highlightedID: search.targetID)
                         .padding(.vertical, 8)
+                    dividerLine
+                    settingRow(L10n.localized(zh: "媒体氛围", en: "Media Ambience"), id: "mediaAmbientStyle",
+                        description: L10n.localized(zh: "仅在媒体卡片内使用封面颜色。动态模糊在暂停、隐藏或减少动态时停止流动。",
+                            en: "Uses artwork colors inside the media card. Motion stops while paused, hidden, or Reduce Motion is enabled.")) {
+                        Picker(L10n.localized(zh: "媒体氛围", en: "Media Ambience"), selection: Binding(
+                            get: { MediaAmbientStyle.resolved(mediaAmbientStyle) },
+                            set: { mediaAmbientStyle = $0.rawValue })) {
+                            ForEach(MediaAmbientStyle.allCases) { style in
+                                Text(style.localizedName).tag(style)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 150)
+                    }
                 }
             }
 
@@ -572,6 +591,30 @@ struct SettingsView: View {
                                 .disabled(!panelLayoutStore.canEdit)
                         }
                     }
+                    dividerLine
+                    Button {
+                        panelLayoutStore.reload()
+                        layoutProfiles.reload()
+                        layoutLibraryBaseSignature = panelLayoutStore.configuration.signature
+                        showsLayoutLibrary = true
+                    } label: {
+                        Label(L10n.localized(zh: "布局方案…", en: "Layouts…"), systemImage: "rectangle.stack")
+                    }
+                    .padding(.vertical, 8)
+                    .disabled(!panelLayoutStore.canEdit)
+                    .accessibilityIdentifier("settingsPanelLayoutLibrary")
+                    .settingsSearchTarget(id: "panelLayoutLibrary", highlightedID: search.targetID)
+                    .popover(isPresented: $showsLayoutLibrary) {
+                        PanelLayoutLibraryView(store: layoutProfiles, currentLayout: panelLayoutStore.configuration,
+                            onApply: { configuration in
+                                try panelLayoutStore.apply(configuration, replacingSignature: layoutLibraryBaseSignature)
+                            }, onClose: { showsLayoutLibrary = false })
+                    }
+                    Text(L10n.localized(zh: "先选内置方案，也可将当前排列另存为自定义布局。方案只保存组件，不改变主题、笔记或任务。",
+                        en: "Choose a template or save the current arrangement. Layouts only store widgets, not your theme, notes, or tasks."))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 8)
                     dividerLine
                     Button {
                         if let delegate = AppDelegate.shared { delegate.openLayoutEditor() }

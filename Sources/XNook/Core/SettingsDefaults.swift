@@ -36,6 +36,7 @@ enum SettingsDefaults {
         "calendarReminderLeadMinutes": 5.0,
         "calendarReminderSoundName": "Glass",
         "showNookFlowHistory": true,
+        "showTaskInboxShortcut": true,
         "nookFlowHistoryDisplayLimit": 3,
     ]
 

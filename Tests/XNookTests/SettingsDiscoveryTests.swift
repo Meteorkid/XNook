@@ -20,6 +20,7 @@ final class SettingsDiscoveryTests: XCTestCase {
                 ("玻璃深浅", "islandGlassDepth"), ("glass depth", "islandGlassDepth"),
                 ("网格", "panelLayoutEditor"), ("grid layout", "panelLayoutEditor"),
                 ("自定义布局", "panelLayoutLibrary"), ("layout profiles", "panelLayoutLibrary"),
+                ("待办入口", "showTaskInboxShortcut"), ("inbox shortcut", "showTaskInboxShortcut"),
                 ("封面柔光", "mediaAmbientStyle"), ("moving blur", "mediaAmbientStyle"),
                 ("auto size", "panelAutoSize"), ("全局快捷唤出", "globalPanelShortcut"),
                 ("global hotkey", "globalPanelShortcut")] {
@@ -35,6 +36,18 @@ final class SettingsDiscoveryTests: XCTestCase {
         }
         XCTAssertEqual(SettingsSearchEntry.matches("  ＨＥＩＧＨＴ  ").map(\.id), SettingsSearchEntry.matches("height").map(\.id))
         XCTAssertEqual(Set(SettingsSearchEntry.all.map(\.id)).count, SettingsSearchEntry.all.count)
+    }
+
+    func testInboxShortcutPreferencePreservesExplicitOptOut() throws {
+        let suite = "XNook.InboxShortcutDefaults.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        SettingsDefaults.register(on: defaults)
+        XCTAssertTrue(defaults.bool(forKey: "showTaskInboxShortcut"))
+        defaults.set(false, forKey: "showTaskInboxShortcut")
+        SettingsDefaults.register(on: defaults)
+        XCTAssertFalse(defaults.bool(forKey: "showTaskInboxShortcut"))
+        XCTAssertNil(defaults.object(forKey: PanelLayoutStore.storageKey))
     }
 
     func testSearchTargetsCorrespondToActualSettingsRows() throws {

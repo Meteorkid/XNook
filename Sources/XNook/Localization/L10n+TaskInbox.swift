@@ -3,6 +3,11 @@ import Foundation
 extension L10n {
     static var inboxTitle: String { localized(zh: "待办收件箱", en: "Task inbox") }
     static var inboxShortTitle: String { localized(zh: "待办", en: "Inbox") }
+    static var showTaskInboxShortcut: String { localized(zh: "在概览显示待办入口", en: "Show inbox shortcut on overview") }
+    static var showTaskInboxShortcutDescription: String {
+        localized(zh: "隐藏当前任务和最近任务组件时，在概览底部显示待办收件箱入口。",
+                  en: "Show an inbox shortcut below the overview when Current Task and Recent Tasks are hidden.")
+    }
     static var inboxPlaceholder: String { localized(zh: "记下一件待办事项", en: "Capture a task") }
     static var inboxAdd: String { localized(zh: "添加", en: "Add") }
     static var inboxStart: String { localized(zh: "开始", en: "Start") }

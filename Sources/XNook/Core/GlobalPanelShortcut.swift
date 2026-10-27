@@ -108,6 +108,19 @@ final class GlobalPanelShortcutController {
         if let configuredShortcut { _ = replace(with: configuredShortcut, persist: false) }
     }
 
+    /// 授权锁定时注销热键，保留配置以便恢复。
+    func suspend() {
+        guard isActivated, !isShutdown else { return }
+        isActivated = false
+        isRecording = false
+        if let activeID {
+            do { try backend.unregister(id: activeID) }
+            catch { pendingCleanup.insert(activeID); failure = removalFailure(error) }
+        }
+        activeID = nil
+        activeShortcut = nil
+    }
+
     @discardableResult
     func apply(_ shortcut: GlobalPanelShortcut) -> Bool { replace(with: shortcut, persist: true) }
 

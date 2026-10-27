@@ -41,6 +41,7 @@ final class CalendarManager {
     private let fetchEvents: (DateInterval, [EKCalendar]) -> [EKEvent]
     private let requestFullAccess: () async throws -> Bool
     private let didRefreshAuthorization: @MainActor () -> Void
+    private var monitoringStopped = false
 
     init(
         eventStore: EKEventStore = EKEventStore(),
@@ -89,7 +90,14 @@ final class CalendarManager {
         refresh()
     }
 
+    func stopMonitoring() {
+        monitoringStopped = true
+        for token in observations.tokens { observations.notificationCenter.removeObserver(token) }
+        observations.tokens.removeAll()
+    }
+
     func refresh() {
+        guard !monitoringStopped else { return }
         let date = now()
         if calendar.isDate(displayedDate, inSameDayAs: currentDate),
            !calendar.isDate(currentDate, inSameDayAs: date) {

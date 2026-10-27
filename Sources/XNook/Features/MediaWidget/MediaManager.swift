@@ -165,6 +165,7 @@ final class MediaManager {
     private let artworkProvider: @MainActor ([String: Any]) async -> Data?
     private let clock: () -> Date
     private let timersEnabled: Bool
+    private var monitoringStopped = false
     private let commandSender: (@MainActor (MediaRemoteCommand) -> Void)?
     private let seekProvider: @MainActor (TimeInterval, MediaSeekContext) async -> MediaSeekResult
 
@@ -247,6 +248,17 @@ final class MediaManager {
         }
     }
 
+    /// 授权到期先取消轮询与未完成请求，再销毁视图。
+    func stopMonitoring() {
+        monitoringStopped = true
+        playbackGeneration &+= 1
+        seekTask?.cancel()
+        artworkTask?.cancel()
+        paletteTask?.cancel()
+        lyricsManager.reset()
+        cleanup.cleanUp()
+    }
+
     // MARK: - 双定时器架构
 
     private func startTimers() {
@@ -267,7 +279,7 @@ final class MediaManager {
 
     /// 根据当前播放状态决定是否启动/停止 progressTimer
     private func startProgressTimerIfNeeded() {
-        guard timersEnabled else { return }
+        guard timersEnabled, !monitoringStopped else { return }
         let lyricsEnabled = defaults.bool(forKey: "showLyrics")
         let needsTimer = Self.shouldAdvanceLyricTimeline(
             isPlaying: isPlaying,
@@ -443,12 +455,13 @@ final class MediaManager {
     private static let infoFetchTimeoutNanoseconds: UInt64 = 5_000_000_000
 
     func fetchNowPlayingInfo() {
+        guard !monitoringStopped else { return }
         Task { [weak self] in await self?.refreshNowPlayingInfo() }
     }
 
     /// 与定时器、播放通知共享的可等待入口，便于复现完整取值链路。
     func refreshNowPlayingInfo() async {
-        guard let requestID = infoFetchGate.begin() else { return }
+        guard !monitoringStopped, let requestID = infoFetchGate.begin() else { return }
         let generation = playbackGeneration
         let timeout = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: Self.infoFetchTimeoutNanoseconds) }

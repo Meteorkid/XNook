@@ -3,13 +3,14 @@ import SwiftUI
 import Observation
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, display, integration, about
+    case general, display, integration, license, about
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: L10n.general
         case .display: L10n.display
         case .integration: L10n.integration
+        case .license: L10n.license
         case .about: L10n.about
         }
     }
@@ -18,6 +19,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "gearshape.fill"
         case .display: "paintbrush.fill"
         case .integration: "rectangle.connected.to.line.below"
+        case .license: "checkmark.seal.fill"
         case .about: "info.circle.fill"
         }
     }
@@ -30,6 +32,7 @@ struct SettingsSearchEntry: Identifiable, Equatable {
     let keywords: String
 
     static var all: [Self] { [
+        .init(id: "softwareLicense", pane: .license, title: L10n.license, keywords: "授权 邀请码 激活 购买 试用 续费 设备 license activation trial purchase renew device"),
         .init(id: "globalPanelShortcut", pane: .general, title: L10n.globalPanelShortcut, keywords: "全局快捷唤出 快捷键 键盘 组合 唤出 global shortcut hotkey keyboard summon reveal panel"),
         .init(id: "applicationAppearance", pane: .display, title: L10n.applicationAppearance, keywords: "应用外观 系统 深色 浅色 appearance system dark light theme"),
         .init(id: "islandBackgroundStyle", pane: .display, title: L10n.islandBackgroundStyle, keywords: "岛背景 跟随外观 黑色 浅色 玻璃 island background black light glass preset"),

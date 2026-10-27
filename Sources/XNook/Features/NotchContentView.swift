@@ -625,6 +625,14 @@ struct NotchContentView: View {
             // 仅在 GIF 选择变更时重新加载
             loadGifData()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .xnookLicenseLocked)) { _ in
+            mediaManager.stopMonitoring()
+            calendarManager.stopMonitoring()
+            deadlineMonitor?.suspend()
+            notesManager.flushPendingChanges()
+            stopHoverPolling()
+            cancelExpandedAutoHide()
+        }
         .onDisappear {
             collapseGeneration += 1
             expandPending = false

@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-26",
+  "current_head": "63a44ca02457af662d952448e5763fe8949d71b4",
+  "implementation_base": "7a1522a",
+  "head_advance": "63a44ca changes only an existing validation document; no production source changes",
+  "files": {
+    "Package.swift": "bf58e022a4f4fd0ecf5e36033f3b03d0b91e6b684dd743b0abb0c9da108d245f",
+    "Sources/MeteorLicenseCore/LicenseCredentialStore.swift": "025586a2b3595587f56fcaebefc2b8902a9cf983de866175c97a52dc1fcf6de2",
+    "Sources/MeteorLicenseCore/SoftwareLicense.swift": "d95227c8d88e5322f4a6e2a64a8e72f731940f4537b9f2caf6f5a1152431078b",
+    "Sources/MeteorLicenseCore/SoftwareLicenseAPI.swift": "6a28ae2d8ec63a8fefa58efd69814e27355cfbc498c16af8a665fc96d5fbdfc4",
+    "Sources/MeteorLicenseCore/SoftwareLicenseSession.swift": "fcaa68c91110c00f682fc742a46d60f1ec5980f27f6260e777bdae9623df680a",
+    "Sources/XNook/App/AppDelegate.swift": "cb3253c8243d7ff9e71edec689d8a788607611c94a7438a22a42e2d93247af13",
+    "Sources/XNook/Core/CalendarReminderManager.swift": "2c281d5c323dcacc66cc4babe49382217af68aec6edc98a467f2036953cf8ca2",
+    "Sources/XNook/Core/GlobalPanelShortcut.swift": "596e136c475009808b395d46ce3bce666147d22fdd0152f263ea6c0ceeb15dfb",
+    "Sources/XNook/Features/CalendarWidget/CalendarManager.swift": "bd663ece6c895b51550b6c69b166c04aac3d0eb8261a1a16621d0705a9173ea1",
+    "Sources/XNook/Features/MediaWidget/MediaManager.swift": "3ade5cbb990a2f4dbd4593bc69227ddc7b1f0607683914c765f5e148978832de",
+    "Sources/XNook/Features/NotchContentView.swift": "e982aedd0a2b4c6e3656b12c0e7a450a41e33e261ece130fd28a828918b75203",
+    "Sources/XNook/Licensing/LicenseActivationView.swift": "f5ce88cb7244025b12bf605240928ccb142722853e7e9b437d75d18e19b07ff0",
+    "Sources/XNook/Licensing/LicenseDataExport.swift": "5d68c265496662a5f09adb49dcd419b0929adc497d425ff052caad714e41ce10",
+    "Sources/XNook/Licensing/LicenseExpiryWindow.swift": "9a3d479c5fd3c27b1e68619013aae9dcab16118844667584bb90050ed04ac916",
+    "Sources/XNook/Licensing/LicenseManager.swift": "c5e9c19c1730fbb223a4d195b37bd9304c2d717e56b17fcc2a813535ede92722",
+    "Sources/XNook/Localization/L10n+License.swift": "d137731daf72ede9259c3e21a60acf38f2ced019d401c2a1bf3c7e947cb2eab2",
+    "Sources/XNook/Settings/SettingsSearch.swift": "d6a16d6a91202a513889e18e064309bc23fe83cbc44f30d3b00674229ffa1100",
+    "Sources/XNook/Settings/SettingsView.swift": "acd8c6aa5c9343eedc80a8bc8600a36a0507a4c2dbedb0d70523f9a217c5fe8c",
+    "Tests/MeteorLicenseCoreTests/SoftwareLicenseTests.swift": "d87dcbadaf0685d7258bad18b48fd29150924a097b2dc618ef0b4ca420e08442",
+    "Tests/XNookTests/GlobalPanelShortcutTests.swift": "2ceaa158990d4633fef9b9503dfad9a48b647e5702cf3b0d80b703a1b61b9b0f",
+    "Tests/XNookTests/LicenseManagerTests.swift": "43d8d8f2d396553439af7499ab509ba83c54b75c4c5d6e4b67fba79498553ed6",
+    "build-app.sh": "cda174740957302d9468b77f528a236aa8fce5552d2b7f577b917dd5c7ba0595"
+  },
+  "shared_core": [
+    {
+      "file": "LicenseCredentialStore.swift",
+      "xnook_sha256": "025586a2b3595587f56fcaebefc2b8902a9cf983de866175c97a52dc1fcf6de2",
+      "xisland_sha256": "025586a2b3595587f56fcaebefc2b8902a9cf983de866175c97a52dc1fcf6de2",
+      "identical": true
+    },
+    {
+      "file": "SoftwareLicense.swift",
+      "xnook_sha256": "d95227c8d88e5322f4a6e2a64a8e72f731940f4537b9f2caf6f5a1152431078b",
+      "xisland_sha256": "d95227c8d88e5322f4a6e2a64a8e72f731940f4537b9f2caf6f5a1152431078b",
+      "identical": true
+    },
+    {
+      "file": "SoftwareLicenseAPI.swift",
+      "xnook_sha256": "6a28ae2d8ec63a8fefa58efd69814e27355cfbc498c16af8a665fc96d5fbdfc4",
+      "xisland_sha256": "6a28ae2d8ec63a8fefa58efd69814e27355cfbc498c16af8a665fc96d5fbdfc4",
+      "identical": true
+    },
+    {
+      "file": "SoftwareLicenseSession.swift",
+      "xnook_sha256": "fcaa68c91110c00f682fc742a46d60f1ec5980f27f6260e777bdae9623df680a",
+      "xisland_sha256": "fcaa68c91110c00f682fc742a46d60f1ec5980f27f6260e777bdae9623df680a",
+      "identical": true
+    }
+  ]
+}

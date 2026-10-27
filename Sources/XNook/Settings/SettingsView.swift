@@ -229,6 +229,8 @@ struct SettingsView: View {
             displayPane
         case .integration:
             integrationPane
+        case .license:
+            LicenseActivationView().settingsSearchTarget(id: "softwareLicense", highlightedID: search.targetID)
         case .about:
             aboutPane
         }

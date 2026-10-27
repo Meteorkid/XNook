@@ -5,6 +5,22 @@ import XCTest
 
 @MainActor
 final class GlobalPanelShortcutTests: XCTestCase {
+    func testLicenseSuspensionUnregistersWithoutLosingPreferenceAndCanResume() throws {
+        let fixture = try Fixture(saved: Self.first)
+        defer { fixture.cleanup() }
+        fixture.controller.activate()
+        fixture.controller.suspend()
+        fixture.backend.press(1)
+        XCTAssertEqual(fixture.invocations, 0)
+        XCTAssertFalse(fixture.controller.isActivated)
+        XCTAssertTrue(fixture.backend.registered.isEmpty)
+        XCTAssertEqual(try fixture.persisted(), Self.first)
+        fixture.controller.activate()
+        fixture.backend.press(2)
+        XCTAssertEqual(fixture.invocations, 1)
+        XCTAssertEqual(fixture.controller.activeShortcut, Self.first)
+    }
+
     func testFreshConstructionAndActivationDoNotRegisterOrWriteDefaults() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

@@ -41,6 +41,7 @@ final class CalendarReminderManager {
     private let soundPlayer: @MainActor (String) -> Void
     private let eventStore = EKEventStore()
     private var timer: Timer?
+    private var isMonitoring = false
     private var notifiedReminderKeys: Set<String>
 
     private static let notifiedReminderKeysKey = "calendarReminderNotifiedKeys"
@@ -61,6 +62,7 @@ final class CalendarReminderManager {
     }
 
     func startMonitoring() {
+        isMonitoring = true
         guard timer == nil else {
             refreshAuthorization()
             return
@@ -75,6 +77,7 @@ final class CalendarReminderManager {
     }
 
     func stopMonitoring() {
+        isMonitoring = false
         timer?.invalidate()
         timer = nil
     }
@@ -210,6 +213,7 @@ final class CalendarReminderManager {
     }
 
     private func checkForDueReminders(now: Date = Date()) {
+        guard isMonitoring else { return }
         pruneReminderKeys(referenceDate: now)
 
         guard remindersEnabled else { return }

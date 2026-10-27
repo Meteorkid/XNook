@@ -4,7 +4,7 @@
 set -e
 
 APP_NAME="X Nook"
-BUILD_DIR=".build"
+BUILD_DIR="${XNOOK_BUILD_DIR:-.build}"
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS="${APP_BUNDLE}/Contents"
 MACOS="${CONTENTS}/MacOS"
@@ -16,7 +16,7 @@ VERSION=$(cat "$(dirname "$0")/VERSION" | tr -d '[:space:]')
 echo "Building ${APP_NAME} v${VERSION}..."
 
 # Build the executable
-swift build -c release "$@" 2>&1
+swift build --scratch-path "${BUILD_DIR}" -c release "$@" 2>&1
 
 # Create app bundle structure
 mkdir -p "${MACOS}"
@@ -32,6 +32,32 @@ sed -e "s/\$(EXECUTABLE_NAME)/${APP_NAME}/g" \
     -e "s/\$(MACOSX_DEPLOYMENT_TARGET)/14.0/g" \
     -e "s/\$(MARKETING_VERSION)/${VERSION}/g" \
     "Info.plist" > "${CONTENTS}/Info.plist"
+
+# 公钥随构建注入；私钥仅由网站签发服务持有。
+python3 - "${CONTENTS}/Info.plist" <<'PY'
+import base64
+import os
+import plistlib
+import sys
+
+public_key = os.environ.get("SOFTWARE_LICENSE_PUBLIC_KEY", "").strip()
+if public_key:
+    try:
+        raw = base64.b64decode(public_key, validate=True)
+    except ValueError as error:
+        raise SystemExit("SOFTWARE_LICENSE_PUBLIC_KEY must be raw Ed25519 public key in Base64") from error
+    if len(raw) != 32 or not any(raw):
+        raise SystemExit("SOFTWARE_LICENSE_PUBLIC_KEY must contain a non-placeholder 32-byte public key")
+elif os.environ.get("XNOOK_BUILD_DMG", "0") == "1":
+    raise SystemExit("Cannot package a paid release without SOFTWARE_LICENSE_PUBLIC_KEY")
+with open(sys.argv[1], "rb") as stream:
+    info = plistlib.load(stream)
+info["SoftwareLicenseAPIBaseURL"] = "https://www.imagentx.top"
+if public_key:
+    info["SoftwareLicensePublicKey"] = public_key
+with open(sys.argv[1], "wb") as stream:
+    plistlib.dump(info, stream)
+PY
 
 # Copy icon if exists
 if [ -f "Resources/AppIcon.icns" ]; then

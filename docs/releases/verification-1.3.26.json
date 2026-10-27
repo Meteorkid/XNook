@@ -56,5 +56,16 @@
   "merged_remote_commit": "dbfc4d15e1eace1622578ca3b2cb500026c42bfa",
   "product_build_input_count": 142,
   "full_test_log": "/Users/meteor/.codex/release-artifacts/software-licensing-20261027/xnook-1.3.26/full-tests.log",
-  "prior_1_3_25_artifact_unchanged": true
+  "prior_1_3_25_artifact_unchanged": true,
+  "post_build_documentation_merge": {
+    "remote_commit": "4061d6c2c96420d3cd86aa31e89732f3697cf438",
+    "merge_commit": "753706e20bff0c00328ebda03c3f564f84fa37f8",
+    "changed_files": [
+      "docs/releases/public-download-1.3.24.json",
+      "docs/releases/verification-1.3.24.json"
+    ],
+    "product_build_inputs_unchanged": true,
+    "verified_input_count": 142,
+    "dmg_reused_without_modification": true
+  }
 }

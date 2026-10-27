@@ -1,0 +1,62 @@
+{
+  "version": "1.3.27",
+  "date": "2026-10-27",
+  "status": "artifact_verified",
+  "source_commit": "c62fa00ac3e38a07df6c5d834a59b4378ae1ea37",
+  "fix_commit": "7994be0",
+  "base_release": "v1.3.26",
+  "source_inputs_unchanged": true,
+  "source_input_count": 266,
+  "dmg_sha256": "2b416138c598783ef5b989cc348d4f510c150f023daa269053d935380e04c72b",
+  "binary_sha256": "ced5c36656c6c97379f2d4ab146d2386a645f5450d479837b2496b34e909333b",
+  "architecture": "arm64",
+  "minimum_macos": "14.0",
+  "bundle_identifier": "com.meteorkid.xnook",
+  "public_key_sha256": "feea02bdbb70c8aad874eb326b3ba601f825a3ceaf039254aaa1091288ca424e",
+  "api_origin": "https://www.imagentx.top",
+  "license_configuration_unchanged": true,
+  "signature": "ad-hoc",
+  "hardened_runtime": true,
+  "notarized": false,
+  "strict_signature_verified": true,
+  "dmg_checksum_verified": true,
+  "readonly_mount_verified": true,
+  "mounted_app_identical": true,
+  "mounted_app_file_count": 5,
+  "entitlements": {
+    "com.apple.security.automation.apple-events": true,
+    "com.apple.security.files.bookmarks.app-scope": true
+  },
+  "tests": {
+    "xnook": {
+      "total": 1203,
+      "passed": 1108,
+      "skipped": 95,
+      "failed": 0
+    },
+    "license_core": {
+      "total": 17,
+      "passed": 16,
+      "skipped": 1,
+      "failed": 0
+    },
+    "targeted_render_and_settings": {
+      "total": 42,
+      "passed": 42,
+      "failed": 0,
+      "run": "pre_release_fix_verification"
+    },
+    "regression_log_sha256": "9433cc16ee6ee5e6709f2eb6c9451e5f71f79df54b6ce0a64bedb0bee668cd7d"
+  },
+  "native_acceptance": {
+    "tested_version": "1.3.26 local repair",
+    "tested_binary_sha256": "6665313f5d1802527dcc78cbbcdec307d27facf8e940cb6ef4ebc845ce170d07",
+    "overview_shortcut_absent": true,
+    "settings_toggle_off": true,
+    "tasks_and_layout_unchanged": true,
+    "only_intended_preference_changed": true,
+    "formal_release_installed": false
+  },
+  "pushed": false,
+  "published": false
+}

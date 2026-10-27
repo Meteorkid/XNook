@@ -9,9 +9,12 @@
     "passed": 1139,
     "skipped": 5,
     "failed": 0,
-    "sourceIdenticalExceptVersion": true,
-    "reference": "/Users/meteor/.codex/worktrees/xnook-overview-header/.build/task-attention-20261026/xn-full.log",
-    "command": "XNOOK_RENDER_UI=1 bash scripts/test-signed-bookmarks.sh"
+    "sourceIdenticalExceptVersion": false,
+    "reference": ".build/release-1.3.24/test-fixture-final.log",
+    "command": "XNOOK_RENDER_UI=1 bash scripts/test-signed-bookmarks.sh",
+    "productionSourceIdenticalExceptVersion": true,
+    "reusedPriorRegression": false,
+    "verifiedAt": "2026-10-27T12:18:29.281383+08:00"
   },
   "package": {
     "version": "1.3.24",
@@ -34,11 +37,12 @@
   },
   "sourceInputs": {
     "manifest": "source-hashes-1.3.24.json",
-    "sha256": "52bc5ef047db7ea5eabec8dd20d2f244054b202a7f1d27ea54ad117122de0396",
+    "sha256": "546c055b47278d229107a506ca1611cecfbafd2f660d83b8fb7074671770f427",
     "count": 239,
     "previousManifestSHA256": "9ce102a5f15861c52f0fad921bb34facbaef03882d866d600d6df4bec0a164a8",
     "changedInputs": [
-      "VERSION"
+      "VERSION",
+      "Tests/XNookTests/LinkedIslandPreviewCrossProcessTests.swift"
     ]
   },
   "installedCandidateValidation": {
@@ -60,5 +64,25 @@
     "Layout library/media ambience/licensing modules are outside this release"
   ],
   "pushed": false,
-  "published": false
+  "published": false,
+  "testFixtureVerification": {
+    "reason": "The peer can close a correctly rejected socket before the parent queries LOCAL_PEERPID; parent peerRejected is valid only with independent target-side authentication rejection evidence.",
+    "file": "Tests/XNookTests/LinkedIslandPreviewCrossProcessTests.swift",
+    "previousSHA256": "6824454d70b97ae43c297ea30c7bad57b0d6d228e9790396bb6fabfef757a69e",
+    "currentSHA256": "7ac50e93ff1fec1453638f58801a795dc106bc139ca003c78aec853f168571cd",
+    "productionTransportSHA256": "cbb0c69d15b89808a599cb0a4445b862aa3a51f84a6a51edf53b370567c42c10",
+    "realAuthenticationCallAndThrowPreserved": true,
+    "instrumentedHelperCopyOnly": true,
+    "helperScenarios": 5,
+    "scenarioEvidence": {
+      "authenticated": "Cross-process preview authenticated: parent=6593, child=11881, captures=1, outcome=snapshot, targetAuth=accepted, endpointValidated=true, exited=true, endpointRemoved=true",
+      "wrongTargetPID": "Cross-process preview wrongTargetPID: parent=6593, child=11884, captures=0, outcome=peerRejected, targetAuth=accepted, endpointValidated=true, exited=true, endpointRemoved=true",
+      "wrongTargetExecutable": "Cross-process preview wrongTargetExecutable: parent=6593, child=11885, captures=0, outcome=peerRejected, targetAuth=accepted, endpointValidated=true, exited=true, endpointRemoved=true",
+      "wrongSourcePID": "Cross-process preview wrongSourcePID: parent=6593, child=11886, captures=0, outcome=io(22), targetAuth=peerRejected, endpointValidated=true, exited=true, endpointRemoved=true",
+      "wrongSourceExecutable": "Cross-process preview wrongSourceExecutable: parent=6593, child=11887, captures=0, outcome=unavailable, targetAuth=peerRejected, endpointValidated=true, exited=true, endpointRemoved=true"
+    },
+    "logSHA256": "2e4f29672e9ae720882181fb22fba263befccae4cf4ae574fa1cca60f94c328f",
+    "artifactRebuilt": false,
+    "existingArtifactHashesUnchanged": true
+  }
 }

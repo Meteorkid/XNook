@@ -172,7 +172,7 @@
   "Tests/XNookTests/IslandWindowOwnershipTests.swift": "b5f90abed4353baafee1270a6fa79ceb3307aa37dc0baeda6ff367b2b0810094",
   "Tests/XNookTests/LinkedIslandPreviewCanvasTests.swift": "f8471e01266f79e0da1620fe9af35731e0f27e54bf73f706692ce10a8633719a",
   "Tests/XNookTests/LinkedIslandPreviewControllerTests.swift": "1ce7df96df768ab2c2f09d4e99848622125131ea066dbfe6f73bfb6c3ada0549",
-  "Tests/XNookTests/LinkedIslandPreviewCrossProcessTests.swift": "6824454d70b97ae43c297ea30c7bad57b0d6d228e9790396bb6fabfef757a69e",
+  "Tests/XNookTests/LinkedIslandPreviewCrossProcessTests.swift": "7ac50e93ff1fec1453638f58801a795dc106bc139ca003c78aec853f168571cd",
   "Tests/XNookTests/LinkedIslandPreviewIntegrationTests.swift": "ef8ae31261d329af942da0d423d2baca48fd32f0685690413906812f894c6155",
   "Tests/XNookTests/LinkedIslandPreviewTransportTests.swift": "7d29323d3215fae175b47422234b46f674bdc1ea23ba3f404a4a9d3a1461313c",
   "Tests/XNookTests/LyricsCacheTests.swift": "9c6691c4d66dd141acd665ce1921024f6d23454947a418c6fa682d2214f6c089",

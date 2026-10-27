@@ -46,12 +46,15 @@ final class AppSwitcher {
         var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
         var sourceGeometry: () -> IslandSwitchGeometry? = { nil }
         var startInteractiveSwitch: ((SwipeDirection) -> Bool)? = nil
+        var captureAttentionEpoch: () -> IslandAttentionEpoch.Admission? = { nil }
+        var isAttentionEpochCurrent: (IslandAttentionEpoch.Admission) -> Bool = { _ in true }
     }
 
     private let environment: Environment
     private var requestID: UUID?
     private var targetName: String?
     private var pendingMotion: IslandSwitchMotion?
+    private var pendingAttentionEpoch: IslandAttentionEpoch.Admission?
     private var acknowledgedMotion: IslandSwitchMotion?
     private var visiblePollsAwaitingMotion = 0
     private(set) var acceptedPeerMotion: IslandSwitchMotion?
@@ -107,7 +110,9 @@ final class AppSwitcher {
             cancelPreview: { AppDelegate.shared?.notchWindow?.cancelIslandSwitchPreview() },
             reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || UserDefaults.standard.bool(forKey: "reduceMotion") || UserDefaults.standard.bool(forKey: "disableAnimations") },
             sourceGeometry: { AppDelegate.shared?.notchWindow?.switchGeometry },
-            startInteractiveSwitch: { AppDelegate.shared?.notchWindow?.startLinkedIslandSwitch(direction: $0) ?? false }
+            startInteractiveSwitch: { AppDelegate.shared?.notchWindow?.startLinkedIslandSwitch(direction: $0) ?? false },
+            captureAttentionEpoch: { IslandAttentionEpoch.capture() },
+            isAttentionEpochCurrent: { IslandAttentionEpoch.isCurrent($0) }
         )
     }
 
@@ -173,13 +178,22 @@ final class AppSwitcher {
         let motion = direction.map { IslandSwitchMotion(requestID: id, direction: $0,
             reduceMotion: animationAlreadyPresented || environment.reduceMotion(), issuedUptime: environment.uptime(),
             sourceGeometry: environment.sourceGeometry()) }
-        guard let url = switchURL(for: targetName, motion: motion) else {
+        guard var url = switchURL(for: targetName, motion: motion) else {
             if animationAlreadyPresented { environment.setSwitching(false) }
             environment.cancelPreview(); return
+        }
+        let attentionEpoch = environment.captureAttentionEpoch()
+        if let attentionEpoch {
+            guard let protectedURL = IslandAttentionEpoch.adding(attentionEpoch, to: url) else {
+                if animationAlreadyPresented { environment.setSwitching(false) }
+                environment.cancelPreview(); return
+            }
+            url = protectedURL
         }
         requestID = id
         self.targetName = targetName
         pendingMotion = motion
+        pendingAttentionEpoch = attentionEpoch
         visiblePollsAwaitingMotion = 0
         lastSwitchFailed = false
         environment.setSwitching(true)
@@ -192,6 +206,7 @@ final class AppSwitcher {
 
     private func checkTarget(_ id: UUID) {
         guard requestID == id, let targetName, let bundleID = islandApps[targetName] else { return }
+        guard pendingAttentionIsCurrent else { cancelSwitch(); return }
         if environment.isVisible(bundleID) {
             if let acknowledgedMotion, acknowledgedMotion.isTimely(at: environment.uptime()) {
                 let readyMotion = acknowledgedMotion.starting(at: acknowledgedMotion.startUptime!,
@@ -216,9 +231,15 @@ final class AppSwitcher {
 
     private func failSwitch(_ id: UUID) {
         guard requestID == id else { return }
+        // 提醒已经夺回显示权时，旧超时/失败不能把来源岛再次显示出来。
+        guard pendingAttentionIsCurrent else { cancelSwitch(); return }
         cancelSwitch()
         lastSwitchFailed = true
         environment.restoreSource()
+    }
+
+    private var pendingAttentionIsCurrent: Bool {
+        pendingAttentionEpoch.map(environment.isAttentionEpochCurrent) ?? true
     }
 
     var isSwitchInProgress: Bool { requestID != nil }
@@ -233,6 +254,7 @@ final class AppSwitcher {
         requestID = nil
         targetName = nil
         pendingMotion = nil
+        pendingAttentionEpoch = nil
         acknowledgedMotion = nil
         visiblePollsAwaitingMotion = 0
         cancelTimeout?(); cancelTimeout = nil

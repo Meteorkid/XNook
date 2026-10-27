@@ -188,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let motion: IslandSwitchMotion?
         do { motion = try IslandSwitchMotion.decode(url: url) }
         catch { return }
+        guard let attentionAdmission = IslandAttentionEpoch.admission(for: url, motion: motion) else { return }
         if let motion {
             guard motion.isTimely(at: ProcessInfo.processInfo.systemUptime),
                   motion.issuedUptime > lastInboundMotionUptime else { return }
@@ -203,6 +204,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clearSwitchingAppsWorkItem?.cancel()
         window.beginInboundHandoff(motion: motion) { [weak self, weak window] generation in
             guard let self, let window else { return }
+            guard IslandAttentionEpoch.isCurrent(attentionAdmission) else {
+                window.hideWindowForIslandSwitch(animated: false)
+                return
+            }
             // 两进程使用同一系统 uptime 起点；内容准备完成后再发送已显示回执。
             let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
                 || UserDefaults.standard.bool(forKey: "reduceMotion") || UserDefaults.standard.bool(forKey: "disableAnimations")

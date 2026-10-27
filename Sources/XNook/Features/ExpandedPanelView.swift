@@ -70,6 +70,7 @@ struct ExpandedPanelView: View {
 
     @AppStorage("panelAutoSize") private var panelAutoSize = SettingsDefaults.bool(for: "panelAutoSize")
     @AppStorage("panelHeightMode") private var panelHeightMode = SettingsDefaults.string(for: "panelHeightMode")
+    @AppStorage("showTaskInboxShortcut") private var showTaskInboxShortcut = SettingsDefaults.bool(for: "showTaskInboxShortcut", fallback: true)
     @AppStorage("reduceMotion") private var reduceMotion = SettingsDefaults.bool(for: "reduceMotion")
     @AppStorage("islandBackgroundStyle") private var backgroundStyle = SettingsDefaults.string(for: "islandBackgroundStyle")
 
@@ -137,13 +138,14 @@ struct ExpandedPanelView: View {
                             isEditing: layoutEditor.isEditing, summary: moduleSummary, moduleFill: moduleFill,
                             fitsContent: usesDefaultContentFit
                         ) { item, size in moduleView(item.id, size: size) }
-                        if let pendingTasks, !layoutEditor.isEditing,
+                        if showTaskInboxShortcut, let pendingTasks, !layoutEditor.isEditing,
                            !visibleModuleIDs.contains(.currentTask), !visibleModuleIDs.contains(.recentTasks) {
                             Button { showsFallbackInbox = true } label: {
                                 Label("\(L10n.inboxShortTitle) \(pendingTasks.visibleTasks.count)", systemImage: "tray")
                             }
                             .accessibilityLabel(L10n.inboxTitle)
                             .accessibilityIdentifier("panelTaskInboxFallback")
+                            .expandedPanelDebugFrame(id: "panelTaskInboxFallback")
                             .popover(isPresented: $showsFallbackInbox) {
                                 TaskInboxView(coordinator: pendingTasks, onClose: { showsFallbackInbox = false })
                             }
@@ -202,6 +204,9 @@ struct ExpandedPanelView: View {
         }
         .onChange(of: confirmsLayoutRecovery) { _, _ in reportInteractions() }
         .onChange(of: showsFallbackInbox) { _, _ in reportInteractions() }
+        .onChange(of: showTaskInboxShortcut) { _, enabled in
+            if !enabled { showsFallbackInbox = false }
+        }
         .onChange(of: showsLayoutLibrary) { _, _ in reportInteractions() }
         .onChange(of: dashboardConfiguration.signature) { _, _ in
             reportInteractions()

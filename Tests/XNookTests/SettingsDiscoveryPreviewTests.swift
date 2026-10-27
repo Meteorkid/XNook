@@ -71,7 +71,8 @@ final class SettingsDiscoveryPreviewTests: XCTestCase {
 
                 let ids = ["panelBaseHeight", "lyricsOffset", "expandedInactivity", "permissionCalendar",
                     "islandBackgroundStyle", "islandGlassDepth", "panelLayoutEditor", "panelAutoSize",
-                    "activityNotificationsEnabled", "calendarReminderActivityEnabled", "claudeCompletionEnabled", "globalPanelShortcut"]
+                    "activityNotificationsEnabled", "calendarReminderActivityEnabled", "claudeCompletionEnabled", "globalPanelShortcut",
+                    "showTaskInboxShortcut"]
                 for id in ids {
                     // 在真实渲染树中切换页和目标，不能仅以索引中存在这个 ID 判定定位成功。
                     search.query = id

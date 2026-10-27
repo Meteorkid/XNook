@@ -69,6 +69,7 @@ struct SettingsSearchEntry: Identifiable, Equatable {
         .init(id: "tickerSpeed", pane: .display, title: L10n.tickerSpeed, keywords: "滚动速度 ticker scroll speed"),
         .init(id: "reduceMotion", pane: .display, title: L10n.reduceMotion, keywords: "减少动态 减弱动画 无障碍 reduce motion accessibility animation"),
         .init(id: "showNookFlowHistory", pane: .display, title: L10n.showNookFlowHistory, keywords: "任务历史 最近任务 nookflow recent task history"),
+        .init(id: "showTaskInboxShortcut", pane: .display, title: L10n.showTaskInboxShortcut, keywords: "待办 待办入口 待办0 收件箱 概览待办 隐藏 开关 task inbox shortcut overview hide show"),
         .init(id: "nookFlowHistoryDisplayLimit", pane: .display, title: L10n.nookFlowHistoryDisplayLimit, keywords: "任务历史 数量 nookflow history limit count"),
         .init(id: "autoCheckForUpdates", pane: .about, title: L10n.autoCheckForUpdates, keywords: "自动检查更新 automatic check update"),
         .init(id: "checkForUpdates", pane: .about, title: L10n.checkForUpdates, keywords: "检查更新 check update"),

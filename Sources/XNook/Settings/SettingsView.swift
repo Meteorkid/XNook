@@ -557,6 +557,11 @@ struct SettingsView: View {
 
             section(L10n.sectionNookFlow) {
                 card {
+                    settingRow(L10n.showTaskInboxShortcut, id: "showTaskInboxShortcut",
+                              description: L10n.showTaskInboxShortcutDescription) {
+                        AppStorageToggle(key: "showTaskInboxShortcut")
+                    }
+                    dividerLine
                     settingRow(L10n.showNookFlowHistory, id: "showNookFlowHistory",
                               description: L10n.showNookFlowHistoryDesc) {
                         Toggle("", isOn: moduleVisibility(.recentTasks)).labelsHidden().disabled(!panelLayoutStore.canEdit)

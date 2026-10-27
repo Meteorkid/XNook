@@ -1,8 +1,8 @@
 # 注意：版本号应与 VERSION 文件保持一致
 # 更新步骤：1. 修改 VERSION 文件 2. 构建 DMG 3. 更新此文件的 version 和 sha256
 cask "x-nook" do
-  version "1.3.25"
-  sha256 "e4585964a3e3007d5836db3b211bda23dd45bdac3b9f0dcbebd8b195ca0fcffa"
+  version "1.3.26"
+  sha256 "5be75eeca452e20579fdf2ebbd0de3228c0805b262e8c8e25cf1c40467cd7dea"
 
   url "https://github.com/Meteorkid/XNook/releases/download/v#{version}/XNook-#{version}.dmg",
       verified: "github.com/Meteorkid/XNook/"

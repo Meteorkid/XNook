@@ -30,10 +30,10 @@ struct LicenseActivationView: View {
             actionsSection
             Text(L10n.licenseHowToGetBody).font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button("联网验证 / 开始试用") { Task { await license.connect() } }
+                Button(L10n.localized(zh: "联网验证 / 开始试用", en: "Verify online / Start trial")) { Task { await license.connect() } }
                     .disabled(license.isWorking || isWorking)
-                Button("购买授权") { NSWorkspace.shared.open(LicenseManager.purchaseURL) }
-                Button("导出本地数据") { LicenseDataExport.run() }
+                Button(L10n.licensePurchase) { NSWorkspace.shared.open(LicenseManager.purchaseURL) }
+                Button(L10n.localized(zh: "导出本地数据", en: "Export local data")) { LicenseDataExport.run() }
             }
             .font(.caption)
         }
@@ -219,7 +219,7 @@ struct LicenseActivationView: View {
                             message = reason
                             isError = true
                         } else {
-                            message = "本机已解绑，可在其他设备使用邀请码。"
+                            message = L10n.licenseDeactivated
                             isError = false
                         }
                     }
@@ -247,7 +247,7 @@ struct LicenseActivationView: View {
         switch outcome {
         case .success:
             isError = false
-            message = "激活成功，感谢支持。"
+            message = L10n.localized(zh: "激活成功，感谢支持。", en: "Activated. Thank you for your support.")
             input = ""
             // 通知外部（如到期锁屏窗口）可以关闭
             NotificationCenter.default.post(name: .xnookLicenseActivated, object: nil)

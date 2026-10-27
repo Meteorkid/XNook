@@ -9,23 +9,26 @@ extension L10n {
 
     static var license: String { localized(zh: "授权", en: "License") }
     static var licenseStatus: String { localized(zh: "当前状态", en: "Status") }
-    static var licenseEnterCode: String { localized(zh: "邀请码", en: "Activation code") }
+    static var licenseEnterCode: String { localized(zh: "激活码", en: "Activation code") }
     static var licenseActivate: String { localized(zh: "激活", en: "Activate") }
     static var licenseActivating: String { localized(zh: "正在激活…", en: "Activating…") }
     static var licensePasteFromClipboard: String { localized(zh: "从剪贴板粘贴", en: "Paste from Clipboard") }
     static var licenseDeactivate: String { localized(zh: "解除激活", en: "Deactivate") }
-    static var licenseDeactivated: String { localized(zh: "已解除激活。", en: "Deactivated.") }
+    static var licenseDeactivated: String {
+        localized(zh: "本机已解绑，可在其他设备使用激活码。",
+                  en: "This device is unlinked. Use the activation code on another device.")
+    }
 
     static var licensePasteHint: String {
         localized(
-            zh: "邀请码较长，建议直接复制粘贴，无需手动输入。也可以点击邮件中的激活链接自动填入。",
-            en: "The code is long — copy and paste it rather than typing. You can also click the activation link in your email to fill it automatically."
+            zh: "从官网账户中复制对应软件的激活码，粘贴到这里后激活。",
+            en: "Copy the matching activation code from your website account, then paste it here."
         )
     }
 
     static var licenseTrialHint: String {
         localized(
-            zh: "试用期内可使用全部功能。试用结束后需输入邀请码才能继续使用。",
+            zh: "试用期内可使用全部功能。试用结束后需输入激活码才能继续使用。",
             en: "All features are available during the trial. After it ends, an activation code is required to continue."
         )
     }
@@ -38,13 +41,13 @@ extension L10n {
     }
 
     static var licenseSectionHowToGet: String {
-        localized(zh: "如何获取邀请码", en: "How to get a code")
+        localized(zh: "如何获取激活码", en: "How to get an activation code")
     }
 
     static var licenseHowToGetBody: String {
         localized(
-            zh: "邀请码可在官方网站购买后获取，也可由管理员发放。首次试用和激活需要联网；每份付费授权最多绑定 3 台设备，离线有效期最长 7 天。旧版 XNK1 邀请码请联系管理员迁移。",
-            en: "Purchase a code from the official website or contact the administrator. Starting a trial and activating require a connection. Each paid license supports up to three devices and seven days offline. Contact the administrator to migrate an old XNK1 code."
+            zh: "购买或由管理员赠送后，在官网账户中查看激活码。首次试用和激活需要联网；每份付费授权最多绑定 3 台设备，离线有效期最长 7 天。旧版 XNK1 离线激活码请联系管理员迁移。",
+            en: "Find purchased or administrator-granted activation codes in your website account. Starting a trial and activating require a connection. Each paid license supports up to three devices and seven days offline. Contact the administrator to migrate an old XNK1 offline activation code."
         )
     }
 
@@ -56,8 +59,8 @@ extension L10n {
 
     static var licenseExpiredWindowSubtitle: String {
         localized(
-            zh: "联网开始 14 天试用，或输入邀请码激活月度、年度或永久使用权。",
-            en: "Connect to start a 14-day trial, or activate a monthly, annual, or lifetime license."
+            zh: "联网开始 14 天试用，或输入激活码解锁一个月、一年或永久使用权。",
+            en: "Connect to start a 14-day trial, or enter an activation code for 1 month, 1 year, or Lifetime access."
         )
     }
 

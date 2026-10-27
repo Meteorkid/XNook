@@ -44,9 +44,16 @@ final class LicenseManagerTests: XCTestCase {
         XCTAssertNil(manager.remainingTrialDays)
     }
 
-    func testLicenseStopPreventsFurtherMediaPolling() async {
+    func testLicenseStopPreventsFurtherMediaPolling() async throws {
+        let suite = "xnook.tests.license.media.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
         var reads = 0
-        let media = MediaManager(startMonitoring: false, infoProvider: { reads += 1; return [:] })
+        let lyrics = LyricsManager(defaults: defaults,
+            loadRequest: { _ in throw URLError(.notConnectedToInternet) },
+            readCache: { _, _, _ in nil }, writeCache: { _, _, _, _, _, _ in })
+        let media = MediaManager(startMonitoring: false, defaults: defaults, lyricsManager: lyrics,
+            infoProvider: { reads += 1; return [:] }, artworkProvider: { _ in nil })
         await media.refreshNowPlayingInfo()
         XCTAssertEqual(reads, 1)
         media.stopMonitoring()

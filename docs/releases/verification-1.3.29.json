@@ -1,7 +1,7 @@
 {
   "version": "1.3.29",
   "date": "2026-10-30",
-  "status": "artifact_verified",
+  "status": "published_native_acceptance_in_progress",
   "source_commit": "66d4de2e49de26857ecb2ffb079641cb7d27089c",
   "fix_commit": "bb62606",
   "base_release": "v1.3.28",
@@ -50,10 +50,22 @@
     "regression_log_sha256": "0f490ad7b5a13ebee3d2d76be1c262a288d222a9f1b3ab026c8c03485cb851d6"
   },
   "native_acceptance": {
-    "status": "awaiting_user_keychain_confirmation",
-    "physical_trackpad_verified": false
+    "status": "permissions_and_date_navigation_verified_waiting_physical_scroll",
+    "physical_trackpad_verified": false,
+    "keychain_wait_resolved": true,
+    "automation_music": "allowed",
+    "automation_spotify": "notInstalled",
+    "calendar_full_access": true,
+    "calendar_overview_access_prompt_absent": true,
+    "login_items": "allowed",
+    "far_future_date_navigation": true
   },
   "installed": true,
-  "pushed": false,
-  "published": false
+  "pushed": true,
+  "published": true,
+  "published_at": "2026-10-30T10:42:18Z",
+  "tag_commit": "0f856f8",
+  "anonymous_download_verified": true,
+  "draft_download_identical": true,
+  "public_download_verification": "docs/releases/public-download-1.3.29.json"
 }

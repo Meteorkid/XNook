@@ -1,6 +1,7 @@
 import SwiftUI
 import ServiceManagement
 import AppKit
+import EventKit
 
 // MARK: - 设置视图
 
@@ -124,6 +125,9 @@ struct SettingsView: View {
         }
         .onChange(of: launchAtLogin) { _, _ in permissions.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissions.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged).receive(on: RunLoop.main)) { _ in
             permissions.refresh()
         }
         .background(Button(L10n.settingsSearch) { searchFocused = true }
@@ -259,7 +263,7 @@ struct SettingsView: View {
                 card {
                     settingRow(L10n.launchAtLogin, id: "launchAtLogin",
                               description: L10n.launchAtLoginDesc) {
-                        LaunchAtLoginToggle()
+                        LaunchAtLoginToggle(permissions: permissions)
                     }
                     dividerLine
                     settingRow(L10n.showOnAllSpaces, id: "showOnAllSpaces",

@@ -39,8 +39,16 @@ final class GridWidgetNativePreviewTests: XCTestCase {
                                 }
                                 XCTAssertGreaterThanOrEqual(controls.width, width < 135 ? 37 : 111)
                             case .calendar:
-                                XCTAssertEqual(record.frames.keys.filter { $0.hasPrefix("gridWidgetCalendarDay-") }.count,
-                                               GridWidgetContentLayout.calendarDayCount(width: width - 24))
+                                let dates = try XCTUnwrap(record.frames["expandedPanelCalendarDates"])
+                                XCTAssertEqual(dates.height, 40, accuracy: 0.5)
+                                let scroll = try XCTUnwrap(descendants(host).compactMap { $0 as? NSScrollView }
+                                    .first { $0.documentView is NSStackView })
+                                XCTAssertEqual(scroll.frame.width, width - 24 - 44, accuracy: 0.5)
+                                for identifier in ["calendarPreviousDates", "calendarNextDates"] {
+                                    let arrow = try XCTUnwrap(record.frames[identifier])
+                                    XCTAssertEqual(arrow.width, 18, accuracy: 0.5)
+                                    XCTAssertEqual(arrow.height, 40, accuracy: 0.5)
+                                }
                                 XCTAssertNotNil(record.frames["gridWidgetCalendarShowAll"])
                             case .notes:
                                 XCTAssertEqual(record.frames.keys.filter { $0.hasPrefix("gridWidgetNotesRow-") }.count, 2)

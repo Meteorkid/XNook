@@ -36,21 +36,14 @@ struct CalendarWidgetView: View {
             .font(.system(size: 13))
             .frame(minHeight: 24)
 
-            if !usesGridOverview {
-                CalendarScroller(
-                    selectedDate: selectedDate,
-                    centeredDate: $centeredDate,
-                    recenterTrigger: $recenterTrigger,
-                    today: today,
-                    dateRange: dateRange,
-                    reduceMotion: shouldReduceMotion
-                )
-                .frame(height: 48)
-                .expandedPanelDebugFrame(id: "expandedPanelCalendarDates")
-            } else {
-                overviewDates
-                    .expandedPanelDebugFrame(id: "expandedPanelCalendarDates")
+            Group {
+                if usesGridOverview {
+                    overviewDates
+                } else {
+                    dateScroller.frame(height: 48)
+                }
             }
+            .expandedPanelDebugFrame(id: "expandedPanelCalendarDates")
 
             if !calendarManager.hasAccess {
                 accessPrompt
@@ -75,48 +68,44 @@ struct CalendarWidgetView: View {
             calendarManager.ensureAccess()
             centeredDate = calendarManager.displayedDate
         }
-        .onChange(of: recenterTrigger) { _, _ in
-            if usesGridOverview { calendarManager.loadEvents(for: today) }
-        }
+    }
+
+    private var dateScroller: some View {
+        CalendarScroller(
+            selectedDate: selectedDate,
+            centeredDate: $centeredDate,
+            recenterTrigger: $recenterTrigger,
+            today: today,
+            dateRange: dateRange,
+            reduceMotion: shouldReduceMotion,
+            isCompact: usesGridOverview
+        )
+        .help(L10n.calendarScrollDates)
     }
 
     private var overviewDates: some View {
         GeometryReader { geometry in
-            let dates = GridWidgetContentLayout.calendarDates(selected: calendarManager.displayedDate, width: geometry.size.width)
             HStack(spacing: 4) {
-                dateNavigationButton(offset: -dates.count, label: L10n.gridCalendarPreviousDays, icon: "chevron.left")
-                ForEach(dates, id: \.self) { date in
-                    let isSelected = Calendar.current.isDate(date, inSameDayAs: calendarManager.displayedDate)
-                    Button { calendarManager.loadEvents(for: date) } label: {
-                        VStack(spacing: 3) {
-                            Text(date, format: .dateTime.weekday(.narrow))
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text(String(Calendar.current.component(.day, from: date)))
-                                .font(.system(size: 13, weight: isSelected ? .bold : .medium, design: .rounded))
-                                .foregroundStyle(isSelected || Calendar.current.isDate(date, inSameDayAs: today) ? Color.accentColor : .primary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .background(isSelected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .expandedPanelDebugFrame(id: "gridWidgetCalendarDay-\(Calendar.current.startOfDay(for: date).timeIntervalSince1970)")
-                }
-                dateNavigationButton(offset: dates.count, label: L10n.gridCalendarNextDays, icon: "chevron.right")
+                dateNavigationButton(forward: false, width: geometry.size.width,
+                                     label: L10n.gridCalendarPreviousDays, icon: "chevron.left")
+                dateScroller
+                dateNavigationButton(forward: true, width: geometry.size.width,
+                                     label: L10n.gridCalendarNextDays, icon: "chevron.right")
             }
         }
         .frame(height: 40)
     }
 
-    private func dateNavigationButton(offset: Int, label: String, icon: String) -> some View {
+    func navigateOverviewDates(forward: Bool, width: CGFloat) {
+        let offset = GridWidgetContentLayout.calendarDayCount(width: width) * (forward ? 1 : -1)
+        if let date = Calendar.current.date(byAdding: .day, value: offset, to: calendarManager.displayedDate) {
+            calendarManager.loadEvents(for: date)
+        }
+    }
+
+    private func dateNavigationButton(forward: Bool, width: CGFloat, label: String, icon: String) -> some View {
         Button {
-            if let date = Calendar.current.date(byAdding: .day, value: offset, to: calendarManager.displayedDate) {
-                calendarManager.loadEvents(for: date)
-            }
+            navigateOverviewDates(forward: forward, width: width)
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 9, weight: .semibold))
@@ -127,6 +116,8 @@ struct CalendarWidgetView: View {
         .buttonStyle(.plain)
         .help(label)
         .accessibilityLabel(label)
+        .accessibilityIdentifier(forward ? "calendarNextDates" : "calendarPreviousDates")
+        .expandedPanelDebugFrame(id: forward ? "calendarNextDates" : "calendarPreviousDates")
     }
 
     private var accessPrompt: some View {
@@ -285,6 +276,7 @@ private struct CalendarScroller: NSViewRepresentable {
     let today: Date
     let dateRange: [Date]
     let reduceMotion: Bool
+    let isCompact: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -321,11 +313,13 @@ private struct CalendarScroller: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         let datesChanged = context.coordinator.parent.dateRange != dateRange
         let motionChanged = context.coordinator.parent.reduceMotion != reduceMotion
+        let compactChanged = context.coordinator.parent.isCompact != isCompact
+        let selectionChanged = !Calendar.current.isDate(context.coordinator.lastSelectedDate, inSameDayAs: selectedDate)
         context.coordinator.parent = self
-        if datesChanged { context.coordinator.rebuildDates(nsView) }
+        if datesChanged || compactChanged { context.coordinator.rebuildDates(nsView) }
         let shouldRecenter = recenterTrigger != context.coordinator.lastTrigger
         context.coordinator.lastTrigger = recenterTrigger
-        if shouldRecenter || datesChanged || motionChanged {
+        if shouldRecenter || datesChanged || motionChanged || compactChanged || selectionChanged {
             DispatchQueue.main.async { [weak coordinator = context.coordinator, weak nsView] in
                 guard let coordinator, let nsView else { return }
                 let date = shouldRecenter ? coordinator.parent.today : coordinator.parent.selectedDate
@@ -337,6 +331,7 @@ private struct CalendarScroller: NSViewRepresentable {
     class Coordinator: NSObject {
         var parent: CalendarScroller
         var lastTrigger: Int
+        var lastSelectedDate: Date
         private var lastIndex = -1
         private var programmaticScrollID = 0
         private var isProgrammaticScroll = true
@@ -346,6 +341,7 @@ private struct CalendarScroller: NSViewRepresentable {
         init(_ parent: CalendarScroller) {
             self.parent = parent
             lastTrigger = parent.recenterTrigger
+            lastSelectedDate = parent.selectedDate
         }
 
         func invalidate() {
@@ -359,14 +355,16 @@ private struct CalendarScroller: NSViewRepresentable {
             let stack = DateStackView()
             stack.orientation = .horizontal
             stack.spacing = 6
-            stack.edgeInsets = NSEdgeInsets(top: 4, left: 12, bottom: 4, right: 12)
+            let verticalInset: CGFloat = parent.isCompact ? 0 : 4
+            stack.edgeInsets = NSEdgeInsets(top: verticalInset, left: 12, bottom: verticalInset, right: 12)
             for (index, date) in parent.dateRange.enumerated() {
                 let cell = DateCell(date: date, isToday: Calendar.current.isDate(date, inSameDayAs: parent.today), index: index)
                 cell.target = self
                 cell.action = #selector(cellClicked(_:))
                 stack.addArrangedSubview(cell)
             }
-            stack.frame = NSRect(x: 0, y: 0, width: CGFloat(parent.dateRange.count) * 36 + 18, height: 48)
+            stack.frame = NSRect(x: 0, y: 0, width: CGFloat(parent.dateRange.count) * 36 + 18,
+                                 height: 40 + verticalInset * 2)
             scrollView.documentView = stack
             stack.layoutSubtreeIfNeeded()
         }
@@ -438,6 +436,8 @@ private struct CalendarScroller: NSViewRepresentable {
         private func select(_ index: Int, in scrollView: NSScrollView, animated: Bool) {
             guard parent.dateRange.indices.contains(index), let stack = scrollView.documentView as? DateStackView else { return }
             let date = parent.dateRange[index]
+            // 绑定会同步反映外部改动；单独记录原生选日，避免把用户横滚误判成外部定位。
+            lastSelectedDate = date
             if !Calendar.current.isDate(parent.selectedDate, inSameDayAs: date) { parent.selectedDate = date }
             if parent.centeredDate != date { parent.centeredDate = date }
             for case let cell as DateCell in stack.arrangedSubviews {

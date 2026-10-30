@@ -40,6 +40,6 @@
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>X Nook needs access to your calendar to display upcoming events.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>X Nook needs to control other applications for app switching.</string>
+    <string>X Nook uses automation to read playback information and control playback in Apple Music and Spotify.</string>
 </dict>
 </plist>

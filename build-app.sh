@@ -78,6 +78,8 @@ else
     codesign --force --deep --sign - --entitlements "${ENTITLEMENTS}" "${APP_BUNDLE}"
 fi
 
+python3 "$(dirname "$0")/scripts/verify-app-permissions.py" "${APP_BUNDLE}"
+
 echo "App bundle created at: ${APP_BUNDLE}"
 echo "To run: open '${APP_BUNDLE}'"
 echo "If /Applications/X Nook.app is already running, use: open -n '${APP_BUNDLE}'"

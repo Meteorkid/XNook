@@ -234,36 +234,22 @@ struct StatusPill: View {
 // MARK: - 开机自启动开关
 
 struct LaunchAtLoginToggle: View {
-    @AppStorage private var launchAtLogin: Bool
-
-    init() {
-        _launchAtLogin = AppStorage(
-            wrappedValue: SettingsDefaults.bool(for: "launchAtLogin"),
-            "launchAtLogin"
-        )
-    }
+    let permissions: SettingsPermissions
 
     var body: some View {
-        Toggle("", isOn: Binding(
-            get: { launchAtLogin },
-            set: { newValue in
-                do {
-                    if newValue {
-                        try SMAppService.mainApp.register()
-                    } else {
-                        try SMAppService.mainApp.unregister()
-                    }
-                    launchAtLogin = newValue
-                } catch {
-                    // 注册失败时回退开关状态
-                    launchAtLogin = !newValue
-                    print("[Settings] Launch at login error: \(error)")
-                }
+        VStack(alignment: .trailing, spacing: 4) {
+            Toggle("", isOn: Binding(
+                get: { permissions.launchAtLoginEnabled },
+                set: { permissions.setLaunchAtLogin($0) }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.small)
+            if let error = permissions.loginItemsError {
+                Text(error).font(.system(size: 11)).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-        ))
-        .toggleStyle(.switch)
-        .labelsHidden()
-        .controlSize(.small)
+        }
     }
 }
 

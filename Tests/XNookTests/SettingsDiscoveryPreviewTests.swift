@@ -34,8 +34,10 @@ final class SettingsDiscoveryPreviewTests: XCTestCase {
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
             for scheme in [ColorScheme.dark, .light] {
                 let search = SettingsSearchState()
+                var calendarStatus = EKAuthorizationStatus.writeOnly
                 var loginStatus = SMAppService.Status.requiresApproval
-                let permissions = SettingsPermissions(readCalendar: { .writeOnly }, readLoginItems: { loginStatus })
+                let permissions = SettingsPermissions(readCalendar: { calendarStatus }, readLoginItems: { loginStatus },
+                    readAutomation: { _ in .notRunning })
                 let theme = ThemeManager(defaults: defaults)
                 let updates = UpdateManager(fetchReleaseData: { XCTFail("设置测试不得联网检查更新"); throw URLError(.notConnectedToInternet) })
                 let geometry = SettingsGeometryRecord()
@@ -56,6 +58,14 @@ final class SettingsDiscoveryPreviewTests: XCTestCase {
                 let suffix = "\(language)-\(scheme == .dark ? "dark" : "light")"
                 settle(host)
                 XCTAssertEqual(permissions.loginItems, .requiresApproval)
+                calendarStatus = .fullAccess
+                NotificationCenter.default.post(name: .EKEventStoreChanged, object: nil)
+                settle(host)
+                XCTAssertEqual(permissions.calendar, .allowed, "应用内日历授权后，无需切换前台即可刷新设置页")
+                calendarStatus = .writeOnly
+                NotificationCenter.default.post(name: .EKEventStoreChanged, object: nil)
+                settle(host)
+                XCTAssertEqual(permissions.calendar, .writeOnly)
                 loginStatus = .enabled
                 defaults.set(true, forKey: "launchAtLogin")
                 settle(host)

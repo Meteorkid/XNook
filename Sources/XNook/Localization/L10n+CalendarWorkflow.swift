@@ -13,6 +13,7 @@ extension L10n {
     static var calendarOpenApp: String { localized(zh: "打开系统日历", en: "Open Calendar") }
     static var calendarOpenFailed: String { localized(zh: "无法打开系统日历", en: "Could not open Calendar") }
     static var calendarAllDay: String { localized(zh: "全天", en: "All day") }
+    static var calendarScrollDates: String { localized(zh: "双指左右滑动切换日期，也可点击日期选择", en: "Swipe left or right with two fingers to change dates, or click a date") }
     static var calendarInProgress: String { localized(zh: "进行中", en: "In progress") }
     static var calendarEnded: String { localized(zh: "已结束", en: "Ended") }
     static var calendarStartTask: String { localized(zh: "开始此日程任务", en: "Start task for this event") }

@@ -85,7 +85,8 @@ final class SettingsDiscoveryTests: XCTestCase {
         var reads = 0
         var calendar = EKAuthorizationStatus.notDetermined
         var login = SMAppService.Status.notRegistered
-        let status = SettingsPermissions(readCalendar: { reads += 1; return calendar }, readLoginItems: { reads += 1; return login })
+        let status = SettingsPermissions(readCalendar: { reads += 1; return calendar }, readLoginItems: { reads += 1; return login },
+            readAutomation: { _ in .unknown })
         XCTAssertEqual(reads, 0)
         XCTAssertEqual(status.calendar, .unknown)
         XCTAssertEqual(status.loginItems, .unknown)
@@ -99,13 +100,14 @@ final class SettingsDiscoveryTests: XCTestCase {
         XCTAssertEqual(reads, 4)
         XCTAssertEqual(status.calendar, .allowed)
         XCTAssertEqual(status.loginItems, .requiresApproval)
-        XCTAssertEqual(status.automation, .unknown)
+        XCTAssertEqual(status.automation[.music], .unknown)
+        XCTAssertEqual(status.automation[.spotify], .unknown)
     }
 
     func testCalendarWriteOnlyDeniedRestrictedAndUnknownAreDistinct() {
         for (input, expected) in [(EKAuthorizationStatus.writeOnly, SettingsPermissionState.writeOnly),
             (.denied, .denied), (.restricted, .restricted), (.fullAccess, .allowed)] {
-            let status = SettingsPermissions(readCalendar: { input }, readLoginItems: { .notRegistered })
+            let status = SettingsPermissions(readCalendar: { input }, readLoginItems: { .notRegistered }, readAutomation: { _ in .unknown })
             status.refresh()
             XCTAssertEqual(status.calendar, expected)
         }
@@ -114,7 +116,7 @@ final class SettingsDiscoveryTests: XCTestCase {
     func testLoginStatesDoNotTreatRegistrationAsApproval() {
         for (input, expected) in [(SMAppService.Status.enabled, SettingsPermissionState.allowed),
             (.requiresApproval, .requiresApproval), (.notFound, .unavailable), (.notRegistered, .disabled)] {
-            let status = SettingsPermissions(readCalendar: { .notDetermined }, readLoginItems: { input })
+            let status = SettingsPermissions(readCalendar: { .notDetermined }, readLoginItems: { input }, readAutomation: { _ in .unknown })
             status.refresh()
             XCTAssertEqual(status.loginItems, expected)
         }

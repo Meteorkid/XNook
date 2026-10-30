@@ -1,0 +1,59 @@
+{
+  "version": "1.3.29",
+  "date": "2026-10-30",
+  "status": "artifact_verified",
+  "source_commit": "66d4de2e49de26857ecb2ffb079641cb7d27089c",
+  "fix_commit": "bb62606",
+  "base_release": "v1.3.28",
+  "source_inputs_unchanged": true,
+  "runtime_source_unchanged_since_tests": true,
+  "source_input_count": 272,
+  "dmg_sha256": "46278196a1ec6b017d0e0520567e405d4bf2df36b163b262858595f809147793",
+  "binary_sha256": "e1eaee76063626037e8cf8491c784cccd822a419fdf6a814ffc2e0b77520610c",
+  "architecture": "arm64",
+  "minimum_macos": "14.0",
+  "bundle_identifier": "com.meteorkid.xnook",
+  "public_key_sha256": "feea02bdbb70c8aad874eb326b3ba601f825a3ceaf039254aaa1091288ca424e",
+  "api_origin": "https://www.imagentx.top",
+  "license_configuration_unchanged": true,
+  "signature": "ad-hoc",
+  "hardened_runtime": true,
+  "notarized": false,
+  "strict_signature_verified": true,
+  "dmg_checksum_verified": true,
+  "readonly_mount_verified": true,
+  "mounted_app_identical": true,
+  "mounted_app_file_count": 5,
+  "entitlements": {
+    "com.apple.security.automation.apple-events": true,
+    "com.apple.security.files.bookmarks.app-scope": true,
+    "com.apple.security.personal-information.calendars": true
+  },
+  "tests": {
+    "xnook": {
+      "total": 1228,
+      "passed": 1130,
+      "skipped": 98,
+      "failed": 0
+    },
+    "license_core": {
+      "total": 31,
+      "passed": 30,
+      "skipped": 1,
+      "failed": 0
+    },
+    "targeted_calendar_and_permissions": {
+      "total": 53,
+      "passed": 53,
+      "failed": 0
+    },
+    "regression_log_sha256": "0f490ad7b5a13ebee3d2d76be1c262a288d222a9f1b3ab026c8c03485cb851d6"
+  },
+  "native_acceptance": {
+    "status": "awaiting_user_keychain_confirmation",
+    "physical_trackpad_verified": false
+  },
+  "installed": true,
+  "pushed": false,
+  "published": false
+}

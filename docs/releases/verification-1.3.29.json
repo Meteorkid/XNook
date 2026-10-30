@@ -1,7 +1,7 @@
 {
   "version": "1.3.29",
   "date": "2026-10-30",
-  "status": "published_native_acceptance_in_progress",
+  "status": "published_calendar_scroll_boundary_followup",
   "source_commit": "66d4de2e49de26857ecb2ffb079641cb7d27089c",
   "fix_commit": "bb62606",
   "base_release": "v1.3.28",
@@ -50,7 +50,7 @@
     "regression_log_sha256": "0f490ad7b5a13ebee3d2d76be1c262a288d222a9f1b3ab026c8c03485cb851d6"
   },
   "native_acceptance": {
-    "status": "permissions_and_date_navigation_verified_waiting_physical_scroll",
+    "status": "permissions_and_basic_scroll_confirmed_cross_month_limit_reported",
     "physical_trackpad_verified": false,
     "keychain_wait_resolved": true,
     "automation_music": "allowed",
@@ -58,7 +58,13 @@
     "calendar_full_access": true,
     "calendar_overview_access_prompt_absent": true,
     "login_items": "allowed",
-    "far_future_date_navigation": true
+    "far_future_date_navigation": true,
+    "user_confirms_calendar_access": true,
+    "user_confirms_basic_scroll": true,
+    "cross_month_scroll": false,
+    "original_preferences_restored": true,
+    "business_data_unchanged": true,
+    "followup_version": "1.3.30"
   },
   "installed": true,
   "pushed": true,

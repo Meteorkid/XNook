@@ -148,16 +148,10 @@ final class CalendarManager {
         calendar.dateInterval(of: .day, for: date)
     }
 
-    /// 保留今天前后两周，并包含用户正在浏览的日期；跨日、休眠后不丢失选中项。
-    static func visibleDates(today: Date, selectedDate: Date, calendar: Calendar = .current) -> [Date] {
-        let today = calendar.startOfDay(for: today)
-        let selected = calendar.startOfDay(for: selectedDate)
-        guard let lowerBound = calendar.date(byAdding: .day, value: -14, to: today),
-              let upperBound = calendar.date(byAdding: .day, value: 14, to: today) else { return [selected] }
-        let start = min(lowerBound, selected)
-        let end = max(upperBound, selected)
-        guard let days = calendar.dateComponents([.day], from: start, to: end).day, days >= 0 else { return [selected] }
-        return (0...days).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+    /// 有界缓冲围绕当前浏览位置移动，远期跳转不创建从今天到目标之间的所有日期。
+    nonisolated static func visibleDates(centeredOn date: Date, calendar: Calendar = .current) -> [Date] {
+        let center = calendar.startOfDay(for: date)
+        return (-90...90).compactMap { calendar.date(byAdding: .day, value: $0, to: center) }
     }
 
     func loadEvents(for date: Date) {

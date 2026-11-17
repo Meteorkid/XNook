@@ -34,6 +34,10 @@ final class CaptionManager {
     /// 调度器诊断量，设置页用于排查。
     private(set) var chainLength: Int = 0
     private(set) var establishedCertificates: Int = 0
+    /// 画面文字来源实际执行的区间数与因证书成立而跳过的区间数。
+    /// 跳过的数字就是「什么时候可以不算了」省下来的真实推理次数。
+    var frameExecutedIntervals: Int { frameProvider?.executedIntervals ?? 0 }
+    var frameSkippedIntervals: Int { frameProvider?.skippedIntervals ?? 0 }
 
     // MARK: - 内部组件
 
@@ -42,6 +46,7 @@ final class CaptionManager {
     private var tap: SystemAudioTap?
     private var speech: SpeechEvidenceProvider?
     private var lyricProvider: LyricEvidenceProvider?
+    private var frameProvider: FrameTextEvidenceProvider?
     private var tickTimer: Timer?
     private var logHandle: FileHandle?
     private var lastLoggedLine: String = ""
@@ -116,9 +121,25 @@ final class CaptionManager {
             clock?.generation ?? 1
         }
 
+        let frameEvidence = FrameTextEvidenceProvider(clock: clock)
+        frameEvidence.onDiagnostics = { [weak self] message in
+            Task { @MainActor in self?.log(message) }
+        }
+        // 画面文字是链里唯一「按区间执行且可跳过」的来源：
+        // 证书一旦覆盖该区间，这里就直接返回 false，连截图与 OCR 都不发生。
+        frameEvidence.runGate = { [weak self, weak frameEvidence] index in
+            guard let self, let frameEvidence else { return false }
+            if self.scheduler.isShortCircuited(frameEvidence, unitIndex: index) { return false }
+            return self.scheduler.shouldExecute(
+                frameEvidence,
+                unitIndex: index,
+                prefetchability: self.prefetchability
+            )
+        }
+
         scheduler.attach(clock: clock)
-        // 注册顺序无关：调度器按证据等级自行排序（歌词 5 级在前，流式识别 1 级在后）。
-        scheduler.register([lyricEvidence, speechProvider])
+        // 注册顺序无关：调度器按证据等级自行排序（歌词 5、画面 3、流式 1）。
+        scheduler.register([frameEvidence, lyricEvidence, speechProvider])
         scheduler.onLineChange = { [weak self] text, level in
             guard let self else { return }
             self.line = text
@@ -143,6 +164,7 @@ final class CaptionManager {
         tap = newTap
         speech = speechProvider
         lyricProvider = lyricEvidence
+        frameProvider = frameEvidence
         state = .running
         startTicking()
 
@@ -162,6 +184,8 @@ final class CaptionManager {
         speech = nil
         lyricProvider?.clear()
         lyricProvider = nil
+        frameProvider?.stop()
+        frameProvider = nil
         await tap?.stop()
         tap = nil
         scheduler.reset()
@@ -205,12 +229,14 @@ final class CaptionManager {
             scheduler.reset()
             // 代次已变，已灌入的歌词条目全部作废，必须按新代次重灌。
             lyricProvider?.resubmit()
+            frameProvider?.reset()
             log("player timeline unstable → fall back to capture clock")
             return
         }
 
         scheduler.reset()
         lyricProvider?.resubmit()
+        frameProvider?.reset()
         log("timeline jump → generation \(clock.generation) at \(String(format: "%.2f", position))")
     }
 
@@ -284,6 +310,10 @@ final class CaptionManager {
             Task { @MainActor in
                 guard let self, self.state.isRunning else { return }
                 self.scheduler.tick(prefetchability: self.prefetchability)
+                self.frameProvider?.advance(
+                    now: self.clock.sourceNow(),
+                    unit: self.scheduler.config.unit
+                )
                 self.chainLength = self.scheduler.diagnostics.chainLength
                 self.establishedCertificates = self.scheduler.diagnostics.certificatesEstablished
                 // 无播放位置可对齐的音源，时间轴由捕获起点起算；这里不再回写。

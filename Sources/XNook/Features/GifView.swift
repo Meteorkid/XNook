@@ -7,6 +7,7 @@ struct GifView: NSViewRepresentable {
     let gifData: Data
     let isPlaying: Bool
     let targetSize: NSSize
+    var isActive = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -31,6 +32,11 @@ struct GifView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         nsView.frame = NSRect(origin: .zero, size: targetSize)
 
+        // 数据与可见性同批改变时，先停止旧动画，避免替换 GIF 时短暂恢复驱动。
+        if !isPlaying || !isActive {
+            context.coordinator.pauseAnimation()
+        }
+
         // 检测 GIF 数据变化，重新加载动画
         if context.coordinator.currentGifData != gifData {
             if let imageView = nsView.subviews.first as? NSImageView {
@@ -38,11 +44,7 @@ struct GifView: NSViewRepresentable {
             }
         }
 
-        if isPlaying {
-            context.coordinator.resumeAnimation()
-        } else {
-            context.coordinator.pauseAnimation()
-        }
+        context.coordinator.updatePlayback(isPlaying: isPlaying, isActive: isActive)
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -112,6 +114,14 @@ struct GifView: NSViewRepresentable {
             }
         }
 
+        func updatePlayback(isPlaying: Bool, isActive: Bool) {
+            if isPlaying && isActive {
+                resumeAnimation()
+            } else {
+                pauseAnimation()
+            }
+        }
+
         func resumeAnimation() {
             guard !isDismantled, !isAnimating, frameCount > 1, let imageView else { return }
             if displayLink == nil {
@@ -130,6 +140,10 @@ struct GifView: NSViewRepresentable {
             guard isAnimating else { return }
             isAnimating = false
             displayLink?.pause()
+            // 恢复时使用新一代驱动，旧驱动已排队的回调不能跨越隐藏周期。
+            animationGeneration += 1
+            displayLink?.invalidate()
+            displayLink = nil
         }
 
         func dismantle() {

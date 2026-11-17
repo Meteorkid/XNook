@@ -22,6 +22,8 @@ final class TrayManager {
     private let storageURL: URL
     private let resolveBookmark: (Data) -> (url: URL, isStale: Bool)?
     private let makeBookmark: (URL) throws -> Data
+    private let writeData: (Data, URL) throws -> Void
+    private let loadDropURL: @MainActor (NSItemProvider) async throws -> URL
     private var unresolvedRecords: [FileRecord] = []
     private var storageIsReadable = true
 
@@ -82,11 +84,27 @@ final class TrayManager {
         resolveBookmark: @escaping (Data) -> (url: URL, isStale: Bool)? = TrayFile.resolveBookmark,
         makeBookmark: @escaping (URL) throws -> Data = {
             try $0.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        },
+        writeData: @escaping (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) },
+        loadDropURL: @escaping @MainActor (NSItemProvider) async throws -> URL = { provider in
+            try await withCheckedThrowingContinuation { continuation in
+                provider.loadObject(ofClass: NSURL.self) { reading, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let url = reading as? NSURL {
+                        continuation.resume(returning: url as URL)
+                    } else {
+                        continuation.resume(throwing: CocoaError(.fileReadUnknown))
+                    }
+                }
+            }
         }
     ) {
         self.storageURL = storageURL ?? Self.defaultStorageURL
         self.resolveBookmark = resolveBookmark
         self.makeBookmark = makeBookmark
+        self.writeData = writeData
+        self.loadDropURL = loadDropURL
         loadFiles()
     }
 
@@ -171,45 +189,90 @@ final class TrayManager {
     }
 
     func addFile(from url: URL) {
-        guard storageIsReadable else { return }
-        let isAccessing = url.startAccessingSecurityScopedResource()
-        defer {
-            if isAccessing {
-                url.stopAccessingSecurityScopedResource()
+        addFiles(from: [url])
+    }
+
+    @discardableResult
+    func addFiles(from urls: [URL]) -> Bool {
+        guard storageIsReadable, !urls.isEmpty else { return false }
+        guard urls.allSatisfy(\.isFileURL) else {
+            issue = .fileUnavailable
+            return false
+        }
+
+        var newFiles: [TrayFile] = []
+        newFiles.reserveCapacity(urls.count)
+        for url in urls {
+            let isAccessing = url.startAccessingSecurityScopedResource()
+            defer {
+                if isAccessing {
+                    url.stopAccessingSecurityScopedResource()
+                }
             }
+
+            guard let bookmarkData = try? makeBookmark(url) else {
+                issue = .bookmarkCreationFailed
+                return false
+            }
+
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            newFiles.append(TrayFile(
+                id: UUID(),
+                bookmarkData: bookmarkData,
+                name: url.lastPathComponent,
+                icon: TrayFile.iconForFile(at: url),
+                size: size,
+                addedAt: Date()
+            ))
         }
 
-        guard let bookmarkData = try? makeBookmark(url) else {
-            issue = .bookmarkCreationFailed
-            return
+        // 全批书签准备成功后再提交，避免后一个文件失败时留下半批记录。
+        let previousFiles = files
+        files.append(contentsOf: newFiles)
+        guard saveFiles() else {
+            files = previousFiles
+            return false
         }
-
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        let file = TrayFile(
-            id: UUID(),
-            bookmarkData: bookmarkData,
-            name: url.lastPathComponent,
-            icon: TrayFile.iconForFile(at: url),
-            size: size,
-            addedAt: Date()
-        )
-        files.append(file)
-        if !saveFiles() {
-            files.removeAll { $0.id == file.id }
-        }
+        return true
     }
 
     func addFile(from pasteboard: NSPasteboard) {
         guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true
         ]) as? [URL] else { return }
-        for url in urls {
-            addFile(from: url)
+        addFiles(from: urls)
+    }
+
+    func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard storageIsReadable else { return false }
+        let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !fileProviders.isEmpty else { return false }
+
+        Task {
+            let results = await withTaskGroup(of: (Int, URL?).self) { group in
+                for (index, provider) in fileProviders.enumerated() {
+                    group.addTask { @MainActor in
+                        (index, try? await self.loadDropURL(provider))
+                    }
+                }
+                var results = [URL?](repeating: nil, count: fileProviders.count)
+                for await (index, url) in group {
+                    results[index] = url
+                }
+                return results
+            }
+            let urls = results.compactMap { $0 }
+            guard urls.count == fileProviders.count else {
+                if storageIsReadable { issue = .fileUnavailable }
+                return
+            }
+            addFiles(from: urls)
         }
+        return true
     }
 
     func removeFile(_ file: TrayFile) {
-        guard storageIsReadable else { return }
+        guard storageIsReadable, files.contains(where: { $0.id == file.id }) else { return }
         let previousFiles = files
         files.removeAll { $0.id == file.id }
         if !saveFiles() {
@@ -293,7 +356,7 @@ final class TrayManager {
                 at: storageURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try data.write(to: storageURL, options: .atomic)
+            try writeData(data, storageURL)
             issue = nil
             return true
         } catch {

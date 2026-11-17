@@ -1,16 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// 物理刘海在面板顶部导航中占据的死区。
+/// 物理刘海在面板顶部导航中需要预留的居中避让区域。
 ///
-/// 展开面板是居中悬浮在屏幕顶部的，而物理刘海也正好在屏幕顶部居中——
-/// 面板的头部区域实际上被刘海切掉一块。此前只是让内容"避开"，但没有显式建模，
-/// 于是导航按钮可能被推进刘海下面，既看不见也点不到。
-///
-/// 这里把死区显式算出来：刘海屏取 `safeAreaInsets` 对应的宽度，无刘海屏为 0。
+/// 屏幕推导物理刘海大小；窗口横向移动后，扩大居中避让区域以完整包含遮挡。
+/// 无刘海屏幕或窗口与刘海不相交时不预留空间。
 /// 死区本身不接收点击（`allowsHitTesting(false)`），避免挡住下方内容。
 struct NotchDeadZone: Equatable {
-    /// 死区宽度
+    /// 居中避让宽度；窗口偏移时可能大于物理刘海宽度。
     let width: CGFloat
     /// 死区高度（刘海高度）
     let height: CGFloat
@@ -33,16 +30,25 @@ struct NotchDeadZone: Equatable {
         )
     }
 
-    /// 判断窗口是否真的位于刘海正下方。窗口不在屏幕顶部居中时，刘海不构成遮挡。
+    /// 为与物理刘海相交的窗口计算居中避让区域。
     static func resolve(for window: NSWindow?) -> NotchDeadZone {
         guard let window, let screen = window.screen else { return .none }
         let zone = resolve(for: screen)
-        guard zone.isPresent else { return .none }
-        let screenFrame = screen.frame
-        let windowFrame = window.frame
-        let topAligned = abs(windowFrame.maxY - screenFrame.maxY) < 6
-        let horizontallyCentered = abs(windowFrame.midX - screenFrame.midX) < zone.width
-        return topAligned && horizontallyCentered ? zone : .none
+        return resolve(screenFrame: screen.frame, windowFrame: window.frame, screenZone: zone)
+    }
+
+    /// 纯几何入口；对称扩张使现有头部布局无需了解窗口的横向偏移。
+    static func resolve(screenFrame: CGRect, windowFrame: CGRect, screenZone zone: NotchDeadZone) -> NotchDeadZone {
+        guard zone.isPresent, zone.height > 0 else { return .none }
+        let notchFrame = CGRect(
+            x: screenFrame.midX - zone.width / 2,
+            y: screenFrame.maxY - zone.height,
+            width: zone.width,
+            height: zone.height
+        )
+        guard notchFrame.intersects(windowFrame) else { return .none }
+        let horizontalOffset = abs(screenFrame.midX - windowFrame.midX)
+        return NotchDeadZone(width: zone.width + horizontalOffset * 2, height: zone.height)
     }
 
     private static func safeAreaInsets(of screen: NSScreen) -> NSEdgeInsets? {

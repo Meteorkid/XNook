@@ -1,5 +1,5 @@
 import SwiftUI
-import XNookLicenseCore
+import MeteorLicenseCore
 
 /// 授权面板内容。被两个地方复用：
 /// 1. 设置窗口中的「授权」页
@@ -24,8 +24,18 @@ struct LicenseActivationView: View {
             inputSection
             if let message {
                 messageBanner(message)
+            } else if let error = license.lastError {
+                Text(error).font(.caption).foregroundStyle(.secondary)
             }
             actionsSection
+            Text(L10n.licenseHowToGetBody).font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button(L10n.localized(zh: "联网验证 / 开始试用", en: "Verify online / Start trial")) { Task { await license.connect() } }
+                    .disabled(license.isWorking || isWorking)
+                Button(L10n.licensePurchase) { NSWorkspace.shared.open(LicenseManager.purchaseURL) }
+                Button(L10n.localized(zh: "导出本地数据", en: "Export local data")) { LicenseDataExport.run() }
+            }
+            .font(.caption)
         }
         .onAppear {
             license.refresh()
@@ -47,13 +57,16 @@ struct LicenseActivationView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(license.statusSummary)
                         .font(.system(size: isCompact ? 14 : 13, weight: .medium))
-                    if case .trial(let days) = license.state {
+                    if let days = license.remainingTrialDays {
                         Text(L10n.licenseTrialHint)
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                         // 剩余天数进度条：让"还剩多少"可感知，而不只是一个数字
                         trialProgressBar(remaining: days)
+                    }
+                    if let expiry = license.expirySummary {
+                        Text(expiry).font(.caption).foregroundStyle(.secondary)
                     }
                     if case .expired = license.state {
                         Text(L10n.licenseExpiredHint)
@@ -86,16 +99,17 @@ struct LicenseActivationView: View {
 
     private var statusColor: Color {
         switch license.state {
-        case .licensed:     return .green
-        case .trial:        return .orange
+        case .active(let payload): return payload.kind == .trial ? .orange : .green
         case .expired:      return .red
         case .unconfigured: return .gray
+        case .needsConnection: return .orange
+        case .blocked: return .red
         }
     }
 
     /// 试用剩余进度条
     private func trialProgressBar(remaining: Int) -> some View {
-        let fraction = max(0, min(1, Double(remaining) / Double(TrialAnchor.trialDays)))
+        let fraction = max(0, min(1, Double(remaining) / 14))
         return GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule()
@@ -114,7 +128,7 @@ struct LicenseActivationView: View {
     @ViewBuilder
     private var inputSection: some View {
         // 已激活时不再展示输入框，避免用户误以为需要重复激活
-        if !license.state.isLicensed {
+        if !license.isLicensed {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.licenseEnterCode)
                     .font(.system(size: 13, weight: .bold))
@@ -168,7 +182,7 @@ struct LicenseActivationView: View {
     @ViewBuilder
     private var actionsSection: some View {
         HStack(spacing: 10) {
-            if !license.state.isLicensed {
+            if !license.isLicensed {
                 Button {
                     Task { await performActivation() }
                 } label: {
@@ -183,7 +197,7 @@ struct LicenseActivationView: View {
                     .frame(minWidth: 80)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isWorking || trimmedInput.isEmpty)
+                .disabled(isWorking || license.isWorking || trimmedInput.isEmpty)
 
                 Button(L10n.licensePasteFromClipboard) {
                     if let clipboard = NSPasteboard.general.string(forType: .string) {
@@ -197,14 +211,22 @@ struct LicenseActivationView: View {
             Spacer()
 
             // 已激活用户提供解除入口——用于换机或排障
-            if license.state.isLicensed {
+            if license.isLicensed {
                 Button(L10n.licenseDeactivate) {
-                    license.deactivate()
-                    message = L10n.licenseDeactivated
-                    isError = false
+                    Task {
+                        let result = await license.deactivate()
+                        if case .failure(let reason) = result {
+                            message = reason
+                            isError = true
+                        } else {
+                            message = L10n.licenseDeactivated
+                            isError = false
+                        }
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(license.isWorking)
             }
         }
     }
@@ -223,15 +245,9 @@ struct LicenseActivationView: View {
         isWorking = false
 
         switch outcome {
-        case .success(let serial, let flags):
+        case .success:
             isError = false
-            let suffix = flags.contains(.earlySupporter)
-                ? LicenseError.text("（早期支持者）", " (Early Supporter)")
-                : ""
-            message = LicenseError.text(
-                "激活成功\(suffix)。感谢支持，编号 \(String(format: "XN-%06u", serial))。",
-                "Activated\(suffix). Thank you for your support — ID \(String(format: "XN-%06u", serial))."
-            )
+            message = L10n.localized(zh: "激活成功，感谢支持。", en: "Activated. Thank you for your support.")
             input = ""
             // 通知外部（如到期锁屏窗口）可以关闭
             NotificationCenter.default.post(name: .xnookLicenseActivated, object: nil)

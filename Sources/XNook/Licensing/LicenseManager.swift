@@ -1,289 +1,226 @@
+import AppKit
 import Foundation
-import CryptoKit
 import Observation
-import XNookLicenseCore
+import MeteorLicenseCore
 
-/// 授权状态。
-enum LicenseState: Equatable {
-    /// 试用中，携带剩余天数（1…14）
-    case trial(remainingDays: Int)
-    /// 已激活（永久授权）
-    case licensed(serial: UInt32, flags: LicenseFlags)
-    /// 试用到期且未激活
-    case expired
-    /// 公钥尚未配置（开发态），一切激活都会被拒绝
-    case unconfigured
-
-    /// 是否允许使用完整功能
-    var allowsFullAccess: Bool {
-        switch self {
-        case .trial, .licensed: return true
-        case .expired, .unconfigured: return false
-        }
-    }
-
-    /// 是否已付费激活
-    var isLicensed: Bool {
-        if case .licensed = self { return true }
-        return false
-    }
-}
-
-/// 激活结果。
-enum ActivationOutcome: Equatable {
-    case success(serial: UInt32, flags: LicenseFlags)
-    case failure(String)
-}
-
-/// 授权管理器。
-///
-/// ## 职责
-/// - 判定当前授权状态（试用 / 已激活 / 已到期）
-/// - 校验并落盘邀请码
-/// - 可选的在线登记（失败不影响本地放行）
-///
-/// ## 关键设计：放行决策在本地
-///
-/// 在线登记**不参与**放行判定。这样服务器故障、断网、DNS 异常
-/// 都不会导致用户无法使用已购买的软件。登记只用于统计与后续运营。
+/// 共享授权协议的界面适配器；凭据与设备令牌只保存在钥匙串。
 @MainActor
 @Observable
 final class LicenseManager {
-
     static let shared = LicenseManager()
+    static let purchaseURL = URL(string: "https://www.imagentx.top/zh/products/xnook")!
 
-    /// 已激活凭证的持久化键
-    private static let credentialKey = "xnook.license.credential"
+    private(set) var state: SoftwareLicenseState
+    private(set) var lastError: String?
+    private(set) var isWorking = false
+    var onAccessChange: ((Bool) -> Void)?
 
-    /// 当前授权状态
-    private(set) var state: LicenseState
+    @ObservationIgnored private let session: SoftwareLicenseSession
+    @ObservationIgnored private let clock: () -> Date
+    @ObservationIgnored private let workspaceNotifications: NotificationCenter
+    @ObservationIgnored private var checkTimer: Timer?
+    @ObservationIgnored private var deadlineTimer: Timer?
+    @ObservationIgnored private var refreshTimer: Timer?
+    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored private var requestTask: Task<ActivationOutcome, Never>?
+    @ObservationIgnored private var requestGeneration = 0
+    @ObservationIgnored private var isStopped = false
 
-    /// 已激活的邀请码原文（便于用户查看/迁移）
-    private(set) var activatedCode: String?
-
-    /// 试用锚点
-    private(set) var anchor: AnchorRecord
-
-    /// 在线登记端点。为空表示不启用登记（纯离线模式）。
-    ///
-    /// 留空即可获得完全离线的行为——这是默认值。
-    /// 填入形如 `https://your-host/api/activate` 即启用。
-    static var registrationEndpoint: URL? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: "XNookLicenseEndpoint") as? String,
-              !raw.isEmpty,
-              let url = URL(string: raw) else { return nil }
-        return url
+    init(session: SoftwareLicenseSession, clock: @escaping () -> Date = Date.init,
+         workspaceNotifications: NotificationCenter = NSWorkspace.shared.notificationCenter) {
+        self.session = session
+        self.clock = clock
+        self.workspaceNotifications = workspaceNotifications
+        self.state = session.state
+        self.lastError = session.lastError
+        session.onStateChange = { [weak self] state in self?.apply(state) }
     }
 
-    /// 公钥是否已配置
-    var isPublicKeyConfigured: Bool {
-        LicenseManager.resolvedPublicKey() != nil
-    }
-
-    /// 公钥解析。
-    ///
-    /// 生产环境从 `LicensePublicKey` 读取；单元测试通过 `publicKeyOverride`
-    /// 注入临时密钥，以便覆盖真实的激活/验签路径。
-    /// 这个注入点本身不构成安全弱点——它只影响验签用哪把公钥，
-    /// 无法凭它构造出有效签名。
-    nonisolated(unsafe) static var publicKeyOverride: Curve25519.Signing.PublicKey?
-
-    static func resolvedPublicKey() -> Curve25519.Signing.PublicKey? {
-        publicKeyOverride ?? LicensePublicKey.publicKey
-    }
-
-    // MARK: - 初始化
-
-    /// 注入的 UserDefaults。生产为 `.standard`，测试用独立 suite 避免相互污染。
-    private let defaults: UserDefaults
-
-    init(defaults: UserDefaults = .standard, now: Date = Date()) {
-        self.defaults = defaults
-        let (loadedAnchor, _) = TrialAnchor.loadOrCreate(defaults: defaults, now: now)
-        self.anchor = loadedAnchor
-
-        // 优先恢复已激活状态
-        if let restored = LicenseManager.restoreCredential(defaults: defaults) {
-            self.state = .licensed(serial: restored.serial, flags: restored.flags)
-            self.activatedCode = restored.code
-        } else if LicenseManager.resolvedPublicKey() == nil {
-            // 未配置公钥：开发态。此时不消耗试用期，但也不放行。
-            self.state = .unconfigured
-        } else {
-            let remaining = TrialAnchor.remainingDays(of: loadedAnchor, now: now)
-            self.state = remaining > 0 ? .trial(remainingDays: remaining) : .expired
-        }
-    }
-
-    // MARK: - 状态刷新
-
-    /// 刷新试用剩余天数。应在每次启动与跨天后调用。
-    func refresh(now: Date = Date()) {
-        // 已激活的不再变动
-        if state.isLicensed { return }
-
-        guard LicenseManager.resolvedPublicKey() != nil else {
-            state = .unconfigured
-            return
-        }
-
-        // 每次刷新时更新 lastSeen，抵御时钟回拨
-        let (updated, _) = TrialAnchor.loadOrCreate(defaults: defaults, now: now)
-        anchor = updated
-
-        let remaining = TrialAnchor.remainingDays(of: updated, now: now)
-        state = remaining > 0 ? .trial(remainingDays: remaining) : .expired
-    }
-
-    // MARK: - 激活
-
-    /// 校验并激活邀请码。
-    ///
-    /// - Parameter input: 用户输入或来自激活链接的邀请码
-    /// - Returns: 激活结果。失败时返回面向用户的错误文案。
-    func activate(input: String, now: Date = Date()) async -> ActivationOutcome {
-        guard let publicKey = LicenseManager.resolvedPublicKey() else {
-            return .failure(LicenseError.text(
-                "软件未配置授权公钥，无法激活。请联系开发者获取正式版本。",
-                "This build has no license public key configured and cannot activate. Please obtain an official release."
-            ))
-        }
-
-        // 1. 解析
-        let code: LicenseCode
+    private convenience init() {
+        let store = KeychainLicenseStore(service: "com.meteorkid.xnook.software-license")
+        let deviceStore = KeychainLicenseStore(service: "com.meteorkid.xnook.software-license", account: "device")
+        let deviceID: String
+        let sessionStore: any LicenseCredentialStore
         do {
-            code = try LicenseCode(parsing: input)
-        } catch let error as LicenseError {
-            return .failure(error.errorDescription ?? "邀请码无效")
+            deviceID = try LicenseDeviceIdentity.resolve(store: deviceStore)
+            sessionStore = store
         } catch {
-            return .failure(error.localizedDescription)
+            deviceID = ""
+            sessionStore = UnavailableLicenseStore()
         }
-
-        // 2. 验签——这一步决定邀请码真伪，必须通过
-        guard LicenseSigning.verify(code, using: publicKey) else {
-            return .failure(LicenseError.invalidSignature.errorDescription ?? "邀请码无效")
-        }
-
-        // 3. 落盘
-        let credential = Credential(
-            code: code.encoded,
-            serial: code.payload.serial,
-            flags: code.payload.flags.rawValue,
-            activatedAt: now
-        )
-        persist(credential)
-
-        state = .licensed(serial: code.payload.serial, flags: code.payload.flags)
-        activatedCode = code.encoded
-
-        // 4. 在线登记（尽力而为，失败不影响放行）
-        await register(code: code)
-
-        return .success(serial: code.payload.serial, flags: code.payload.flags)
+        let origin = Bundle.main.object(forInfoDictionaryKey: "SoftwareLicenseAPIBaseURL") as? String
+        let api = SoftwareLicenseAPI(baseURL: URL(string: origin ?? "https://www.imagentx.top") ?? Self.purchaseURL)
+        self.init(session: SoftwareLicenseSession(
+            productId: "xnook", deviceId: deviceID, deviceName: String((Host.current().localizedName ?? "Mac").prefix(100)),
+            publicKeyBase64: Bundle.main.object(forInfoDictionaryKey: "SoftwareLicensePublicKey") as? String,
+            api: api, store: sessionStore
+        ))
     }
 
-    /// 解除激活（供用户换机或排障使用，会退回试用/到期状态）
-    func deactivate(now: Date = Date()) {
-        defaults.removeObject(forKey: LicenseManager.credentialKey)
-        activatedCode = nil
-        let remaining = TrialAnchor.remainingDays(of: anchor, now: now)
-        if LicenseManager.resolvedPublicKey() == nil {
-            state = .unconfigured
-        } else {
-            state = remaining > 0 ? .trial(remainingDays: remaining) : .expired
-        }
+    var isLicensed: Bool {
+        if case .active(let payload) = state { return payload.kind != .trial }
+        return false
     }
 
-    // MARK: - 凭证持久化
-
-    /// 落盘的激活凭证。
-    ///
-    /// 只存邀请码原文与冗余的元信息——验证时仍会重新验签，
-    /// 因此即使用户改写这个文件，也必须拥有私钥才能构造出有效签名。
-    private struct Credential: Codable {
-        let code: String
-        let serial: UInt32
-        let flags: UInt8
-        let activatedAt: Date
+    var remainingTrialDays: Int? {
+        guard case .active(let payload) = state, payload.kind == .trial,
+              let end = payload.entitlementExpiresAt else { return nil }
+        return max(0, Int(ceil((end - session.effectiveNow(now: clock()).timeIntervalSince1970) / 86_400)))
     }
 
-    private func persist(_ credential: Credential) {
-        guard let data = try? JSONEncoder().encode(credential) else { return }
-        defaults.set(data, forKey: LicenseManager.credentialKey)
-    }
-
-    /// 恢复凭证并**重新验签**。
-    ///
-    /// 关键：不信任落盘内容。即使用户手工写入一条伪造凭证，
-    /// 缺少私钥就无法产生有效签名，验签会失败并被丢弃。
-    private static func restoreCredential(
-        defaults: UserDefaults
-    ) -> (code: String, serial: UInt32, flags: LicenseFlags)? {
-        guard let publicKey = LicenseManager.resolvedPublicKey(),
-              let data = defaults.data(forKey: credentialKey),
-              let credential = try? JSONDecoder().decode(Credential.self, from: data),
-              let code = try? LicenseCode(parsing: credential.code),
-              LicenseSigning.verify(code, using: publicKey) else {
-            return nil
-        }
-        return (code.encoded, code.payload.serial, code.payload.flags)
-    }
-
-    // MARK: - 在线登记
-
-    /// 向登记端点上报一次激活。
-    ///
-    /// 刻意不重试、不阻塞、不因失败改变授权状态。
-    /// 上报内容不含任何个人身份信息，仅邀请码序列号与版本号。
-    private func register(code: LicenseCode) async {
-        guard let endpoint = LicenseManager.registrationEndpoint else { return }
-
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 8
-
-        let body: [String: Any] = [
-            "serial": code.payload.serial,
-            "shortId": code.payload.shortIdentifier,
-            "flags": code.payload.flags.rawValue,
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
-            "platform": "macos",
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        // 失败静默处理——登记是增量信息，不是放行前提
-        _ = try? await URLSession.shared.data(for: request)
-    }
-
-    // MARK: - 展示辅助
-
-    /// 状态摘要文案
     var statusSummary: String {
         switch state {
-        case .licensed(let serial, let flags):
-            let suffix = flags.contains(.earlySupporter)
-                ? LicenseError.text("（早期支持者）", " (Early Supporter)")
-                : ""
-            return LicenseError.text(
-                "已激活 · 永久授权\(suffix) · 编号 \(String(format: "XN-%06u", serial))",
-                "Activated · Perpetual license\(suffix) · ID \(String(format: "XN-%06u", serial))"
-            )
-        case .trial(let days):
-            return LicenseError.text(
-                "试用中 · 剩余 \(days) 天",
-                "Trial · \(days) day\(days == 1 ? "" : "s") remaining"
-            )
-        case .expired:
-            return LicenseError.text(
-                "试用已结束 · 请输入邀请码激活",
-                "Trial ended · Enter an activation code to continue"
-            )
-        case .unconfigured:
-            return LicenseError.text(
-                "未配置授权公钥（开发版本）",
-                "No license public key configured (development build)"
-            )
+        case .active(let payload):
+            if payload.kind == .trial {
+                let days = remainingTrialDays ?? 0
+                return L10n.localized(zh: "试用中 · 剩余 \(days) 天", en: "Trial · \(days) \(days == 1 ? "day" : "days") remaining")
+            }
+            switch payload.kind {
+            case .lifetime: return L10n.localized(zh: "已激活 · 永久", en: "Activated · Lifetime")
+            case .monthly: return L10n.localized(zh: "已激活 · 一个月", en: "Activated · 1 month")
+            case .annual: return L10n.localized(zh: "已激活 · 一年", en: "Activated · 1 year")
+            case .trial: return L10n.localized(zh: "试用中", en: "Trial")
+            }
+        case .unconfigured: return L10n.localized(zh: "此版本尚未配置授权公钥", en: "This build has no license public key configured")
+        case .needsConnection: return L10n.localized(zh: "请联网开始 14 天试用，或输入激活码。", en: "Connect to start a 14-day trial, or enter an activation code.")
+        case .expired: return L10n.localized(zh: "授权或离线使用期限已到，请联网验证或续费", en: "License or offline access has expired. Connect to verify or renew.")
+        case .blocked(let reason): return reason
         }
     }
+
+    var expirySummary: String? {
+        guard case .active(let payload) = state else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: L10n.effectiveLanguage)
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let offline = formatter.string(from: payload.deadline)
+        if payload.kind == .lifetime {
+            return L10n.localized(zh: "无需续费；最迟于 \(offline) 联网核验。", en: "No renewal needed. Verify online by \(offline).")
+        }
+        if let entitlementEnd = payload.entitlementExpiresAt {
+            let entitlement = formatter.string(from: Date(timeIntervalSince1970: entitlementEnd))
+            return L10n.localized(zh: "使用权至 \(entitlement)；离线有效至 \(offline)。", en: "Access until \(entitlement); offline access until \(offline).")
+        }
+        return nil
+    }
+
+    func refresh(now: Date? = nil) {
+        guard !isStopped else { return }
+        session.checkAccess(now: now ?? clock())
+        apply(session.state)
+        lastError = session.lastError
+    }
+
+    func startMonitoring() {
+        guard checkTimer == nil else { return }
+        isStopped = false
+        refresh()
+        let check = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+        RunLoop.main.add(check, forMode: .common)
+        checkTimer = check
+        let renewal = Timer(timeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.connect() }
+        }
+        RunLoop.main.add(renewal, forMode: .common)
+        refreshTimer = renewal
+        wakeObserver = workspaceNotifications.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refresh()
+                await self?.connect()
+            }
+        }
+        Task { await connect() }
+    }
+
+    func stopMonitoring() {
+        isStopped = true
+        requestGeneration &+= 1
+        requestTask?.cancel()
+        requestTask = nil
+        isWorking = false
+        checkTimer?.invalidate(); checkTimer = nil
+        refreshTimer?.invalidate(); refreshTimer = nil
+        deadlineTimer?.invalidate(); deadlineTimer = nil
+        if let wakeObserver { workspaceNotifications.removeObserver(wakeObserver) }
+        wakeObserver = nil
+    }
+
+    func connect() async {
+        _ = await performRequest { [session] in await session.start() }
+    }
+
+    func activate(input: String) async -> ActivationOutcome {
+        await performRequest { [session] in try await session.activate(code: input) }
+    }
+
+    func deactivate() async -> ActivationOutcome {
+        await performRequest { [session] in try await session.deactivate() }
+    }
+
+    private func performRequest(_ operation: @escaping @MainActor () async throws -> Void) async -> ActivationOutcome {
+        guard !isStopped, !Task.isCancelled else { return .failure("授权操作已取消。") }
+        guard !isWorking else { return .failure("正在处理授权请求，请稍后再试。") }
+        isWorking = true
+        requestGeneration &+= 1
+        let generation = requestGeneration
+        let task = Task { @MainActor () -> ActivationOutcome in
+            do {
+                try Task.checkCancellation()
+                try await operation()
+                try Task.checkCancellation()
+                return .success
+            } catch { return .failure(error.localizedDescription) }
+        }
+        requestTask = task
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: { task.cancel() }
+        guard !isStopped, generation == requestGeneration else { return .failure("授权操作已取消。") }
+        requestTask = nil
+        isWorking = false
+        refresh()
+        // 先刷新状态再保留本次错误，避免预校验错误被 session 的空错误覆盖。
+        if case .failure(let reason) = result { lastError = reason }
+        return result
+    }
+
+    private func apply(_ newState: SoftwareLicenseState) {
+        guard !isStopped else { return }
+        let previouslyAllowed = state.allowsAccess
+        state = newState
+        if newState.allowsAccess != previouslyAllowed {
+            onAccessChange?(newState.allowsAccess)
+            if newState.allowsAccess {
+                NotificationCenter.default.post(name: .xnookLicenseActivated, object: nil)
+            }
+        }
+        scheduleDeadline()
+    }
+
+    private func scheduleDeadline() {
+        deadlineTimer?.invalidate()
+        guard let deadline = session.nextDeadline else { deadlineTimer = nil; return }
+        let interval = max(0.01, deadline.timeIntervalSince(session.effectiveNow(now: clock())))
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        deadlineTimer = timer
+    }
+}
+
+enum ActivationOutcome: Equatable {
+    case success
+    case failure(String)
+}
+
+private struct UnavailableLicenseStore: LicenseCredentialStore {
+    func load() throws -> Data? { throw SoftwareLicenseError.storage(-1) }
+    func save(_ data: Data) throws { throw SoftwareLicenseError.storage(-1) }
+    func delete() throws { throw SoftwareLicenseError.storage(-1) }
 }

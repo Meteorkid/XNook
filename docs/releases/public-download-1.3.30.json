@@ -1,0 +1,39 @@
+{
+  "version": "1.3.30",
+  "verified_at": "2026-10-30T20:07:56.476736+08:00",
+  "anonymous_access": true,
+  "authorization_header_used": false,
+  "release_id": 428987553,
+  "release_url": "https://github.com/Meteorkid/XNook/releases/tag/v1.3.30",
+  "published_at": "2026-10-30T12:07:52Z",
+  "latest_tag": "v1.3.30",
+  "is_draft": false,
+  "is_prerelease": false,
+  "release_page": {
+    "url": "https://github.com/Meteorkid/XNook/releases/tag/v1.3.30",
+    "status": 200,
+    "bytes": 155782,
+    "final_host": "github.com"
+  },
+  "latest_api": {
+    "url": "https://api.github.com/repos/Meteorkid/XNook/releases/latest",
+    "status": 200,
+    "bytes": 6479,
+    "final_host": "api.github.com"
+  },
+  "checksums": {
+    "url": "https://github.com/Meteorkid/XNook/releases/download/v1.3.30/SHA256SUMS.txt",
+    "status": 200,
+    "bytes": 83,
+    "final_host": "release-assets.githubusercontent.com"
+  },
+  "dmg": {
+    "url": "https://github.com/Meteorkid/XNook/releases/download/v1.3.30/XNook-1.3.30.dmg",
+    "status": 200,
+    "bytes": 5933739,
+    "final_host": "release-assets.githubusercontent.com"
+  },
+  "dmg_sha256": "febcd0db52a56a48f416aed3e99f9630cffcdb5416751487f0f20e01e27fa84e",
+  "matches_local_verified_artifact": true,
+  "checksums_identical": true
+}

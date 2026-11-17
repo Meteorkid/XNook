@@ -24,6 +24,8 @@
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>LSUIElement</key>
     <true/>
+    <key>IslandPreviewProtocolVersion</key>
+    <integer>1</integer>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -38,7 +40,7 @@
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>X Nook needs access to your calendar to display upcoming events.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>X Nook needs to control other applications for app switching.</string>
+    <string>X Nook uses automation to read playback information, control playback in the current player, and switch between apps.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>X Nook transcribes the audio your Mac is playing so it can show live captions below the island. Recognition happens on this Mac.</string>
 </dict>

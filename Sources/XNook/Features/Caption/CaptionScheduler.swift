@@ -175,14 +175,22 @@ final class CaptionScheduler {
         return provider.estimatedLatency + (1 - p) * min(8, provider.estimatedLatency * 6)
     }
 
-    /// 反解区间上的链长 k。
-    /// 只累加证据等级高于该区间当前最高等级者——已由证书排除的低等级来源不占用本区间的预算。
-    func chainLength(for unitIndex: Int, prefetchability p: Double) -> Int {
+    /// 参与本区间预算竞争的来源。
+    /// 两道过滤：当前不可用的来源不占预算；已被证书覆盖的低等级来源不必再参与。
+    private func eligibleProviders(for unitIndex: Int) -> [CaptionEvidenceProvider] {
         let maxLevel = certificates[unitIndex]?.maxLevel
+        return chain.filter { provider in
+            guard provider.isAvailable else { return false }
+            if let maxLevel, provider.level <= maxLevel { return false }
+            return true
+        }
+    }
+
+    /// 反解区间上的链长 k。
+    func chainLength(for unitIndex: Int, prefetchability p: Double) -> Int {
         var cumulative: TimeInterval = 0
         var length = 0
-        for provider in chain {
-            if let maxLevel, provider.level <= maxLevel { continue }
+        for provider in eligibleProviders(for: unitIndex) {
             let cost = correctedCost(provider, prefetchability: p)
             if cumulative + cost > effectiveBudget { break }
             cumulative += cost
@@ -194,11 +202,14 @@ final class CaptionScheduler {
     /// 该区间上某来源是否允许执行。
     /// k 为 0 时退化为不要求可预取的流式识别兜底（见说明书 5.5 异常处理）。
     func shouldExecute(_ provider: CaptionEvidenceProvider, unitIndex: Int, prefetchability p: Double) -> Bool {
+        guard provider.isAvailable else { return false }
         let length = chainLength(for: unitIndex, prefetchability: p)
         if length == 0 {
             return !provider.prefetchRequired && provider.level == .streaming
         }
-        guard let position = chain.firstIndex(where: { $0 === provider }) else { return false }
+        // 序位必须在同一份「可竞争名单」里取，否则被跳过的来源会让序位错位。
+        let eligible = eligibleProviders(for: unitIndex)
+        guard let position = eligible.firstIndex(where: { $0 === provider }) else { return false }
         return position < length
     }
 

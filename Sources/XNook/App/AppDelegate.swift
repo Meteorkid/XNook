@@ -5,6 +5,8 @@ extension Notification.Name {
     static let xnookShowAboutPane = Notification.Name("xnookShowAboutPane")
     static let xnookScrollDown = Notification.Name("xnookScrollDown")
     static let xnookCollapse = Notification.Name("xnookCollapse")
+    static let xnookWindowDidPresent = Notification.Name("xnookWindowDidPresent")
+    static let xnookRevealPanel = Notification.Name("xnookRevealPanel")
     static let islandDidCollapse = Notification.Name("islandDidCollapse")
 }
 
@@ -23,19 +25,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     var notchWindow: NotchWindow?
     weak var notesManagerForTermination: NotesManager?
+    private(set) var discardsPendingNotesOnTermination = false
     let themeManager = ThemeManager()
     let updateManager = UpdateManager()
+    let activityCoordinator = PanelActivityCoordinator(
+        onPresent: { event in
+            if event.source == "calendar" { CalendarReminderManager.shared.playDueReminderSound() }
+        },
+        onAction: { action in
+            if action == .openCalendar,
+               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    )
+    lazy var claudeCompletionReceiver = ClaudeCompletionReceiver { [weak self] event in
+        guard let self, UserDefaults.standard.bool(forKey: "claudeCompletionEnabled"),
+              UserDefaults.standard.bool(forKey: "activityNotificationsEnabled") else { return }
+        self.activityCoordinator.setEnabled(true)
+        self.activityCoordinator.enqueue(PanelActivityEvent(source: event.source, id: event.id,
+            title: L10n.claudeResponseEnded, kind: .completion,
+            createdAt: event.createdAt, expiresAt: event.expiresAt))
+    }
+    private var claudePreferencesObserver: NSObjectProtocol?
+    private var claudeWasEnabled: Bool?
+    lazy var globalPanelShortcut = GlobalPanelShortcutController { [weak self] in
+        self?.revealPanelFromShortcut()
+    }
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var scrollMonitor: Any?
     private var islandHideObserver: NSObjectProtocol?
+    private var linkedIslandPreviewService: LinkedIslandPreviewService?
     private var pendingIslandShowURL: URL?
+    private var lastInboundMotionUptime: TimeInterval = -.infinity
     private var hasExplicitIslandVisibilityRequest = false
     private var ownsSharedData = false
+    private var licenseLockIsPresented = false
+    private(set) var licenseRetainedNotesManager: NotesManager?
     /// 统一的 isSwitchingApps 清除 WorkItem，确保只有一个活跃的清除计时器
     private var clearSwitchingAppsWorkItem: DispatchWorkItem?
-    /// 授权激活成功的观察者（仅在锁定状态注册）
-    private var licenseActivationObserver: NSObjectProtocol?
 
     /// 悬停自动展开是否关闭
     private var hoverToExpandDisabled: Bool {
@@ -66,21 +95,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsDefaults.register()
         IslandIntegrationSettings.registerDefaults()
         IslandIntegrationSettings.markProtocolAvailable(for: .xnook)
-        CalendarReminderManager.shared.startMonitoring()
-
-        // 授权检查必须先于灵动岛创建。
-        // 试用到期时直接进入锁定流程，不创建 NotchWindow——
-        // 这样"硬锁"是真的不工作，而不是仅弹一个可被忽略的提示。
-        LicenseManager.shared.refresh()
-        if !LicenseManager.shared.state.allowsFullAccess {
-            setupLicenseLockdown()
-            return
+        activityCoordinator.setEnabled(false)
+        claudePreferencesObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.synchronizeClaudeCompletion() }
         }
-
-        setupNotchWindow()
-        if let pendingIslandShowURL { handleIslandCommand(pendingIslandShowURL) }
+        CalendarReminderManager.shared.onReminder = { [weak activityCoordinator] reminder in
+            guard let activityCoordinator, LicenseManager.shared.state.allowsAccess else { return false }
+            activityCoordinator.setEnabled(UserDefaults.standard.bool(forKey: "activityNotificationsEnabled"))
+            guard activityCoordinator.isEnabled else { return false }
+            activityCoordinator.enqueue(.calendarReminder(reminder))
+            // 已交给统一队列，不能在提示被门控时绕过队列发声。
+            return true
+        }
         setupMenuBarItem()
-        setupScrollMonitor()
+        LicenseManager.shared.onAccessChange = { [weak self] allowed in self?.applyLicenseAccess(allowed) }
+        LicenseManager.shared.refresh()
+        applyLicenseAccess(LicenseManager.shared.state.allowsAccess)
+        LicenseManager.shared.startMonitoring()
 
         // 监听跨进程通知：对方应用请求本应用隐藏
         // 通知名格式：island.switch.hide.{targetAppName}
@@ -93,8 +126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ) { [weak self] note in
                 let peer = note.userInfo?["source"] as? String
                 let shownAt = note.userInfo?["shownAt"] as? TimeInterval
+                let motion: IslandSwitchMotion?
+                do { motion = try IslandSwitchMotion.decode(userInfo: note.userInfo) }
+                catch { return }
                 Task { @MainActor [weak self] in
-                    self?.hideIslandForSwitch(from: peer, shownAt: shownAt)
+                    self?.hideIslandForSwitch(from: peer, shownAt: shownAt, motion: motion)
                 }
             }
         }
@@ -106,58 +142,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        scheduleInitialVisibilityResolution()
-
-        // 启动自动检查更新
-        updateManager.startAutoCheck()
-
         // 监听更新状态变化，实时刷新菜单栏
         observeUpdateState()
     }
 
-    // MARK: - 授权锁定
-
-    /// 试用到期或未授权时的启动路径。
-    ///
-    /// 刻意不创建灵动岛窗口、不注册全局滚动监听、不启动更新检查——
-    /// 未授权状态下这些功能一律不工作。仅保留：
-    /// 1. 一个激活窗口（用户填码的入口）
-    /// 2. 一个最小菜单栏图标（用于退出，避免用户无法关闭进程）
-    private func setupLicenseLockdown() {
-        // 监听激活成功，激活后立即恢复正常启动流程，无需用户重启
-        licenseActivationObserver = NotificationCenter.default.addObserver(
-            forName: .xnookLicenseActivated,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.recoverFromLockdown()
+    /// 授权到期与唤醒共用一个门禁，同时停止窗口和后台服务。
+    func applyLicenseAccess(_ allowed: Bool) {
+        guard allowed else {
+            if let notesManagerForTermination { licenseRetainedNotesManager = notesManagerForTermination }
+            NotificationCenter.default.post(name: .xnookLicenseLocked, object: nil)
+            notesManagerForTermination?.flushPendingChanges()
+            CalendarReminderManager.shared.stopMonitoring()
+            updateManager.stopAutoCheck()
+            activityCoordinator.setEnabled(false)
+            claudeCompletionReceiver.setEnabled(false)
+            claudeWasEnabled = false
+            globalPanelShortcut.suspend()
+            linkedIslandPreviewService?.stop()
+            linkedIslandPreviewService = nil
+            if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+            scrollMonitor = nil
+            clearSwitchingAppsWorkItem?.cancel()
+            clearSwitchingAppsWorkItem = nil
+            AppSwitcher.shared.cancelSwitch()
+            notchWindow?.tearDown()
+            notchWindow?.contentView = nil
+            notchWindow?.orderOut(nil)
+            notchWindow?.close()
+            notchWindow = nil
+            NSCursor.arrow.set()
+            if !licenseLockIsPresented {
+                licenseLockIsPresented = true
+                LicenseExpiryWindowController.shared.show()
             }
+            return
         }
-
-        setupMenuBarItem()
-        LicenseExpiryWindowController.shared.show()
-    }
-
-    /// 激活成功后从锁定状态恢复。
-    private func recoverFromLockdown() {
         guard notchWindow == nil else { return }
-
-        // 移除锁定期的观察者，避免重复恢复
-        if let licenseActivationObserver {
-            NotificationCenter.default.removeObserver(licenseActivationObserver)
-            self.licenseActivationObserver = nil
-        }
-
+        licenseLockIsPresented = false
         LicenseExpiryWindowController.shared.close()
-
-        // 走一遍正常的启动流程
+        activityCoordinator.setEnabled(UserDefaults.standard.bool(forKey: "activityNotificationsEnabled"))
+        synchronizeClaudeCompletion()
+        CalendarReminderManager.shared.startMonitoring()
         setupNotchWindow()
         setupScrollMonitor()
+        setupLinkedIslandPreviewService()
+        globalPanelShortcut.activate()
+        if let pendingIslandShowURL { handleIslandCommand(pendingIslandShowURL) }
+        scheduleInitialVisibilityResolution()
         updateManager.startAutoCheck()
-        observeUpdateState()
-
-        showIsland(preferMouseScreen: false, hidePeers: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -165,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        discardsPendingNotesOnTermination = false
         guard notesManagerForTermination?.prepareForTermination() != false else {
             let alert = NSAlert()
             alert.alertStyle = .warning
@@ -173,7 +206,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: L10n.back)
             alert.addButton(withTitle: L10n.notesQuitWithoutSaving)
             sender.activate(ignoringOtherApps: true)
-            return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+            guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+            discardsPendingNotesOnTermination = true
+            return .terminateNow
         }
         return .terminateNow
     }
@@ -181,102 +216,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard url.scheme == AppSwitcher.shared.currentURLScheme else { continue }
-
-            // 激活链接分流：xnook://activate?code=...
-            // 与灵动岛指令（xnook://{appName}/show）共用同一 scheme，靠 host 区分。
             if url.host == "activate" {
                 handleActivationURL(url)
                 continue
             }
-
             handleIslandCommand(url)
         }
     }
 
-    /// 处理一键激活链接。
-    ///
-    /// 购买邮件中的链接形如 `xnook://activate?code=XNK1…`，
-    /// 用户点击后自动填入邀请码并完成激活，免去复制粘贴长字符串。
     private func handleActivationURL(_ url: URL) {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
-              !code.isEmpty else {
-            LicenseExpiryWindowController.shared.show()
-            return
-        }
-
+              !code.isEmpty else { LicenseExpiryWindowController.shared.show(); return }
         Task { @MainActor in
-            let outcome = await LicenseManager.shared.activate(input: code)
-            switch outcome {
-            case .success:
-                // 激活成功：通知由 LicenseManager 之后的流程统一处理
-                NotificationCenter.default.post(name: .xnookLicenseActivated, object: nil)
-            case .failure(let reason):
-                // 激活失败仍打开窗口，让用户看到具体原因并手工重试
+            if case .failure = await LicenseManager.shared.activate(input: code) {
                 LicenseExpiryWindowController.shared.show()
-                FileHandle.standardError.write(
-                    Data("license activation failed: \(reason)\n".utf8)
-                )
             }
         }
     }
 
     private func handleIslandCommand(_ url: URL) {
-        // 解析路径: xnook://xnook/show
-        // url.host 是目标应用名，检查是否是发给自己的
         guard let targetName = url.host,
               targetName == AppSwitcher.shared.currentAppName,
               url.path == "/show" else { return }
-        hasExplicitIslandVisibilityRequest = true
-        guard let window = notchWindow else {
-            pendingIslandShowURL = url
-            return
+        let motion: IslandSwitchMotion?
+        do { motion = try IslandSwitchMotion.decode(url: url) }
+        catch { return }
+        guard let attentionAdmission = IslandAttentionEpoch.admission(for: url, motion: motion) else { return }
+        if let motion {
+            guard motion.isTimely(at: ProcessInfo.processInfo.systemUptime),
+                  motion.issuedUptime > lastInboundMotionUptime else { return }
+            if notchWindow == nil, let pendingIslandShowURL,
+               let pending = try? IslandSwitchMotion.decode(url: pendingIslandShowURL),
+               pending.issuedUptime >= motion.issuedUptime { return }
         }
+        hasExplicitIslandVisibilityRequest = true
+        guard let window = notchWindow else { pendingIslandShowURL = url; return }
         pendingIslandShowURL = nil
+        if let motion { lastInboundMotionUptime = motion.issuedUptime }
         AppSwitcher.shared.cancelSwitch()
-
-        // 立即设置切换标志（同步），防止 activeSpaceDidChange 重新显示窗口
-        window.isHiddenByIslandSwitch = false
-        window.isSwitchingApps = true
-        window.swipeRecognizer.suppress(for: 0.8)
-        scheduleClearSwitchingApps(window: window, delay: 1.5)
-
-        // 先收起并显示自身，确认接管后再请求来源岛隐藏
-        NotificationCenter.default.post(name: .xnookCollapse, object: nil)
-
-        // 同步缩小窗口 frame 到收起态尺寸，避免 showAtMouseScreen 时以展开态闪现
-        let collapsedW = IslandSizeCalculator.collapsedPillWidth
-        let collapsedH = IslandSizeCalculator.collapsedShapeHeight + 4 // 留一点余量
-        window.resizeToFitCollapse(contentWidth: collapsedW, contentHeight: collapsedH)
-        window.islandState = .collapsed
-
-        window.showAtMouseScreen()
-
-        // 发送跨进程通知让其他所有岛隐藏
-        for islandName in AppSwitcher.shared.otherIslandNames {
-            guard isValidNotificationAppName(islandName) else { continue }
-            let hideNotification = "\(hideNotificationPrefix)\(islandName)"
-            postHideNotification(hideNotification)
+        clearSwitchingAppsWorkItem?.cancel()
+        window.beginInboundHandoff(motion: motion) { [weak self, weak window] generation in
+            guard let self, let window else { return }
+            guard IslandAttentionEpoch.isCurrent(attentionAdmission) else {
+                window.hideWindowForIslandSwitch(animated: false)
+                return
+            }
+            // 两进程使用同一系统 uptime 起点；内容准备完成后再发送已显示回执。
+            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                || UserDefaults.standard.bool(forKey: "reduceMotion") || UserDefaults.standard.bool(forKey: "disableAnimations")
+            let readyMotion = motion?.arriving(at: window.switchGeometry)
+                .starting(at: ProcessInfo.processInfo.systemUptime + 0.05,
+                                              reduceMotion: reduceMotion)
+            window.showPreparedHandoff(generation: generation, motion: readyMotion)
+            self.scheduleClearSwitchingApps(window: window, delay: 1.5)
+            self.requestOtherIslandsToHide(motion: readyMotion)
         }
     }
 
     func hideIslandForSwitch(from peer: String? = nil, shownAt: TimeInterval? = nil,
-                             using switcher: AppSwitcher? = nil) {
+                             using switcher: AppSwitcher? = nil, motion: IslandSwitchMotion? = nil) {
+        let switcher = switcher ?? .shared
         guard let window = notchWindow,
-              (switcher ?? .shared).acceptPeerHideRequest(from: peer, shownAt: shownAt, after: window.lastExplicitShowTime)
-        else { return }
+              switcher.acceptPeerHideRequest(from: peer, shownAt: shownAt,
+                  after: window.lastExplicitShowTime, motion: motion) else { return }
         hasExplicitIslandVisibilityRequest = true
-        window.isHiddenByIslandSwitch = true
-        window.isSwitchingApps = true
-        window.orderOut(nil)
-        scheduleClearSwitchingApps(window: window, delay: 1.0)
+        clearSwitchingAppsWorkItem?.cancel()
+        window.hideWindowForIslandSwitch(motion: switcher.acceptedPeerMotion)
     }
 
     /// 统一调度 isSwitchingApps 清除，取消之前的计时器避免竞争
     func scheduleClearSwitchingApps(window: NotchWindow?, delay: TimeInterval) {
         clearSwitchingAppsWorkItem?.cancel()
+        let handoffGeneration = window?.handoffState.generation
         let workItem = DispatchWorkItem { [weak self, weak window] in
-            guard let window else { return }
+            guard let window, handoffGeneration == window.handoffState.generation else { return }
             self?.clearSwitchingProtection(window: window)
         }
         clearSwitchingAppsWorkItem = workItem
@@ -284,7 +298,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func clearSwitchingProtection(window: NotchWindow, using switcher: AppSwitcher? = nil) {
-        guard !(switcher ?? .shared).isSwitchInProgress else { return }
+        guard !(switcher ?? .shared).isSwitchInProgress,
+              window.handoffState.pendingPreparation == nil,
+              !window.handoffState.isPresentingInbound,
+              !window.handoffState.isFadingOut else { return }
         window.isSwitchingApps = false
     }
 
@@ -292,10 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupScrollMonitor() {
         scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            // Global monitor 回调不一定在主线程，确保后续 UI 操作安全
-            DispatchQueue.main.async {
-                self?.handleScrollEvent(event)
-            }
+            // AppKit 保证事件监听在主线程执行，跟手输入无需再排队一轮。
+            MainActor.assumeIsolated { self?.handleScrollEvent(event) }
         }
     }
 
@@ -304,26 +319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let mouseLocation = NSEvent.mouseLocation
 
-        // 1. 横滑切换手势（仅由鼠标下最上层的收起岛响应）
-        if IslandIntegrationSettings.isSwipeSwitchEnabled,
-           IslandWindowOwnership.canHandleGlobalSwipe(
-            isVisible: window.isVisible,
-            isCollapsed: window.islandState == .collapsed,
-            windowFrame: window.frame,
-            mouseLocation: mouseLocation
-        ) {
-            let result = window.swipeRecognizer.handleScroll(event: event)
-            if case .triggered(_) = result {
-                guard window.isFrontmostIslandWindow() else {
-                    window.swipeRecognizer.reset()
-                    return
-                }
-                AppSwitcher.shared.switchToNextIsland()
-                return
-            }
-        } else {
-            window.swipeRecognizer.reset()
-        }
+        if window.handleIslandSwipe(event) { return }
+        guard !window.isSwitchingApps, event.momentumPhase.isEmpty else { return }
 
         // 2. 双指下滑展开面板
         // 自然滚动开启时 deltaY 正值=手指下滑；关闭时 deltaY 负值=手指下滑
@@ -354,20 +351,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .xnookScrollDown, object: nil)
     }
 
+    private func setupLinkedIslandPreviewService() {
+        let service = LinkedIslandPreviewService(app: .xnook) { [weak self] in
+            self?.captureLinkedIslandPreview()
+        }
+        linkedIslandPreviewService = service
+        service.start()
+    }
+
+    private func captureLinkedIslandPreview() -> IslandPreviewSnapshot? {
+        guard let window = notchWindow, Self.canCaptureLinkedIslandPreview(window),
+              let content = window.contentView, content.window === window,
+              let background = IslandSlideAnimator.background(in: content), background.window === window,
+              window.switchGeometry != nil else { return nil }
+        content.layoutSubtreeIfNeeded()
+        guard Self.canCaptureLinkedIslandPreview(window), let outline = window.switchGeometry else { return nil }
+        do {
+            let snapshot = try LinkedIslandPreviewCanvas.capture(view: content, outline: outline)
+            guard Self.canCaptureLinkedIslandPreview(window), window.switchGeometry == outline else { return nil }
+            return snapshot
+        } catch is LinkedIslandPreviewCanvas.CaptureError {
+            // 当前视图不适合捕获，私有连接返回 unavailable，提交仍走原 /show。
+            return nil
+        } catch {
+            NSLog("Linked island preview capture failed (%@)", String(reflecting: type(of: error)))
+            return nil
+        }
+    }
+
+    private static func canCaptureLinkedIslandPreview(_ window: NotchWindow) -> Bool {
+        !window.isVisible && window.islandState == .collapsed && window.isCollapsedPreviewReady
+            && !window.isInteractiveSwitchPreviewActive && !window.isSwitchingApps
+            && !window.isHandoffLayoutLocked && !window.isPreviewingIslandSwitch && !window.isDragging
+            && !window.swipeRecognizer.isActive && window.handoffState.pendingPreparation == nil
+            && window.handoffState.pendingPresentation == nil
+    }
+
     private func setupNotchWindow() {
         let window = NotchWindow()
+        notchWindow = window
         let hostView = NotchHostingView(
             rootView: NotchContentView(onSizeChange: { [weak window] w, h in
                 window?.resizeToFit(contentWidth: w, contentHeight: h)
-            })
+            }, notesManager: licenseRetainedNotesManager, activityCoordinator: activityCoordinator)
         )
+        licenseRetainedNotesManager = nil
         hostView.frame = window.contentView!.bounds
         hostView.autoresizingMask = [.width, .height]
         if #available(macOS 13.0, *) {
             hostView.sizingOptions = []
         }
         window.contentView?.addSubview(hostView)
-        notchWindow = window
         themeManager.onSchemeChange = { [weak self] in
             guard let self else { return }
             if let notchWindow = self.notchWindow {
@@ -408,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleNotch() {
         if let w = notchWindow {
             if w.isVisible {
+                AppSwitcher.shared.cancelSwitch()
                 w.hideWindow()
             } else {
                 showIsland(preferMouseScreen: false, hidePeers: true)
@@ -419,12 +454,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showIsland(preferMouseScreen: false, hidePeers: true)
     }
 
+    func openLayoutEditor() {
+        showIsland(preferMouseScreen: false, hidePeers: true)
+        NotificationCenter.default.post(name: .xnookEditPanelLayout, object: nil)
+    }
+
     @objc func openPreferences() {
-        if let w = settingsWindow, w.isVisible {
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
+        let window = settingsWindowForPresentation()
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func makeSettingsContent() -> some View {
+        SettingsView(
+            claudeReceiver: claudeCompletionReceiver,
+            globalPanelShortcut: globalPanelShortcut
+        )
+            .environment(themeManager)
+            .environment(updateManager)
+    }
+
+    func registerSettingsWindow(_ window: NSWindow) {
+        window.minSize = NSSize(width: 560, height: 400)
+        window.maxSize = NSSize(width: 560, height: 700)
+        let frame = window.frame
+        let height = min(max(frame.height, window.minSize.height), window.maxSize.height)
+        if frame.width != 560 || frame.height != height {
+            // 恢复旧窗口时也沿用尺寸约束，保留原来的顶部位置。
+            window.setFrame(NSRect(x: frame.minX, y: frame.maxY - height, width: 560, height: height), display: false)
         }
+        guard settingsWindow !== window else { return }
+        let previousWindow = settingsWindow
+        settingsWindow = window
+        window.title = L10n.xnookSettings
+        window.isReleasedWhenClosed = false
+        updateWindowAppearance(window)
+        // 系统 scene 接管设置入口后，移除此前创建的备用面板。
+        previousWindow?.close()
+    }
+
+    func settingsWindowForPresentation() -> NSWindow {
+        if let settingsWindow { return settingsWindow }
 
         let w = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 550),
@@ -432,22 +503,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        w.minSize = NSSize(width: 560, height: 400)
-        w.maxSize = NSSize(width: 560, height: 700)
         w.isFloatingPanel = true
         w.hidesOnDeactivate = false
-        w.title = L10n.xnookSettings
         w.center()
-        w.isReleasedWhenClosed = false
-        w.contentView = NSHostingView(
-            rootView: SettingsView()
-                .environment(themeManager)
-                .environment(updateManager)
-        )
-        settingsWindow = w
-        updateWindowAppearance(w)
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        w.contentView = NSHostingView(rootView: makeSettingsContent())
+        registerSettingsWindow(w)
+        return w
     }
 
     @objc private func openPreferencesFromNotification() {
@@ -499,6 +560,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        LicenseManager.shared.stopMonitoring()
+        updateManager.stopAutoCheck()
+        linkedIslandPreviewService?.stop()
+        linkedIslandPreviewService = nil
+        globalPanelShortcut.shutdown()
+        claudeCompletionReceiver.shutdown()
+        if let observer = claudePreferencesObserver {
+            NotificationCenter.default.removeObserver(observer)
+            claudePreferencesObserver = nil
+        }
+        CalendarReminderManager.shared.onReminder = nil
+        activityCoordinator.shutdown()
+        clearSwitchingAppsWorkItem?.cancel()
+        clearSwitchingAppsWorkItem = nil
+        notchWindow?.tearDown()
         CalendarReminderManager.shared.stopMonitoring()
         if let observer = islandHideObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
@@ -510,24 +586,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func postHideNotification(_ name: String) {
-        guard name.hasPrefix(hideNotificationPrefix), notchWindow?.isVisible == true else { return }
+    private func synchronizeClaudeCompletion() {
+        guard ownsSharedData else { return }
+        let enabled = LicenseManager.shared.state.allowsAccess
+            && UserDefaults.standard.bool(forKey: "claudeCompletionEnabled")
+            && UserDefaults.standard.bool(forKey: "activityNotificationsEnabled")
+        guard claudeWasEnabled != enabled else { return }
+        claudeWasEnabled = enabled
+        claudeCompletionReceiver.setEnabled(enabled)
+    }
+
+    private func revealPanelFromShortcut() {
+        guard ownsSharedData, let window = notchWindow else { return }
+        showIsland(preferMouseScreen: true, hidePeers: true)
+        window.requestPanelReveal()
+    }
+
+    private func postHideNotification(_ name: String, motion: IslandSwitchMotion? = nil) {
+        // 隔离 XCTest/预览宿主不能向用户的正式同伴发送隐藏请求。
+        guard Bundle.main.bundleIdentifier == "com.meteorkid.xnook",
+              name.hasPrefix(hideNotificationPrefix), notchWindow?.isVisible == true else { return }
         let appName = String(name.dropFirst(hideNotificationPrefix.count))
         guard isValidNotificationAppName(appName) else { return }
+        var info: [String: Any] = ["source": AppSwitcher.shared.currentAppName ?? "",
+                                   "shownAt": notchWindow?.lastExplicitShowTime ?? 0]
+        motion?.userInfo.forEach { info[$0.key] = $0.value }
         DistributedNotificationCenter.default().postNotificationName(
             Notification.Name(name),
             object: nil,
-            userInfo: ["source": AppSwitcher.shared.currentAppName ?? "",
-                       "shownAt": notchWindow?.lastExplicitShowTime ?? 0],
+            userInfo: info,
             deliverImmediately: true
         )
     }
 
     func updateWindowAppearance(_ window: NSWindow) {
-        let scheme = themeManager.resolvedScheme
-        window.appearance = scheme == .dark
-            ? NSAppearance(named: .darkAqua)
-            : NSAppearance(named: .aqua)
+        let applicationIsDark = themeManager.resolvedScheme == .dark
+        let isDark = window is NotchWindow
+            ? IslandBackgroundPolicy.isDark(
+                style: IslandBackgroundStyle.resolved(from: UserDefaults.standard.string(forKey: "islandBackgroundStyle")),
+                applicationIsDark: applicationIsDark)
+            : applicationIsDark
+        let name: NSAppearance.Name = isDark ? .darkAqua : .aqua
+        guard window.appearance?.name != name else { return }
+        window.appearance = NSAppearance(named: name)
     }
 
     private func scheduleInitialVisibilityResolution() {
@@ -587,10 +688,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestOtherIslandsToHide()
     }
 
-    private func requestOtherIslandsToHide() {
+    private func requestOtherIslandsToHide(motion: IslandSwitchMotion? = nil) {
         for otherIslandName in AppSwitcher.shared.otherIslandNames {
             let hideNotification = "\(hideNotificationPrefix)\(otherIslandName)"
-            postHideNotification(hideNotification)
+            postHideNotification(hideNotification, motion: motion)
         }
     }
 }

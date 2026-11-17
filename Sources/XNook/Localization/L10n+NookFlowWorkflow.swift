@@ -27,4 +27,16 @@ extension L10n {
     static func flowFileCount(_ count: Int) -> String { localized(zh: "查看文件（\(count)）", en: "View files (\(count))") }
     static func flowViewAll(_ count: Int) -> String { localized(zh: "查看全部（\(count)）", en: "View all (\(count))") }
     static func flowEnded(_ time: String) -> String { localized(zh: "结束 \(time)", en: "Ended \(time)") }
+
+    static var flowRelinkNote: String { localized(zh: "关联已有笔记", en: "Link existing note") }
+    static var flowChangeNote: String { localized(zh: "重新关联笔记", en: "Relink note") }
+    static var flowReselectFile: String { localized(zh: "重新选择文件", en: "Select replacement") }
+    static var flowNoLinkedNote: String { localized(zh: "尚未关联笔记", en: "No linked note") }
+    static var flowNoLinkedFiles: String { localized(zh: "尚未关联文件", en: "No linked files") }
+    static var flowBackToHistory: String { localized(zh: "返回全部任务", en: "Back to all tasks") }
+    static var flowNoHistory: String { localized(zh: "暂无已结束任务", en: "No completed tasks") }
+    static var flowFileSelectionFailed: String { localized(
+        zh: "无法读取所选文件，请重新选择。原关联已保留。",
+        en: "The selected file could not be read. Select it again. The original link is preserved.") }
+    static func flowLinkedNoteTitle(_ title: String) -> String { localized(zh: "已关联：\(title)", en: "Linked: \(title)") }
 }

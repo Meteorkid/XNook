@@ -25,7 +25,15 @@ final class IslandWindowOwnershipTests: XCTestCase {
             throw XCTSkip("当前测试环境没有可用屏幕，跳过依赖 Window Server 的校验")
         }
 
-        let window = NotchWindow()
+        let suiteName = "XNookTests.WindowOwnership.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.set(false, forKey: "hideInFullscreen")
+        let window = NotchWindow(defaults: defaults, markVisible: {}, onExplicitShow: {})
+        NSWorkspace.shared.notificationCenter.removeObserver(window)
+        defer {
+            window.close()
+            defaults.removePersistentDomain(forName: suiteName)
+        }
         window.level = .screenSaver
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }
@@ -36,6 +44,34 @@ final class IslandWindowOwnershipTests: XCTestCase {
         }
 
         XCTAssertTrue(window.isFrontmostIslandWindow())
+    }
+
+    func testLinkedCanvasIsIgnoredWhilePeerWindowStillOwnsSwipe() {
+        let bounds = CGRect(x: 100, y: 0, width: 240, height: 50)
+        let snapshots = [
+            IslandWindowSnapshot(number: 99, ownerPID: 100, bounds: bounds, alpha: 1,
+                                 level: NSWindow.Level.statusBar.rawValue + 4),
+            IslandWindowSnapshot(number: 20, ownerPID: 200, bounds: bounds, alpha: 1,
+                                 level: NSWindow.Level.statusBar.rawValue + 2),
+            IslandWindowSnapshot(number: 10, ownerPID: 100, bounds: bounds, alpha: 1,
+                                 level: NSWindow.Level.statusBar.rawValue + 1),
+        ]
+        XCTAssertEqual(IslandWindowOwnership.frontmostWindowNumber(
+            overlapping: bounds, snapshots: snapshots, islandPIDs: [100, 200]), 20)
+    }
+
+    func testOrdinaryWindowAboveIslandIsNotIgnoredWithLinkedCanvas() {
+        let bounds = CGRect(x: 100, y: 0, width: 240, height: 50)
+        let canvas = IslandWindowSnapshot(number: 99, ownerPID: 100, bounds: bounds, alpha: 1,
+                                         level: NSWindow.Level.statusBar.rawValue + 4)
+        let overlay = IslandWindowSnapshot(number: 30, ownerPID: 100, bounds: bounds, alpha: 1,
+                                          level: NSWindow.Level.statusBar.rawValue + 3)
+        let island = IslandWindowSnapshot(number: 10, ownerPID: 100, bounds: bounds, alpha: 1,
+                                         level: NSWindow.Level.statusBar.rawValue + 1)
+        XCTAssertEqual(IslandWindowOwnership.frontmostWindowNumber(
+            overlapping: bounds, snapshots: [canvas, overlay, island], islandPIDs: [100]), 30)
+        XCTAssertNil(IslandWindowOwnership.frontmostWindowNumber(
+            overlapping: bounds, snapshots: [canvas], islandPIDs: [100]))
     }
 
     func testGlobalSwipeRequiresVisibleCollapsedIslandUnderPointer() {

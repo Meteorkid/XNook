@@ -24,6 +24,10 @@ final class LyricEvidenceProvider: CaptionEvidenceProvider {
     var onCandidates: (([CaptionCandidate]) -> Void)?
     var onCoverageChange: (() -> Void)?
 
+    /// 没有歌词时不占预算：否则它会以 5 级身份把流式识别挤出链外，
+    /// 而视频/会议恰恰只能靠流式识别出字。
+    var isAvailable: Bool { !lines.isEmpty }
+
     private let generation: () -> Int
     /// 上次提交的签名。同一份歌词不重复灌入，避免无谓的候选洪泛。
     private var lastSignature: String = ""

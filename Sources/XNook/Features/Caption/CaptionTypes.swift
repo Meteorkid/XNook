@@ -101,6 +101,12 @@ protocol CaptionEvidenceProvider: AnyObject {
     var estimatedLatency: TimeInterval { get }
     var timeoutAction: CaptionTimeoutAction { get }
 
+    /// 当前是否有能力为本区间贡献候选。
+    ///
+    /// 这一项直接影响反解：没有歌词时，歌词来源不该占着预算把流式识别挤出链外。
+    /// 默认实现恒为 true，只有「需要外部内容才能工作」的来源才覆盖它。
+    var isAvailable: Bool { get }
+
     /// 产出的候选条目回调（可能多次调用，流式来源会反复产出）。
     var onCandidates: (([CaptionCandidate]) -> Void)? { get set }
     /// 产出的绝对源时间区间发生变化时回调（用于触发证书重判）。
@@ -108,6 +114,10 @@ protocol CaptionEvidenceProvider: AnyObject {
 
     func start()
     func stop()
+}
+
+extension CaptionEvidenceProvider {
+    var isAvailable: Bool { true }
 }
 
 // MARK: - 时间区间单元

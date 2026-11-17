@@ -1,0 +1,51 @@
+{
+  "version": "1.3.22",
+  "preparedAtUTC": "2026-10-25T06:39:05.447171+00:00",
+  "implementationCommit": "bb05334",
+  "candidateBase": "e7830bd",
+  "previousRelease": "v1.3.21",
+  "integrationCommit": "efc5d1ea44a952dc4de209a0d5bb753d9b935d80",
+  "installedCandidateRuntimePreserved": true,
+  "uncommittedWebPageTitleFeatureIncluded": false,
+  "tests": {
+    "total": 977,
+    "passed": 973,
+    "skipped": 4,
+    "failed": 0,
+    "command": "XNOOK_RENDER_UI=1 bash scripts/test-signed-bookmarks.sh"
+  },
+  "isolatedOverviewClick": {
+    "passed": true,
+    "widthPt": 460,
+    "productionAppInstalled": false
+  },
+  "releaseBuild": true,
+  "package": {
+    "version": "1.3.22",
+    "architecture": "arm64",
+    "minimumOS": "14.0",
+    "signatureVerified": true,
+    "signing": "ad-hoc",
+    "notarized": false,
+    "dmgIntegrityVerified": true,
+    "mountedAppMatchesBuiltApp": true,
+    "dmgSHA256": "ddf7855a0e69fbb833fe4d8a8696302fa6f0f97a0f068d7c8da4078c1e896920",
+    "dmgSize": 5289850,
+    "executableSHA256": "a654bc931a6572301e47ca7d7339e6c52cbfa4df0c96ab38195bceaf00a03de4",
+    "claudeHookMatchesSource": true,
+    "bookmarkEntitlement": true,
+    "appleEventsEntitlement": true
+  },
+  "sourceInputs": {
+    "manifest": "source-hashes-1.3.22.json",
+    "sha256": "9199f7866cf8703923eafa58b52c771d1eeb876e1801e58bccff507614ce663e",
+    "count": 218
+  },
+  "knownLimitations": [
+    "Global shortcut physical key activation unresolved and left unset by user request",
+    "Spotify native seeking and real Claude client not covered by this release test",
+    "Two earlier isolated-host geometry warnings not localized",
+    "VoiceOver, external multi-display and frame-rate acceptance pending"
+  ],
+  "localInstallation": "to be verified after publication"
+}

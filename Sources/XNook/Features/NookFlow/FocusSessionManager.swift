@@ -14,10 +14,6 @@ final class FocusSessionManager {
     /// 二进制，与主偏好共用同一个 plist 会互相牵连：任一侧损坏都会连累另一侧。
     private static let storeSuiteName = "com.meteorkid.xnook.nookflow"
 
-    /// 历史保留上限。每条记录可携带 security-scoped bookmark（数百字节到数 KB），
-    /// 且每次写入都是全量编码，无节制增长会让启动解码与每次操作越来越慢。
-    static let historyLimit = 200
-
     /// 单个会话最多保留的文件快照，避免一次性关联整个文件架导致单条记录膨胀。
     static let linkedFileLimit = 50
 
@@ -32,25 +28,24 @@ final class FocusSessionManager {
 
     /// 存储介质（可注入 UserDefaults suite 用于测试）
     private let userDefaults: UserDefaults
+    private let legacyUserDefaults: UserDefaults?
     private let writeData: (Data) throws -> Void
+    private let onSessionEnded: (FocusSession) -> Void
 
     // MARK: - Init
 
     init(
         userDefaults: UserDefaults? = nil,
-        writeData: ((Data) throws -> Void)? = nil
+        legacyUserDefaults: UserDefaults? = nil,
+        writeData: ((Data) throws -> Void)? = nil,
+        onSessionEnded: @escaping (FocusSession) -> Void = { _ in }
     ) {
-        guard let injected = userDefaults else {
-            let store = Self.resolvedStore()
-            self.userDefaults = store
-            self.writeData = writeData ?? { store.set($0, forKey: Self.storageKey) }
-            // 迁移只发生在默认存储路径上；注入的 store（如测试）一律不碰主偏好。
-            Self.migrateLegacyStore(to: store)
-            loadFromStorage()
-            return
-        }
-        self.userDefaults = injected
-        self.writeData = writeData ?? { injected.set($0, forKey: Self.storageKey) }
+        let store = userDefaults ?? Self.resolvedStore()
+        self.userDefaults = store
+        // 注入目标时只使用显式注入的迁移来源，测试不会接触主偏好。
+        self.legacyUserDefaults = legacyUserDefaults ?? (userDefaults == nil ? .standard : nil)
+        self.writeData = writeData ?? { store.set($0, forKey: Self.storageKey) }
+        self.onSessionEnded = onSessionEnded
         loadFromStorage()
     }
 
@@ -58,19 +53,52 @@ final class FocusSessionManager {
         UserDefaults(suiteName: storeSuiteName) ?? .standard
     }
 
-    /// 把仍停留在主偏好里的旧历史搬到独立存储域。
-    /// 只有写入新位置成功后才清除旧位置，搬运失败时保留原数据不动。
-    private static func migrateLegacyStore(to store: UserDefaults) {
-        let standard = UserDefaults.standard
-        guard store !== standard,
-              let payload = standard.object(forKey: storageKey),
-              store.object(forKey: storageKey) == nil else { return }
-        store.set(payload, forKey: storageKey)
-        guard store.object(forKey: storageKey) != nil else { return }
-        standard.removeObject(forKey: storageKey)
+    // MARK: - 会话生命周期
+
+    enum PendingStartResult: Equatable {
+        case started(UUID)
+        case alreadyStarted(UUID)
+        case activeTaskConflict
+        case identifierConflict
+        case storageUnavailable
+        case invalidTask
     }
 
-    // MARK: - 会话生命周期
+    /// nil 表示来源集合未知，调用者不能按空历史进行导入去重或恢复清理。
+    var startedPendingTaskIDs: Set<UUID>? {
+        guard storageError == nil else { return nil }
+        let sessions = [activeSession].compactMap { $0 } + history
+        var sessionsByOrigin: [UUID: UUID] = [:]
+        for session in sessions {
+            guard let origin = session.originPendingTaskID else { continue }
+            // 旧版本的来源与会话 ID 可以不同；仅一来源指向不同会话时无法安全确认移交。
+            if let existing = sessionsByOrigin[origin], existing != session.id { return nil }
+            sessionsByOrigin[origin] = session.id
+        }
+        return Set(sessionsByOrigin.keys)
+    }
+
+    @discardableResult
+    func startPendingTask(id: UUID, title: String) -> PendingStartResult {
+        guard storageError == nil else { return .storageUnavailable }
+        guard startedPendingTaskIDs != nil else { return .identifierConflict }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 500 else { return .invalidTask }
+        if let existing = ([activeSession].compactMap { $0 } + history).first(where: { $0.originPendingTaskID == id }) {
+            return .alreadyStarted(existing.id)
+        }
+        if session(id: id) != nil { return .identifierConflict }
+        if let activeSession {
+            activityMessage = L10n.flowExistingTask(activeSession.title)
+            return .activeTaskConflict
+        }
+        let session = FocusSession(id: id, title: trimmed, eventIdentifier: nil,
+            startedAt: Date(), scheduledEndAt: nil, endedAt: nil, state: .active,
+            linkedNote: nil, linkedFiles: [], originPendingTaskID: id)
+        guard persist(activeSession: session, history: history) else { return .storageUnavailable }
+        activityMessage = nil
+        return .started(id)
+    }
 
     @discardableResult
     func start(
@@ -104,12 +132,11 @@ final class FocusSessionManager {
         guard var session = activeSession else { return true }
         session.endedAt = Date()
         session.state = .ended
-        var candidateHistory = [session] + history
-        if candidateHistory.count > Self.historyLimit {
-            candidateHistory = Array(candidateHistory.prefix(Self.historyLimit))
-        }
+        // 界面限制首批展示数量，持久化保留全部历史及可编辑的关联资料。
+        let candidateHistory = [session] + history
         guard persist(activeSession: nil, history: candidateHistory) else { return false }
         activityMessage = nil
+        onSessionEnded(session)
         return true
     }
 
@@ -118,6 +145,55 @@ final class FocusSessionManager {
     func session(id: UUID) -> FocusSession? {
         if activeSession?.id == id { return activeSession }
         return history.first { $0.id == id }
+    }
+
+    @discardableResult
+    func setLinkedNote(_ note: LinkedNote?, for sessionID: UUID) -> Bool {
+        updateSession(id: sessionID) { $0.linkedNote = note }
+    }
+
+    /// 一次批量写入；重复 ID 保留原快照，只给缺少书签的记录补凭据。
+    @discardableResult
+    func linkFiles(_ files: [LinkedFile], to sessionID: UUID) -> Bool {
+        updateSession(id: sessionID) { session in
+            // 旧存储可能含重复ID，保留firstIndex的首项语义而不假定唯一。
+            var indices: [UUID: Int] = [:]
+            indices.reserveCapacity(session.linkedFiles.count + files.count)
+            for (index, existing) in session.linkedFiles.enumerated() where indices[existing.id] == nil {
+                indices[existing.id] = index
+            }
+            for file in files {
+                if let index = indices[file.id] {
+                    let existing = session.linkedFiles[index]
+                    if existing.bookmarkData == nil, let bookmark = file.bookmarkData {
+                        session.linkedFiles[index] = LinkedFile(
+                            id: existing.id, name: existing.name, icon: existing.icon, bookmarkData: bookmark
+                        )
+                    }
+                } else {
+                    guard session.linkedFiles.count < Self.linkedFileLimit else { continue }
+                    indices[file.id] = session.linkedFiles.count
+                    session.linkedFiles.append(file)
+                }
+            }
+        }
+    }
+
+    /// 用户重选文件时替换整个快照，允许修复已有但失效的书签。
+    @discardableResult
+    func replaceLinkedFile(_ replacement: LinkedFile, in sessionID: UUID) -> Bool {
+        guard session(id: sessionID)?.linkedFiles.contains(where: { $0.id == replacement.id }) == true else {
+            return false
+        }
+        return updateSession(id: sessionID) { session in
+            guard let index = session.linkedFiles.firstIndex(where: { $0.id == replacement.id }) else { return }
+            session.linkedFiles[index] = replacement
+        }
+    }
+
+    @discardableResult
+    func unlinkFile(id: UUID, from sessionID: UUID) -> Bool {
+        updateSession(id: sessionID) { $0.linkedFiles.removeAll { $0.id == id } }
     }
 
     enum TaskLinkResult: Equatable {
@@ -189,6 +265,22 @@ final class FocusSessionManager {
         updateSession(id: sessionID) { $0.linkedURLs?.removeAll { $0.id == id } }
     }
 
+    /// 预算从本次操作时刻开始计算；历史记录仅保留原计划时间。
+    @discardableResult
+    func setTimeBudget(minutes: Int?, for sessionID: UUID, now: Date = Date()) -> Bool {
+        guard let active = activeSession, active.id == sessionID, active.state == .active else { return false }
+        let scheduledEndAt: Date?
+        if let minutes {
+            guard (1...1440).contains(minutes), now.timeIntervalSinceReferenceDate.isFinite else { return false }
+            let end = now.addingTimeInterval(Double(minutes) * 60)
+            guard end.timeIntervalSinceReferenceDate.isFinite, end > now else { return false }
+            scheduledEndAt = end
+        } else {
+            scheduledEndAt = nil
+        }
+        return updateSession(id: sessionID) { $0.scheduledEndAt = scheduledEndAt }
+    }
+
     // MARK: - 活跃任务兼容入口
 
     @discardableResult
@@ -223,23 +315,9 @@ final class FocusSessionManager {
     @discardableResult
     func linkFiles(_ snapshots: [FileSnapshot]) -> Bool {
         guard let sessionID = activeSession?.id else { return false }
-        return updateSession(id: sessionID) { session in
-            for snapshot in snapshots {
-                guard let index = session.linkedFiles.firstIndex(where: { $0.id == snapshot.id }) else {
-                    guard session.linkedFiles.count < Self.linkedFileLimit else { continue }
-                    session.linkedFiles.append(
-                        LinkedFile(id: snapshot.id, name: snapshot.name, icon: snapshot.icon, bookmarkData: snapshot.bookmarkData)
-                    )
-                    continue
-                }
-                // 老版本的关联没有书签，再次关联时只补访问凭据，不改原快照标题。
-                let existing = session.linkedFiles[index]
-                guard existing.bookmarkData == nil, let bookmarkData = snapshot.bookmarkData else { continue }
-                session.linkedFiles[index] = LinkedFile(
-                    id: existing.id, name: existing.name, icon: existing.icon, bookmarkData: bookmarkData
-                )
-            }
-        }
+        return linkFiles(snapshots.map {
+            LinkedFile(id: $0.id, name: $0.name, icon: $0.icon, bookmarkData: $0.bookmarkData)
+        }, to: sessionID)
     }
 
     @discardableResult
@@ -269,8 +347,32 @@ final class FocusSessionManager {
         loadFromStorage()
     }
 
+    /// 只复制可解码的旧数据；保留旧域作为迁移时的回退快照，不覆盖已有目标。
+    private func migrateLegacyStoreIfNeeded() -> Bool {
+        guard userDefaults.object(forKey: Self.storageKey) == nil,
+              let payload = legacyUserDefaults?.object(forKey: Self.storageKey) else { return true }
+        guard let data = payload as? Data,
+              (try? JSONDecoder().decode(FocusSessionStore.self, from: data)) != nil else {
+            storageError = L10n.flowStorageReadError
+            return false
+        }
+        do {
+            try writeData(data)
+        } catch {
+            storageError = L10n.flowStorageWriteError
+            return false
+        }
+        // 读回仅校验存储接受了完整副本，不把同进程读取视为物理落盘保证。
+        guard userDefaults.data(forKey: Self.storageKey) == data else {
+            storageError = L10n.flowStorageWriteError
+            return false
+        }
+        return true
+    }
+
     @discardableResult
     private func loadFromStorage() -> Bool {
+        guard migrateLegacyStoreIfNeeded() else { return false }
         guard let storedValue = userDefaults.object(forKey: Self.storageKey) else {
             activeSession = nil
             history = []

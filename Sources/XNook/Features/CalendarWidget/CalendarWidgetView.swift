@@ -8,35 +8,42 @@ struct CalendarWidgetView: View {
     var onStartFocus: ((EKEvent) -> Void)?
     var isDetail: Bool = false
     var onShowAll: (() -> Void)? = nil
+    var availableHeight: CGFloat? = nil
     @AppStorage("reduceMotion") private var reduceMotion = false
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var centeredDate = Date()
     @State private var calendarOpenFailed = false
 
     private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
+    private var usesGridOverview: Bool { !isDetail && availableHeight?.isFinite == true }
     private var selectedDate: Binding<Date> {
         Binding(get: { calendarManager.displayedDate }, set: { calendarManager.loadEvents(for: $0) })
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(monthString(for: centeredDate))
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                Text(L10n.monthSuffix)
-                    .font(.system(size: 12, weight: .medium))
+        VStack(alignment: .leading, spacing: isDetail ? 12 : 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
                     .foregroundStyle(.secondary)
+                Text(L10n.widgetCalendar)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 4)
+                Text(L10n.panelCalendarMonth(centeredDate))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .font(.system(size: 13))
+            .frame(minHeight: 24)
 
-            CalendarScroller(
-                selectedDate: selectedDate,
-                centeredDate: $centeredDate,
-                recenterTrigger: $recenterTrigger,
-                today: today,
-                dateRange: dateRange,
-                reduceMotion: shouldReduceMotion
-            )
-            .frame(height: 48)
+            Group {
+                if usesGridOverview {
+                    overviewDates
+                } else {
+                    dateScroller.frame(height: 48)
+                }
+            }
+            .expandedPanelDebugFrame(id: "expandedPanelCalendarDates")
 
             if !calendarManager.hasAccess {
                 accessPrompt
@@ -56,63 +63,135 @@ struct CalendarWidgetView: View {
                 Text(L10n.calendarOpenFailed).font(.system(size: 11)).foregroundStyle(.orange)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             calendarManager.ensureAccess()
             centeredDate = calendarManager.displayedDate
         }
     }
 
-    private var accessPrompt: some View {
-        VStack(spacing: 8) {
-            Label(calendarManager.authorizationStatus == .restricted ? L10n.calendarAccessRestricted : L10n.calendarAccessRequired,
-                  systemImage: "lock.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly {
-                Button(L10n.calendarEnableAccess) {
-                    Task { await calendarManager.requestAccess() }
-                }
-                .disabled(calendarManager.isRequestingAccess)
-            } else {
-                Button(L10n.calendarOpenSettings) { SystemPrivacySettings.openCalendars() }
-            }
-            if let error = calendarManager.accessError {
-                Text(error).font(.system(size: 11)).foregroundStyle(.orange)
+    private var dateScroller: some View {
+        CalendarScroller(
+            selectedDate: selectedDate,
+            centeredDate: $centeredDate,
+            recenterTrigger: $recenterTrigger,
+            today: today,
+            reduceMotion: shouldReduceMotion,
+            isCompact: usesGridOverview
+        )
+        .help(L10n.calendarScrollDates)
+    }
+
+    private var overviewDates: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 4) {
+                dateNavigationButton(forward: false, width: geometry.size.width,
+                                     label: L10n.gridCalendarPreviousDays, icon: "chevron.left")
+                dateScroller
+                dateNavigationButton(forward: true, width: geometry.size.width,
+                                     label: L10n.gridCalendarNextDays, icon: "chevron.right")
             }
         }
-        .buttonStyle(.bordered)
+        .frame(height: 40)
+    }
+
+    func navigateOverviewDates(forward: Bool, width: CGFloat) {
+        let offset = GridWidgetContentLayout.calendarDayCount(width: width) * (forward ? 1 : -1)
+        if let date = Calendar.current.date(byAdding: .day, value: offset, to: calendarManager.displayedDate) {
+            calendarManager.loadEvents(for: date)
+        }
+    }
+
+    private func dateNavigationButton(forward: Bool, width: CGFloat, label: String, icon: String) -> some View {
+        Button {
+            navigateOverviewDates(forward: forward, width: width)
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(forward ? "calendarNextDates" : "calendarPreviousDates")
+        .expandedPanelDebugFrame(id: forward ? "calendarNextDates" : "calendarPreviousDates")
+    }
+
+    private var accessPrompt: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isDetail {
+                Label(calendarManager.authorizationStatus == .restricted ? L10n.calendarAccessRestricted : L10n.calendarAccessRequired,
+                      systemImage: "lock.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(accessActionTitle, action: handleAccessAction)
+                    .buttonStyle(.bordered)
+            } else {
+                Button(action: handleAccessAction) {
+                    Label(accessActionTitle, systemImage: "lock.fill")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+            if let error = calendarManager.accessError {
+                Text(error).font(.system(size: isDetail ? 11 : 10)).foregroundStyle(.orange)
+                    .lineLimit(isDetail ? nil : 2)
+                    .help(error)
+            }
+        }
         .font(.system(size: 12))
+        .disabled(calendarManager.isRequestingAccess)
+    }
+
+    private var accessActionTitle: String {
+        calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly
+            ? L10n.calendarEnableAccess : L10n.calendarOpenSettings
+    }
+
+    private func handleAccessAction() {
+        if calendarManager.authorizationStatus == .notDetermined || calendarManager.authorizationStatus == .writeOnly {
+            Task { await calendarManager.requestAccess() }
+        } else {
+            SystemPrivacySettings.openCalendars()
+        }
     }
 
     @ViewBuilder
     private func eventContent(now: Date) -> some View {
         let overview = CalendarManager.overviewEvents(calendarManager.upcomingEvents, date: calendarManager.displayedDate, now: now)
-        let events = isDetail ? calendarManager.upcomingEvents : Array(overview.prefix(2))
-        VStack(alignment: .leading, spacing: 8) {
+        let limit = GridWidgetContentLayout.rowLimit(height: availableHeight, reserved: 100, rowHeight: 36, maximum: 1)
+        let events = isDetail ? calendarManager.upcomingEvents : Array(overview.prefix(limit))
+        VStack(alignment: .leading, spacing: isDetail ? 8 : 6) {
             if events.isEmpty {
                 Label(emptyMessage, systemImage: "calendar.badge.checkmark")
-                    .font(.system(size: 12))
+                    .font(.system(size: isDetail ? 12 : 11))
                     .foregroundStyle(.secondary)
+                    .lineLimit(isDetail ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                ForEach(Array(events.enumerated()), id: \.offset) { index, event in
                     eventRow(event, now: now)
+                        .expandedPanelDebugFrame(id: "expandedPanelCalendarEvent-\(index)")
                 }
             }
-            if !isDetail {
+            if !isDetail, !calendarManager.upcomingEvents.isEmpty {
                 let hiddenCount = calendarManager.upcomingEvents.count - events.count
                 Button {
                     if let onShowAll { onShowAll() } else { openCalendar() }
                 } label: {
                     Text(hiddenCount > 0 ? L10n.calendarMoreEvents(hiddenCount) : L10n.calendarAllEvents)
                         .font(.system(size: 11, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(.secondary)
+                .expandedPanelDebugFrame(id: "gridWidgetCalendarShowAll")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,15 +211,17 @@ struct CalendarWidgetView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.title ?? L10n.untitled)
                     .font(.system(size: 12, weight: .medium))
-                    .lineLimit(isDetail ? nil : 2)
+                    .lineLimit(isDetail ? nil : (usesGridOverview ? 1 : 2))
                     .fixedSize(horizontal: false, vertical: true)
-                Text(event.isAllDay ? L10n.calendarAllDay : timeString(from: event.startDate) + " – " + timeString(from: event.endDate))
+                Text((event.isAllDay ? L10n.calendarAllDay : timeString(from: event.startDate) + " – " + timeString(from: event.endDate))
+                     + (!isDetail && event.startDate <= now && event.endDate > now ? " · " + L10n.calendarInProgress : ""))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
-                if event.startDate <= now && event.endDate > now {
+                    .lineLimit(isDetail ? nil : 1)
+                if isDetail && event.startDate <= now && event.endDate > now {
                     Text(L10n.calendarInProgress).font(.system(size: 10)).foregroundStyle(Color.accentColor)
                 } else if isDetail && event.endDate <= now {
-                    Text(L10n.calendarEnded).font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(L10n.calendarEnded).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 0)
@@ -157,6 +238,7 @@ struct CalendarWidgetView: View {
                 .accessibilityLabel(L10n.calendarStartTask + ": " + (event.title ?? L10n.untitled))
             }
         }
+        .expandedPanelDebugFrame(id: "gridWidgetCalendarEvent-\(event.eventIdentifier ?? event.title ?? "untitled")")
     }
 
     private func eventColor(_ event: EKEvent) -> Color {
@@ -173,10 +255,6 @@ struct CalendarWidgetView: View {
     }
 
     private var today: Date { Calendar.current.startOfDay(for: calendarManager.currentDate) }
-    private var dateRange: [Date] {
-        CalendarManager.visibleDates(today: today, selectedDate: calendarManager.displayedDate)
-    }
-    private func monthString(for date: Date) -> String { String(Calendar.current.component(.month, from: date)) }
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
@@ -192,8 +270,8 @@ private struct CalendarScroller: NSViewRepresentable {
     @Binding var centeredDate: Date
     @Binding var recenterTrigger: Int
     let today: Date
-    let dateRange: [Date]
     let reduceMotion: Bool
+    let isCompact: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -203,16 +281,19 @@ private struct CalendarScroller: NSViewRepresentable {
         scrollView.hasVerticalScroller = false
         scrollView.drawsBackground = false
         scrollView.autohidesScrollers = true
-        context.coordinator.rebuildDates(scrollView)
+        context.coordinator.updateDateWindow(scrollView, centeredOn: selectedDate)
         scrollView.contentView.postsBoundsChangedNotifications = true
+        // 缩窄时 AppKit 可能只发 frame 通知，不能等第一次用户滚动才发现宽度变化。
+        scrollView.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
             context.coordinator, selector: #selector(Coordinator.boundsChanged(_:)),
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
         )
-        DispatchQueue.main.async { [weak coordinator = context.coordinator, weak scrollView] in
-            guard let coordinator, let scrollView else { return }
-            coordinator.scrollToDate(scrollView, date: coordinator.parent.selectedDate, animated: false)
-        }
+        NotificationCenter.default.addObserver(
+            context.coordinator, selector: #selector(Coordinator.boundsChanged(_:)),
+            name: NSView.frameDidChangeNotification, object: scrollView.contentView
+        )
+        context.coordinator.scheduleScrollToDate(scrollView, date: selectedDate)
         return scrollView
     }
 
@@ -222,32 +303,39 @@ private struct CalendarScroller: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        let datesChanged = context.coordinator.parent.dateRange != dateRange
+        let todayChanged = context.coordinator.parent.today != today
         let motionChanged = context.coordinator.parent.reduceMotion != reduceMotion
+        let compactChanged = context.coordinator.parent.isCompact != isCompact
+        let selectionChanged = !Calendar.current.isDate(context.coordinator.lastSelectedDate, inSameDayAs: selectedDate)
         context.coordinator.parent = self
-        if datesChanged { context.coordinator.rebuildDates(nsView) }
+        if todayChanged || compactChanged {
+            context.coordinator.updateDateWindow(nsView, centeredOn: selectedDate,
+                                                preserving: context.coordinator.centerCell(in: nsView))
+        }
         let shouldRecenter = recenterTrigger != context.coordinator.lastTrigger
         context.coordinator.lastTrigger = recenterTrigger
-        if shouldRecenter || datesChanged || motionChanged {
-            DispatchQueue.main.async { [weak coordinator = context.coordinator, weak nsView] in
-                guard let coordinator, let nsView else { return }
-                let date = shouldRecenter ? coordinator.parent.today : coordinator.parent.selectedDate
-                coordinator.scrollToDate(nsView, date: date, animated: false)
-            }
+        if shouldRecenter || todayChanged || motionChanged || compactChanged || selectionChanged {
+            context.coordinator.scheduleScrollToDate(nsView, date: shouldRecenter ? today : selectedDate)
         }
     }
 
     class Coordinator: NSObject {
         var parent: CalendarScroller
         var lastTrigger: Int
+        var lastSelectedDate: Date
+        private var renderedDates: [Date] = []
         private var lastIndex = -1
         private var programmaticScrollID = 0
         private var isProgrammaticScroll = true
         private var isInvalidated = false
+        private var isUpdatingDateWindow = false
+        private var pendingScrollDate: Date?
+        private var scrollState = GridWidgetCalendarScrollState()
 
         init(_ parent: CalendarScroller) {
             self.parent = parent
             lastTrigger = parent.recenterTrigger
+            lastSelectedDate = parent.selectedDate
         }
 
         func invalidate() {
@@ -255,35 +343,93 @@ private struct CalendarScroller: NSViewRepresentable {
             programmaticScrollID += 1
         }
 
-        func rebuildDates(_ scrollView: NSScrollView) {
-            isProgrammaticScroll = true
-            programmaticScrollID += 1
-            let stack = DateStackView()
+        func updateDateWindow(_ scrollView: NSScrollView, centeredOn date: Date, preserving anchor: DateCell? = nil) {
+            let dates = CalendarManager.visibleDates(centeredOn: date)
+            guard !isInvalidated, !dates.isEmpty else { return }
+            isUpdatingDateWindow = true
+            defer { isUpdatingDateWindow = false }
+            let stack = (scrollView.documentView as? DateStackView) ?? DateStackView()
+            let oldOrigin = scrollView.contentView.bounds.origin
+            let oldAnchorX = anchor?.frame.minX
+            let existing = Dictionary(uniqueKeysWithValues: stack.arrangedSubviews.compactMap { view -> (Date, DateCell)? in
+                guard let cell = view as? DateCell else { return nil }
+                return (cell.date, cell)
+            })
+            let retainedDates = Set(dates)
+            for (date, cell) in existing where !retainedDates.contains(date) {
+                stack.removeArrangedSubview(cell)
+                cell.removeFromSuperview()
+            }
             stack.orientation = .horizontal
             stack.spacing = 6
-            stack.edgeInsets = NSEdgeInsets(top: 4, left: 12, bottom: 4, right: 12)
-            for (index, date) in parent.dateRange.enumerated() {
-                let cell = DateCell(date: date, isToday: Calendar.current.isDate(date, inSameDayAs: parent.today), index: index)
+            let verticalInset: CGFloat = parent.isCompact ? 0 : 4
+            stack.edgeInsets = NSEdgeInsets(top: verticalInset, left: 12, bottom: verticalInset, right: 12)
+            for (index, date) in dates.enumerated() {
+                let isToday = Calendar.current.isDate(date, inSameDayAs: parent.today)
+                let cell = existing[date] ?? DateCell(date: date, isToday: isToday, index: index)
+                cell.index = index
+                cell.isToday = isToday
                 cell.target = self
                 cell.action = #selector(cellClicked(_:))
-                stack.addArrangedSubview(cell)
+                if cell.superview == nil { stack.insertArrangedSubview(cell, at: index) }
             }
-            stack.frame = NSRect(x: 0, y: 0, width: CGFloat(parent.dateRange.count) * 36 + 18, height: 48)
-            scrollView.documentView = stack
+            renderedDates = dates
+            stack.frame = NSRect(x: 0, y: 0, width: CGFloat(dates.count) * 36 + 18,
+                                 height: 40 + verticalInset * 2)
+            if scrollView.documentView !== stack { scrollView.documentView = stack }
             stack.layoutSubtreeIfNeeded()
+            if let anchor, let oldAnchorX, anchor.superview === stack {
+                // 平移日期缓冲后补偿同一天的布局位移，保留手势中的小数偏移而不吸附居中。
+                var bounds = scrollView.contentView.bounds
+                bounds.origin = NSPoint(x: oldOrigin.x + anchor.frame.minX - oldAnchorX, y: oldOrigin.y)
+                scrollView.contentView.scroll(to: scrollView.contentView.constrainBoundsRect(bounds).origin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+            lastIndex = dates.firstIndex { Calendar.current.isDate($0, inSameDayAs: lastSelectedDate) } ?? -1
+            for case let cell as DateCell in stack.arrangedSubviews {
+                cell.updateMagnify(centerIndex: lastIndex, reduceMotion: parent.reduceMotion)
+            }
+            _ = scrollState.update(scrollView.contentView.bounds)
         }
 
         @objc func cellClicked(_ sender: DateCell) {
-            guard parent.dateRange.indices.contains(sender.index), let scrollView = sender.enclosingScrollView else { return }
-            scrollToDate(scrollView, date: parent.dateRange[sender.index], animated: !parent.reduceMotion)
+            guard let scrollView = sender.enclosingScrollView else { return }
+            scrollToDate(scrollView, date: sender.date, animated: !parent.reduceMotion)
+        }
+
+        func centerCell(in scrollView: NSScrollView) -> DateCell? {
+            let center = scrollView.contentView.bounds.midX
+            return (scrollView.documentView as? DateStackView)?.arrangedSubviews.compactMap { $0 as? DateCell }
+                .min { abs($0.frame.midX - center) < abs($1.frame.midX - center) }
+        }
+
+        func scheduleScrollToDate(_ scrollView: NSScrollView, date: Date) {
+            isProgrammaticScroll = true
+            programmaticScrollID += 1
+            pendingScrollDate = date
+            let scrollID = programmaticScrollID
+            DispatchQueue.main.async { [weak self, weak scrollView] in
+                guard let self, let scrollView, !self.isInvalidated,
+                      scrollID == self.programmaticScrollID else { return }
+                self.scrollToDate(scrollView, date: date, animated: false)
+            }
         }
 
         func scrollToDate(_ scrollView: NSScrollView, date: Date, animated: Bool) {
             // 即使布局重建后目标不再存在，也不能把日期条永久留在“程序滚动中”。
             isProgrammaticScroll = false
             programmaticScrollID += 1
+            pendingScrollDate = nil
+            let targetIndex = renderedDates.firstIndex { Calendar.current.isDate($0, inSameDayAs: date) }
+            let margin = max(14 * 36, scrollView.contentSize.width)
+            let hasBuffer = targetIndex.map { index in
+                CGFloat(min(index, renderedDates.count - index - 1)) * 36 >= margin
+            } ?? false
+            if !hasBuffer {
+                updateDateWindow(scrollView, centeredOn: date, preserving: centerCell(in: scrollView))
+            }
             guard !isInvalidated,
-                  let index = parent.dateRange.firstIndex(where: { Calendar.current.isDate($0, inSameDayAs: date) }),
+                  let index = renderedDates.firstIndex(where: { Calendar.current.isDate($0, inSameDayAs: date) }),
                   let stack = scrollView.documentView as? DateStackView,
                   stack.arrangedSubviews.indices.contains(index) else { return }
             stack.layoutSubtreeIfNeeded()
@@ -310,24 +456,43 @@ private struct CalendarScroller: NSViewRepresentable {
                 scrollView.reflectScrolledClipView(scrollView.contentView)
                 isProgrammaticScroll = false
             }
+            _ = scrollState.update(scrollView.contentView.bounds)
         }
 
         @objc func boundsChanged(_ notification: Notification) {
-            guard !isInvalidated, !isProgrammaticScroll,
+            guard !isInvalidated, !isUpdatingDateWindow,
                   let clipView = notification.object as? NSClipView,
                   let scrollView = clipView.enclosingScrollView,
                   let stack = scrollView.documentView as? DateStackView else { return }
+            let change = scrollState.update(clipView.bounds)
+            if change == .layout {
+                // 同一轮布局还可能修正 origin；在重居中完成前，它也不是用户滚动。
+                scheduleScrollToDate(scrollView, date: pendingScrollDate ?? parent.selectedDate)
+                return
+            }
+            guard !isProgrammaticScroll, change == .scroll else { return }
             let center = clipView.bounds.midX
             guard let index = stack.arrangedSubviews.enumerated().min(by: {
                 abs($0.element.frame.midX - center) < abs($1.element.frame.midX - center)
-            })?.offset, index != lastIndex else { return }
-            lastIndex = index
-            select(index, in: scrollView, animated: false)
+            })?.offset else { return }
+            if index != lastIndex {
+                lastIndex = index
+                select(index, in: scrollView, animated: false)
+            }
+            // 在耗尽可滚动空间之前补齐两侧日期；同一个日期内的细小滚动也检查边缘。
+            let margin = max(14 * 36, clipView.bounds.width)
+            if clipView.bounds.minX < margin || stack.bounds.maxX - clipView.bounds.maxX < margin,
+               let anchor = stack.arrangedSubviews[index] as? DateCell,
+               CalendarManager.visibleDates(centeredOn: anchor.date) != renderedDates {
+                updateDateWindow(scrollView, centeredOn: anchor.date, preserving: anchor)
+            }
         }
 
         private func select(_ index: Int, in scrollView: NSScrollView, animated: Bool) {
-            guard parent.dateRange.indices.contains(index), let stack = scrollView.documentView as? DateStackView else { return }
-            let date = parent.dateRange[index]
+            guard renderedDates.indices.contains(index), let stack = scrollView.documentView as? DateStackView else { return }
+            let date = renderedDates[index]
+            // 绑定会同步反映外部改动；单独记录原生选日，避免把用户横滚误判成外部定位。
+            lastSelectedDate = date
             if !Calendar.current.isDate(parent.selectedDate, inSameDayAs: date) { parent.selectedDate = date }
             if parent.centeredDate != date { parent.centeredDate = date }
             for case let cell as DateCell in stack.arrangedSubviews {
@@ -347,12 +512,13 @@ private class DateStackView: NSStackView {
 
 private class DateCell: NSButton {
     let date: Date
-    let isToday: Bool
-    let index: Int
+    var isToday: Bool
+    var index: Int
 
     private let weekdayLabel = NSTextField(labelWithString: "")
     private let dayLabel = NSTextField(labelWithString: "")
     private let highlightLayer = CALayer()
+    private var isCentered = false
 
     init(date: Date, isToday: Bool, index: Int) {
         self.date = date
@@ -372,14 +538,14 @@ private class DateCell: NSButton {
         layer?.addSublayer(highlightLayer)
 
         // 星期标签
-        weekdayLabel.font = .systemFont(ofSize: 8, weight: .medium)
+        weekdayLabel.font = .systemFont(ofSize: 11, weight: .medium)
         weekdayLabel.alignment = .center
         weekdayLabel.textColor = isToday ? .systemBlue : .secondaryLabelColor
         weekdayLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(weekdayLabel)
 
         // 日期数字
-        dayLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        dayLabel.font = .systemFont(ofSize: 13, weight: .medium)
         dayLabel.alignment = .center
         dayLabel.textColor = isToday ? .systemBlue : .labelColor
         dayLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -387,22 +553,25 @@ private class DateCell: NSButton {
 
         // 设置文字
         let formatter = DateFormatter()
-        formatter.locale = L10n.isChinese ? Locale(identifier: "zh_CN") : Locale.current
+        formatter.locale = Locale(identifier: L10n.isChinese ? "zh_CN" : "en_US")
         formatter.dateFormat = "E"
         weekdayLabel.stringValue = formatter.string(from: date)
         dayLabel.stringValue = "\(Calendar.current.component(.day, from: date))"
         formatter.dateStyle = .full
         setAccessibilityLabel(formatter.string(from: date))
 
-        // 约束
+        // NSTextField 的 frame 还包含对齐外沿，限制其宽度时需一并扣除。
+        let weekdayInsets = weekdayLabel.alignmentRectInsets
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: 30),
             heightAnchor.constraint(equalToConstant: 40),
 
-            weekdayLabel.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            weekdayLabel.topAnchor.constraint(equalTo: topAnchor, constant: 1),
             weekdayLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            weekdayLabel.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor,
+                constant: -weekdayInsets.left - weekdayInsets.right),
 
-            dayLabel.topAnchor.constraint(equalTo: weekdayLabel.bottomAnchor, constant: 2),
+            dayLabel.topAnchor.constraint(equalTo: weekdayLabel.bottomAnchor),
             dayLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             dayLabel.widthAnchor.constraint(equalToConstant: 24),
             dayLabel.heightAnchor.constraint(equalToConstant: 24),
@@ -410,6 +579,11 @@ private class DateCell: NSButton {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
 
     override func layout() {
         super.layout()
@@ -429,11 +603,11 @@ private class DateCell: NSButton {
         let scale: CGFloat
         let yOffset: CGFloat
         switch dist {
-        case 0:  scale = 1.3;  yOffset = 4
-        case 1:  scale = 1.15; yOffset = 2
-        case 2:  scale = 1.05; yOffset = 1
+        case 0:  scale = 1.08; yOffset = 1
+        case 1:  scale = 1.04; yOffset = 0
+        case 2:  scale = 1.0;  yOffset = 0
         case 3:  scale = 1.0;  yOffset = 0
-        default: scale = 0.92; yOffset = 0
+        default: scale = 1.0; yOffset = 0
         }
 
         // 缩放 + 位移全部在 layer transform 中完成，不修改 frame
@@ -457,17 +631,24 @@ private class DateCell: NSButton {
             CATransaction.commit()
         }
 
-        // 高亮状态：今天=蓝色文字，中心=白色文字+背景
-        let isCenter = dist == 0
-        weekdayLabel.textColor = isToday ? .systemBlue : (isCenter ? .white : .secondaryLabelColor)
-        dayLabel.textColor = isToday ? .systemBlue : (isCenter ? .labelColor : .secondaryLabelColor)
-        highlightLayer.backgroundColor = isCenter && !isToday
-            ? NSColor.white.withAlphaComponent(0.15).cgColor
-            : NSColor.clear.cgColor
+        isCentered = dist == 0
+        updateColors()
 
         // 字体始终更新，确保离开中心时字号正确重置
-        dayLabel.font = .systemFont(ofSize: isCenter ? 13 : 11, weight: isCenter ? .bold : .medium)
-        weekdayLabel.font = .systemFont(ofSize: isCenter ? 9 : 8, weight: isCenter ? .semibold : .medium)
+        dayLabel.font = .systemFont(ofSize: 13, weight: isCentered ? .bold : .medium)
+        weekdayLabel.font = .systemFont(ofSize: 11, weight: isCentered ? .semibold : .medium)
+    }
+
+    private func updateColors() {
+        let textColor: NSColor = isToday ? .systemBlue : (isCentered ? .labelColor : .secondaryLabelColor)
+        weekdayLabel.textColor = textColor
+        dayLabel.textColor = textColor
+        // CALayer 保存的是解析后的 CGColor，切换外观时需要重新取语义颜色。
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            highlightLayer.backgroundColor = isCentered && !isToday
+                ? NSColor.labelColor.withAlphaComponent(0.12).cgColor
+                : NSColor.clear.cgColor
+        }
     }
 }
 

@@ -6,11 +6,12 @@ extension Notification.Name {
     static let xnookLicenseActivated = Notification.Name("xnookLicenseActivated")
     /// 请求打开设置窗口的授权页。
     static let xnookShowLicensePane = Notification.Name("xnookShowLicensePane")
+    static let xnookLicenseLocked = Notification.Name("xnookLicenseLocked")
 }
 
 /// 试用到期时的独立激活窗口。
 ///
-/// 为什么不是模态弹窗：模态弹窗会阻塞整个应用，用户在复制邀请码时
+/// 为什么不是模态弹窗：模态弹窗会阻塞整个应用，用户在复制激活码时
 /// 无法切换窗口。这里用普通窗口，用户可以从邮件里复制后粘回来。
 final class LicenseExpiryWindowController {
 
@@ -89,9 +90,7 @@ private struct LicenseExpiryWindowView: View {
 
             HStack {
                 Button(L10n.licensePurchase) {
-                    if let url = URL(string: "https://github.com/meteorkid/XNook") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    NSWorkspace.shared.open(LicenseManager.purchaseURL)
                 }
                 .buttonStyle(.link)
 

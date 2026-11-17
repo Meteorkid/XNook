@@ -6,6 +6,7 @@ final class FocusSessionManagerTests: XCTestCase {
     /// 每个测试使用独立 suite，避免污染全局 standard 与彼此串扰
     private var suite: UserDefaults!
     private var suiteName: String!
+    private var legacySuite: UserDefaults!
     private static let storageKey = "nookflow.sessions"
 
     override func setUp() {
@@ -13,13 +14,17 @@ final class FocusSessionManagerTests: XCTestCase {
         suiteName = "TestNookFlow.\(UUID().uuidString)"
         suite = UserDefaults(suiteName: suiteName)
         suite.removePersistentDomain(forName: suiteName)
+        legacySuite = UserDefaults(suiteName: suiteName + ".legacy")
+        legacySuite.removePersistentDomain(forName: suiteName + ".legacy")
     }
 
     override func tearDown() {
         if let name = suiteName {
             suite.removePersistentDomain(forName: name)
+            legacySuite.removePersistentDomain(forName: name + ".legacy")
         }
         suite = nil
+        legacySuite = nil
         suiteName = nil
         super.tearDown()
     }
@@ -370,6 +375,260 @@ final class FocusSessionManagerTests: XCTestCase {
         XCTAssertEqual(restored.history.first?.originPendingTaskID, session.originPendingTaskID)
         XCTAssertEqual(restored.history.first?.linkedFiles.first?.bookmarkData, bookmark)
         XCTAssertEqual(restored.history.first?.linkedNote?.title, "新笔记")
+    }
+
+    func testEndingTaskPreservesAllHistoryBeyondTwoHundredRecords() throws {
+        let originalHistory = makeHistory(count: 200)
+        suite.set(
+            try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: originalHistory)),
+            forKey: Self.storageKey
+        )
+        let manager = FocusSessionManager(userDefaults: suite)
+        let active = try XCTUnwrap(manager.start(title: "第 201 个任务"))
+
+        XCTAssertTrue(manager.end())
+        XCTAssertEqual(manager.history.count, 201)
+        XCTAssertEqual(manager.history.first?.id, active.id)
+        XCTAssertTrue(Array(manager.history.dropFirst()) == originalHistory, "原有 200 条历史应完整保留")
+
+        let restored = FocusSessionManager(userDefaults: suite)
+        XCTAssertTrue(restored.history == manager.history, "重载应恢复全部 201 条历史")
+        XCTAssertEqual(restored.session(id: originalHistory[199].id), originalHistory[199])
+    }
+
+    func testOldestHistoryRecordRemainsEditableAfterEndingAnotherTask() throws {
+        let originalHistory = makeHistory(count: 250)
+        let oldest = try XCTUnwrap(originalHistory.last)
+        suite.set(
+            try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: originalHistory)),
+            forKey: Self.storageKey
+        )
+        let manager = FocusSessionManager(userDefaults: suite)
+        XCTAssertNotNil(manager.start(title: "最新任务"))
+        XCTAssertTrue(manager.end())
+        guard case .added = manager.addTaskURL(
+            urlString: "https://example.com/older-task", title: "旧任务资料", to: oldest.id
+        ) else {
+            return XCTFail("超过 200 条的历史任务必须仍可编辑")
+        }
+        let link = try XCTUnwrap(manager.session(id: oldest.id)?.taskURLs.first)
+        XCTAssertEqual(
+            manager.editTaskURL(link, urlString: "https://example.com/updated", title: "更新资料", in: oldest.id),
+            .updated
+        )
+
+        let restored = FocusSessionManager(userDefaults: suite)
+        let restoredOldest = try XCTUnwrap(restored.session(id: oldest.id))
+        XCTAssertEqual(restored.history.count, 251)
+        XCTAssertEqual(restoredOldest.linkedFiles, oldest.linkedFiles)
+        XCTAssertEqual(restoredOldest.linkedNote, oldest.linkedNote)
+        XCTAssertEqual(restoredOldest.taskURLs.first?.title, "更新资料")
+        XCTAssertEqual(restoredOldest.taskURLs.first?.urlString, "https://example.com/updated")
+    }
+
+    func testFailedEndPreservesCompleteLargeHistoryAndActiveTask() throws {
+        let originalHistory = makeHistory(count: 250)
+        suite.set(
+            try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: originalHistory)),
+            forKey: Self.storageKey
+        )
+        let seed = FocusSessionManager(userDefaults: suite)
+        let active = try XCTUnwrap(seed.start(title: "保存失败的任务"))
+        let originalData = try XCTUnwrap(suite.data(forKey: Self.storageKey))
+        let manager = FocusSessionManager(userDefaults: suite, writeData: { _ in
+            throw CocoaError(.fileWriteNoPermission)
+        })
+
+        XCTAssertFalse(manager.end())
+        XCTAssertEqual(manager.activeSession, active)
+        XCTAssertTrue(manager.history == originalHistory, "写入失败不得更改完整历史")
+        XCTAssertEqual(suite.data(forKey: Self.storageKey), originalData)
+        XCTAssertEqual(manager.storageError, L10n.flowStorageWriteError)
+    }
+
+    func testLegacyMigrationCopiesCompleteStoreAndKeepsRollbackSnapshot() throws {
+        let seed = FocusSessionManager(userDefaults: legacySuite)
+        let active = try XCTUnwrap(seed.start(title: "旧活跃任务"))
+        seed.linkNote(id: UUID(), title: "旧笔记")
+        seed.linkFile(id: UUID(), name: "旧文件", icon: "doc", bookmarkData: Data([4, 2, 1]))
+        seed.addTaskURL(urlString: "https://example.com/legacy", title: "旧资料", to: active.id)
+        let originalHistory = makeHistory(count: 250)
+        let originalData = try JSONEncoder().encode(
+            FocusSessionStore(activeSession: seed.activeSession, history: originalHistory)
+        )
+        legacySuite.set(originalData, forKey: Self.storageKey)
+
+        let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite)
+
+        XCTAssertNil(manager.storageError)
+        XCTAssertEqual(manager.activeSession, seed.activeSession)
+        XCTAssertTrue(manager.history == originalHistory, "迁移应保留全部 250 条历史及关联快照")
+        XCTAssertEqual(suite.data(forKey: Self.storageKey), originalData)
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), originalData)
+        let rollback = FocusSessionManager(userDefaults: legacySuite)
+        XCTAssertEqual(rollback.activeSession, seed.activeSession)
+        XCTAssertTrue(rollback.history == originalHistory, "迁移来源应保持旧版本可读取的完整快照")
+    }
+
+    func testLegacyMigrationIsIdempotentAfterTargetEdits() throws {
+        let sourceHistory = makeHistory(count: 2)
+        let sourceData = try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: sourceHistory))
+        legacySuite.set(sourceData, forKey: Self.storageKey)
+        var writes = 0
+        let write: (Data) throws -> Void = { [suite] data in
+            writes += 1
+            suite?.set(data, forKey: Self.storageKey)
+        }
+        let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite, writeData: write)
+        XCTAssertEqual(writes, 1)
+        let active = try XCTUnwrap(manager.start(title: "迁移后新增任务"))
+        let targetData = try XCTUnwrap(suite.data(forKey: Self.storageKey))
+        XCTAssertEqual(writes, 2)
+
+        let restored = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite, writeData: write)
+        XCTAssertTrue(restored.retryLoadingStorage())
+        XCTAssertEqual(writes, 2)
+        XCTAssertEqual(restored.activeSession, active)
+        XCTAssertEqual(restored.history, sourceHistory)
+        XCTAssertEqual(suite.data(forKey: Self.storageKey), targetData)
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), sourceData)
+    }
+
+    func testExistingValidTargetIsUsableEvenWhenLegacySourceIsCorrupt() throws {
+        let history = makeHistory(count: 2)
+        let targetData = try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: history))
+        suite.set(targetData, forKey: Self.storageKey)
+        let corruptSource = Data("corrupt legacy history".utf8)
+        legacySuite.set(corruptSource, forKey: Self.storageKey)
+        var writes = 0
+
+        let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite, writeData: { _ in
+            writes += 1
+        })
+
+        XCTAssertNil(manager.storageError)
+        XCTAssertEqual(manager.history, history)
+        XCTAssertEqual(writes, 0)
+        XCTAssertEqual(suite.data(forKey: Self.storageKey), targetData)
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), corruptSource)
+    }
+
+    func testInvalidLegacySourcesAreProtectedAndDoNotCreateTarget() {
+        for payload in [Data("broken source".utf8), "unexpected source type"] as [Any] {
+            legacySuite.set(payload, forKey: Self.storageKey)
+            var writes = 0
+            let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite, writeData: { _ in
+                writes += 1
+            })
+
+            XCTAssertEqual(manager.storageError, L10n.flowStorageReadError)
+            XCTAssertNil(manager.start(title: "不得覆盖旧历史"))
+            XCTAssertFalse(manager.end())
+            XCTAssertFalse(manager.retryLoadingStorage())
+            XCTAssertTrue(manager.history.isEmpty)
+            XCTAssertNil(suite.object(forKey: Self.storageKey))
+            XCTAssertEqual(legacySuite.object(forKey: Self.storageKey) as? NSObject, payload as? NSObject)
+            XCTAssertEqual(writes, 0)
+        }
+    }
+
+    func testInvalidExistingTargetsAreNotReplacedByLegacySource() throws {
+        let sourceData = try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: makeHistory(count: 2)))
+        legacySuite.set(sourceData, forKey: Self.storageKey)
+        for payload in [Data("broken target".utf8), "unexpected target type"] as [Any] {
+            suite.set(payload, forKey: Self.storageKey)
+            var writes = 0
+            let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite, writeData: { _ in
+                writes += 1
+            })
+
+            XCTAssertEqual(manager.storageError, L10n.flowStorageReadError)
+            XCTAssertNil(manager.start(title: "不得覆盖损坏目标"))
+            XCTAssertFalse(manager.retryLoadingStorage())
+            XCTAssertEqual(suite.object(forKey: Self.storageKey) as? NSObject, payload as? NSObject)
+            XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), sourceData)
+            XCTAssertEqual(writes, 0)
+        }
+    }
+
+    func testFailedLegacyMigrationPreservesSourceAndRequiresReloadBeforeWriting() throws {
+        let sourceHistory = makeHistory(count: 2)
+        let sourceData = try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: sourceHistory))
+        legacySuite.set(sourceData, forKey: Self.storageKey)
+        var shouldFail = true
+        var writes = 0
+        let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite, writeData: { [suite] data in
+            writes += 1
+            if shouldFail { throw CocoaError(.fileWriteNoPermission) }
+            suite?.set(data, forKey: Self.storageKey)
+        })
+
+        XCTAssertEqual(manager.storageError, L10n.flowStorageWriteError)
+        XCTAssertTrue(manager.history.isEmpty)
+        XCTAssertNil(suite.object(forKey: Self.storageKey))
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), sourceData)
+        shouldFail = false
+        XCTAssertNil(manager.start(title: "须先重新读取"))
+        XCTAssertEqual(writes, 1)
+
+        XCTAssertTrue(manager.retryLoadingStorage())
+        XCTAssertNil(manager.storageError)
+        XCTAssertEqual(manager.history, sourceHistory)
+        XCTAssertEqual(writes, 2)
+        XCTAssertEqual(suite.data(forKey: Self.storageKey), sourceData)
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), sourceData)
+        XCTAssertNotNil(manager.start(title: "恢复后任务"))
+    }
+
+    func testMigrationWithoutMatchingReadbackDoesNotPublishAndCanRetry() throws {
+        let sourceHistory = makeHistory(count: 2)
+        let sourceData = try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: sourceHistory))
+        legacySuite.set(sourceData, forKey: Self.storageKey)
+        var acceptsWrite = false
+        let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite, writeData: { [suite] data in
+            if acceptsWrite { suite?.set(data, forKey: Self.storageKey) }
+        })
+
+        XCTAssertEqual(manager.storageError, L10n.flowStorageWriteError)
+        XCTAssertTrue(manager.history.isEmpty)
+        XCTAssertNil(manager.start(title: "不能先发布"))
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), sourceData)
+        acceptsWrite = true
+
+        XCTAssertTrue(manager.retryLoadingStorage())
+        XCTAssertEqual(manager.history, sourceHistory)
+        XCTAssertEqual(suite.data(forKey: Self.storageKey), sourceData)
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), sourceData)
+    }
+
+    func testRepairingLegacySourceAllowsMigrationOnReload() throws {
+        legacySuite.set(Data("broken source".utf8), forKey: Self.storageKey)
+        let manager = FocusSessionManager(userDefaults: suite, legacyUserDefaults: legacySuite)
+        XCTAssertEqual(manager.storageError, L10n.flowStorageReadError)
+        let history = makeHistory(count: 2)
+        let sourceData = try JSONEncoder().encode(FocusSessionStore(activeSession: nil, history: history))
+        legacySuite.set(sourceData, forKey: Self.storageKey)
+
+        XCTAssertTrue(manager.retryLoadingStorage())
+        XCTAssertNil(manager.storageError)
+        XCTAssertEqual(manager.history, history)
+        XCTAssertEqual(suite.data(forKey: Self.storageKey), sourceData)
+        XCTAssertEqual(legacySuite.data(forKey: Self.storageKey), sourceData)
+    }
+
+    private func makeHistory(count: Int) -> [FocusSession] {
+        (0..<count).map { index in
+            let endedAt = Date(timeIntervalSince1970: 1_700_000_000 - Double(index * 60))
+            return FocusSession(
+                id: UUID(), title: "历史任务 \(index)", eventIdentifier: nil,
+                startedAt: endedAt.addingTimeInterval(-30), scheduledEndAt: nil,
+                endedAt: endedAt, state: .ended,
+                linkedNote: LinkedNote(id: UUID(), title: "历史笔记 \(index)"),
+                linkedFiles: [LinkedFile(
+                    id: UUID(), name: "历史文件 \(index)", icon: "doc", bookmarkData: Data([1, 2, 3])
+                )]
+            )
+        }
     }
 
 }

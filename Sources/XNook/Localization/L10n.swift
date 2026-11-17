@@ -117,8 +117,8 @@ enum L10n {
 
     static var enableSwipeSwitch: String { localized(zh: "启用双指横滑切换", en: "Enable two-finger swipe switching") }
     static var enableSwipeSwitchDesc: String { localized(
-        zh: "仅在灵动岛收起时响应双指左右滑动，切换到另一个灵动岛应用。",
-        en: "When the island is collapsed, switch to the other island app with a two-finger horizontal swipe.") }
+        zh: "在收起的岛上双指横滑，预览并排连接的两款岛；松手切换，短滑回弹。对方未运行或暂不能预览时，松手后再显示。",
+        en: "Swipe with two fingers on the collapsed island to reveal the other island alongside it. Release to switch, or release a short swipe to return. If a preview is unavailable, the other app opens after release.") }
 
     static var switchSensitivity: String { localized(zh: "切换灵敏度", en: "Switch sensitivity") }
     static var switchSensitivityDesc: String { localized(
@@ -160,18 +160,23 @@ enum L10n {
 
     static var panelWidth: String { localized(zh: "面板宽度", en: "Panel width") }
     static var panelWidthDesc: String { localized(
-        zh: "展开面板的宽度（单位：点）。",
-        en: "Width of the expanded panel in points.") }
+        zh: "展开面板的宽度（单位：点）；开启自动调整宽度时作为宽度上限。",
+        en: "Expanded panel width in points; used as the maximum when automatic width fitting is on.") }
 
-    static var panelBaseHeight: String { localized(zh: "面板最大高度", en: "Panel max height") }
+    static var panelAutoSize: String { localized(zh: "自动调整宽度", en: "Fit panel width") }
+    static var panelAutoSizeDesc: String { localized(
+        zh: "少量组件和媒体详情自动收窄；关闭后使用设置的宽度。展开高度由下方的高度模式单独控制。",
+        en: "Narrow the panel for fewer widgets or media details. When off, use the configured width. Height is controlled separately below.") }
+
+    static var panelBaseHeight: String { localized(zh: "高度上限", en: "Height limit") }
     static var panelBaseHeightDesc: String { localized(
-        zh: "展开面板的高度上限；内容不足时按实际高度展开，超出时裁切。",
-        en: "Height cap for the expanded panel. Panel fits content; caps when content exceeds.") }
+        zh: "选择“自定义高度上限”后生效。它限制窗口最高能展开多高，不会给较少内容补空白；超出上限时滚动查看。",
+        en: "Applies in Custom limit mode. This caps the expanded height without adding blank space to shorter content; longer content scrolls.") }
 
     static var nookFlowHistoryDisplayLimit: String { localized(zh: "最近任务显示条数", en: "Recent tasks shown") }
     static var nookFlowHistoryDisplayLimitDesc: String { localized(
-        zh: "控制展开面板中最近任务的显示数量（1–5 条）。",
-        en: "Choose how many recent tasks appear in the expanded panel (1–5).") }
+        zh: "设置最近任务的显示上限（1–5 条）；较小组件会减少条数，完整记录可在“查看全部”中打开。",
+        en: "Set the recent-task limit (1–5). Smaller modules show fewer rows; all records remain available in View All.") }
     static var showNookFlowHistory: String { localized(zh: "显示最近任务", en: "Show recent tasks") }
     static var showNookFlowHistoryDesc: String { localized(
         zh: "在展开面板中显示已完成的最近任务。",
@@ -182,12 +187,43 @@ enum L10n {
 
     static var reduceMotion: String { localized(zh: "减弱动画", en: "Reduce motion") }
     static var reduceMotionDesc: String { localized(
-        zh: "禁用展开/收起过渡的弹簧动画。",
-        en: "Disable spring animations for the expand/collapse transitions.") }
+        zh: "禁用展开/收起的弹簧动画与两个岛之间的淡入淡出。",
+        en: "Disable expand/collapse springs and fades when switching between islands.") }
 
     static var appearanceDark: String { localized(zh: "深色", en: "Dark") }
     static var appearanceLight: String { localized(zh: "浅色", en: "Light") }
     static var appearanceSystem: String { localized(zh: "系统", en: "System") }
+
+    static var applicationAppearance: String { localized(zh: "应用外观", en: "App appearance") }
+    static var islandBackgroundStyle: String { localized(zh: "岛的背景", en: "Island background") }
+    static var islandBackgroundStyleDesc: String { localized(
+        zh: "可独立选择纯黑、浅色或液态玻璃；不会改变设置窗口的外观。",
+        en: "Choose black, light or Liquid Glass independently of the settings window.") }
+    static var backgroundSolid: String { localized(zh: "跟随外观", en: "Follow appearance") }
+    static var backgroundBlack: String { localized(zh: "纯黑", en: "Pure black") }
+    static var backgroundGlass: String { localized(zh: "液态玻璃", en: "Liquid Glass") }
+    static var backgroundFollowDescription: String { localized(
+        zh: "跟随应用外观：深色时使用纯黑底色，浅色时使用浅色底色。",
+        en: "Follows app appearance: a black surface in dark mode and a light surface in light mode.") }
+    static var backgroundBlackDescription: String { localized(
+        zh: "固定纯黑底色，模块使用深灰区分层次；不受应用外观影响。",
+        en: "A fixed black surface with dark gray modules, independent of app appearance.") }
+    static var backgroundLightDescription: String { localized(
+        zh: "固定浅色底色与深色文字，不受应用外观影响。",
+        en: "A fixed light surface with dark text, independent of app appearance.") }
+    static var glassEnabled: String { localized(
+        zh: "液态玻璃已启用，搭配清晰的浅色文字；下方可调节深浅。",
+        en: "Liquid Glass is enabled with light text. Adjust its darkness below.") }
+    static var glassUnsupported: String { localized(
+        zh: "当前环境不支持液态玻璃（需要 macOS 26 或更新版本），暂用纯黑背景。",
+        en: "Liquid Glass is unavailable here (macOS 26 or later is required). Using a black surface.") }
+    static var glassReducedTransparency: String { localized(
+        zh: "系统已开启“减少透明度”，当前使用纯黑背景；关闭后自动恢复液态玻璃。",
+        en: "Reduce Transparency is on, so a black surface is used. Liquid Glass returns when it is turned off.") }
+    static var islandGlassDepth: String { localized(zh: "玻璃深浅", en: "Glass darkness") }
+    static var islandGlassDepthDesc: String { localized(
+        zh: "数值越大，黑色背衬越深；范围 50–100%，兼顾文字清晰度。",
+        en: "Higher values darken the black backing. The 50–100% range keeps text readable.") }
 
     static var jellyIntensity: String { localized(zh: "果冻动画强度", en: "Jelly animation intensity") }
     static var jellyIntensityDesc: String { localized(

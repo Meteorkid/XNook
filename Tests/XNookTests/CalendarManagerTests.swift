@@ -31,44 +31,72 @@ final class CalendarManagerTests: XCTestCase {
         )
     }
 
-    func testVisibleDatesKeepTheUsualTwoWeekWindow() {
+    func testVisibleDatesKeepNinetyDaysOnEitherSideOfTheSelection() throws {
         let fixture = CalendarFixture()
-        let dates = CalendarManager.visibleDates(today: fixture.now, selectedDate: fixture.now, calendar: fixture.calendar)
-        XCTAssertEqual(dates.count, 29)
-        XCTAssertEqual(dates[14], fixture.calendar.startOfDay(for: fixture.now))
+        let dates = CalendarManager.visibleDates(centeredOn: fixture.now, calendar: fixture.calendar)
+        let selected = fixture.calendar.startOfDay(for: fixture.now)
+        XCTAssertEqual(dates.count, 181)
+        XCTAssertEqual(dates.dropFirst(90).first, selected)
+        XCTAssertEqual(dates.first, try XCTUnwrap(fixture.calendar.date(byAdding: .day, value: -90, to: selected)))
+        XCTAssertEqual(dates.last, try XCTUnwrap(fixture.calendar.date(byAdding: .day, value: 90, to: selected)))
     }
 
-    func testVisibleDatesKeepTheOldestSelectionAfterMidnight() {
+    func testVisibleDatesNormalizeSelectionToTheCalendarDay() throws {
         let fixture = CalendarFixture()
-        let selected = fixture.now.addingTimeInterval(-14 * 86400)
-        let tomorrow = fixture.now.addingTimeInterval(86400)
-        let dates = CalendarManager.visibleDates(today: tomorrow, selectedDate: selected, calendar: fixture.calendar)
-        XCTAssertEqual(dates.first, fixture.calendar.startOfDay(for: selected))
-        XCTAssertTrue(dates.contains(fixture.calendar.startOfDay(for: tomorrow)))
-        XCTAssertEqual(dates.count, 30)
+        let selected = try XCTUnwrap(fixture.calendar.date(from: DateComponents(year: 2026, month: 12, day: 31,
+                                                                                hour: 23, minute: 59, second: 59)))
+        let dates = CalendarManager.visibleDates(centeredOn: selected, calendar: fixture.calendar)
+        XCTAssertEqual(dates.dropFirst(90).first, fixture.calendar.startOfDay(for: selected))
+        XCTAssertTrue(dates.allSatisfy { $0 == fixture.calendar.startOfDay(for: $0) })
+        XCTAssertEqual(fixture.calendar.component(.year, from: try XCTUnwrap(dates.last)), 2027)
     }
 
-    func testVisibleDatesRetainSelectionAndTodayAfterLongSleepOrClockChange() {
+    func testVisibleDatesStayBoundedForDistantSelections() throws {
         let fixture = CalendarFixture()
-        for dayOffset in [-45, 45] {
-            let selected = fixture.now.addingTimeInterval(Double(dayOffset) * 86400)
-            let dates = CalendarManager.visibleDates(today: fixture.now, selectedDate: selected, calendar: fixture.calendar)
-            XCTAssertTrue(dates.contains(fixture.calendar.startOfDay(for: selected)))
-            XCTAssertTrue(dates.contains(fixture.calendar.startOfDay(for: fixture.now)))
-            XCTAssertEqual(dates.count, 60)
+        for dayOffset in [-3650, -400, 400, 3650] {
+            let selected = try XCTUnwrap(fixture.calendar.date(byAdding: .day, value: dayOffset, to: fixture.now))
+            let dates = CalendarManager.visibleDates(centeredOn: selected, calendar: fixture.calendar)
+            XCTAssertEqual(dates.count, 181)
+            XCTAssertEqual(dates.dropFirst(90).first, fixture.calendar.startOfDay(for: selected))
+            XCTAssertFalse(dates.contains(fixture.calendar.startOfDay(for: fixture.now)),
+                           "远期浏览只保留所选日期周围的缓冲，不铺满今天至目标日之间的日期")
             XCTAssertEqual(Set(dates).count, dates.count)
         }
     }
 
-    func testVisibleDatesStayOnCalendarDaysAcrossDaylightSavingChange() throws {
+    func testVisibleDatesRemainContiguousAcrossMonthAndYearBoundaries() throws {
+        let fixture = CalendarFixture()
+        for month in [1, 10, 12] {
+            let selected = try XCTUnwrap(fixture.calendar.date(from: DateComponents(year: 2026, month: month, day: 1)))
+            let dates = CalendarManager.visibleDates(centeredOn: selected, calendar: fixture.calendar)
+            XCTAssertEqual(Set(dates).count, 181)
+            for (previous, next) in zip(dates, dates.dropFirst()) {
+                XCTAssertEqual(next, fixture.calendar.date(byAdding: .day, value: 1, to: previous),
+                               "跨月和跨年日期必须连续，不能遗漏或重复")
+            }
+        }
+    }
+
+    func testVisibleDatesStayOnCalendarDaysAcrossSpringDaylightSavingChange() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
-        let today = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 9, hour: 12)))
-        let selected = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 2, day: 22, hour: 12)))
-        let dates = CalendarManager.visibleDates(today: today, selectedDate: selected, calendar: calendar)
-        XCTAssertEqual(dates.first, calendar.startOfDay(for: selected))
-        XCTAssertEqual(dates.count, 30)
-        XCTAssertTrue(dates.allSatisfy { calendar.component(.hour, from: $0) == 0 })
+        let selected = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 9, hour: 12)))
+        let dates = CalendarManager.visibleDates(centeredOn: selected, calendar: calendar)
+        XCTAssertEqual(dates.count, 181)
+        XCTAssertEqual(dates.dropFirst(90).first, calendar.startOfDay(for: selected))
+        XCTAssertTrue(dates.allSatisfy { $0 == calendar.startOfDay(for: $0) })
+        XCTAssertEqual(zip(dates, dates.dropFirst()).filter { $0.1.timeIntervalSince($0.0) == 23 * 3600 }.count, 1)
+    }
+
+    func testVisibleDatesStayOnCalendarDaysAcrossAutumnDaylightSavingChange() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let selected = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 12)))
+        let dates = CalendarManager.visibleDates(centeredOn: selected, calendar: calendar)
+        XCTAssertEqual(dates.count, 181)
+        XCTAssertEqual(dates.dropFirst(90).first, calendar.startOfDay(for: selected))
+        XCTAssertTrue(dates.allSatisfy { $0 == calendar.startOfDay(for: $0) })
+        XCTAssertEqual(zip(dates, dates.dropFirst()).filter { $0.1.timeIntervalSince($0.0) == 25 * 3600 }.count, 1)
     }
 
     func testSelectedCalendarsPreserveExplicitEmptyPreference() {

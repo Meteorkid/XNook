@@ -43,6 +43,28 @@ final class IslandHandoffReceiverTests: XCTestCase {
         XCTAssertFalse(window.isSwitchingApps)
     }
 
+    func testDirectionalPendingURLReplaysAfterWindowAssignmentAndKeepsIdentity() throws {
+        _ = NSApplication.shared
+        let delegate = AppDelegate()
+        let motion = IslandSwitchMotion(direction: .right, reduceMotion: true)
+        let url = try XCTUnwrap(motion.adding(to: URL(string: "xnook://xnook/show")!))
+        delegate.application(NSApp, open: [url])
+        let fixture = makeWindow()
+        defer { fixture.window.close(); fixture.defaults.removePersistentDomain(forName: fixture.suite) }
+        delegate.notchWindow = fixture.window
+        delegate.application(NSApp, open: [url])
+        XCTAssertEqual(fixture.window.inboundSwitchMotion, motion)
+        XCTAssertFalse(fixture.window.isVisible)
+        fixture.window.installHandoffPreparationHandler { [weak window = fixture.window] generation in
+            _ = window?.completeInboundHandoffPreparation(generation: generation)
+        }
+        XCTAssertTrue(fixture.window.isVisible)
+        let generation = fixture.window.handoffState.generation
+        delegate.application(NSApp, open: [url])
+        XCTAssertEqual(fixture.window.handoffState.generation, generation)
+        XCTAssertFalse(fixture.window.isSwitchingApps)
+    }
+
     private func makeWindow() -> (window: NotchWindow, defaults: UserDefaults, suite: String) {
         let suite = "XNookTests.HandoffReceiver.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

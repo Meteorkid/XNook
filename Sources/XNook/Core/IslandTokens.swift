@@ -87,9 +87,7 @@ enum IslandTokens {
     enum Layout {
         /// 卡片最小宽度，用于列数计算
         static let cardMinWidth: CGFloat = 272
-        /// 导航栏高度
-        static let navigationHeight: CGFloat = 36
-        /// 头部高度
+        /// 标题、导航与窗口操作共享的工具栏高度
         static let headerHeight: CGFloat = 40
     }
 }

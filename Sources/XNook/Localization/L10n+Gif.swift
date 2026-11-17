@@ -2,6 +2,7 @@ import Foundation
 
 extension L10n {
     static var gifInvalidData: String { localized(zh: "无法读取有效的 GIF 图像。", en: "The file is not a readable GIF image.") }
+    static var gifFileTypeInvalid: String { localized(zh: "请选择普通 GIF 文件，不能读取目录、管道或设备。", en: "Choose a regular GIF file. Folders, pipes, and devices cannot be read.") }
     static var gifEncodedSizeLimit: String { localized(zh: "GIF 文件不能超过 10 MiB。", en: "GIF files must not exceed 10 MiB.") }
     static var gifDimensionLimit: String { localized(zh: "GIF 宽高均不能超过 2048 像素。", en: "GIF width and height must not exceed 2048 pixels.") }
     static var gifFrameCountLimit: String { localized(zh: "GIF 不能超过 500 帧。", en: "GIF files must not exceed 500 frames.") }
@@ -10,4 +11,7 @@ extension L10n {
     static func gifLoadFailed(_ name: String, reason: String) -> String { localized(
         zh: "“\(name)”无法使用：\(reason) 原选择未更改。",
         en: "“\(name)” could not be used: \(reason) The previous selection is unchanged.") }
+    static func gifDeleteFailed(_ name: String, reason: String) -> String { localized(
+        zh: "“\(name)”无法删除：\(reason) 列表和选择已保留。",
+        en: "“\(name)” could not be deleted: \(reason) The list and selection are unchanged.") }
 }

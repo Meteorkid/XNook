@@ -6,6 +6,66 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class GifViewTests: XCTestCase {
+    /// 重放旧调用端：透明展开区和 orderOut 都没有改变 isPlaying。
+    /// 这是虚拟驱动回调基线，不是内核唤醒或实机能耗测量。
+    func testVirtualMinuteLegacyPlayingOnlyBaseline() throws {
+        let fixture = try playingFixture()
+        var samples: [[String: Any]] = []
+        for phase in ["active", "expanded", "hidden", "restore"] {
+            fixture.coordinator.resumeAnimation()
+            let sample = fixture.advanceVirtualMinute(phase: phase)
+            XCTAssertEqual(sample["driverCallbacks"] as? Int, 3_600)
+            XCTAssertGreaterThan(sample["frameUpdates"] as? Int ?? 0, 0)
+            samples.append(sample)
+        }
+        try recordActivity(samples, name: "gif-legacy-playing-only-virtual-60s")
+    }
+
+    func testVirtualMinuteHiddenAndExpandedDecorationsDoNotAdvance() throws {
+        let fixture = Fixture()
+        fixture.coordinator.setupAnimation(gifData: try makeGIF(), imageView: fixture.imageView)
+        let activity = PanelActivityState()
+        var samples: [[String: Any]] = []
+        for phase in ["active", "expanded", "hidden", "restore"] {
+            activity.setWindowVisible(phase != "hidden")
+            let isActive = activity.isActive && phase != "expanded"
+            fixture.coordinator.updatePlayback(isPlaying: true, isActive: isActive)
+            let sample = fixture.advanceVirtualMinute(phase: phase)
+            XCTAssertEqual(sample["driverCallbacks"] as? Int, isActive ? 3_600 : 0)
+            XCTAssertEqual(sample["activeDrivers"] as? Int, isActive ? 1 : 0)
+            if isActive {
+                XCTAssertGreaterThan(sample["frameUpdates"] as? Int ?? 0, 0)
+            } else {
+                XCTAssertEqual(sample["frameUpdates"] as? Int, 0)
+            }
+            samples.append(sample)
+        }
+        try recordActivity(samples, name: "gif-visibility-gated-virtual-60s")
+    }
+
+    func testHiddenPlaybackDoesNotCreateDriverAndResumeRejectsOldCallback() throws {
+        let fixture = Fixture()
+        fixture.coordinator.setupAnimation(gifData: try makeGIF(), imageView: fixture.imageView)
+        fixture.coordinator.updatePlayback(isPlaying: true, isActive: false)
+        XCTAssertTrue(fixture.drivers.isEmpty)
+
+        fixture.coordinator.updatePlayback(isPlaying: true, isActive: true)
+        let oldDriver = fixture.drivers[0]
+        fixture.coordinator.updatePlayback(isPlaying: true, isActive: false)
+        fixture.now = 60
+        fixture.coordinator.updatePlayback(isPlaying: true, isActive: true)
+        fixture.coordinator.updatePlayback(isPlaying: true, isActive: true)
+        let frame = fixture.imageView.image
+        fixture.now = 61
+        oldDriver.fire()
+        XCTAssertTrue(fixture.imageView.image === frame)
+        XCTAssertTrue(oldDriver.isInvalidated)
+        XCTAssertEqual(fixture.drivers.filter(\.isRunning).count, 1)
+
+        fixture.drivers[1].fire()
+        XCTAssertFalse(fixture.imageView.image === frame)
+    }
+
     func testSetupShowsFirstFrameWithoutStartingRefresh() throws {
         let fixture = Fixture()
         fixture.coordinator.setupAnimation(gifData: try makeGIF(), imageView: fixture.imageView)
@@ -45,13 +105,14 @@ final class GifViewTests: XCTestCase {
         fixture.now = 10
         fixture.coordinator.resumeAnimation()
         fixture.now = 10.01
-        fixture.drivers[0].fire()
+        fixture.drivers[1].fire()
         XCTAssertTrue(fixture.imageView.image === firstFrame)
 
         fixture.now = 10.11
-        fixture.drivers[0].fire()
+        fixture.drivers[1].fire()
         XCTAssertFalse(fixture.imageView.image === firstFrame)
-        XCTAssertEqual(fixture.drivers[0].resumeCount, 2)
+        XCTAssertTrue(fixture.drivers[0].isInvalidated)
+        XCTAssertEqual(fixture.drivers[1].resumeCount, 1)
     }
 
     func testDismantleInvalidatesAndCannotRestart() throws {
@@ -189,6 +250,18 @@ final class GifViewTests: XCTestCase {
         return fixture
     }
 
+    private func recordActivity(_ samples: [[String: Any]], name: String) throws {
+        guard let path = ProcessInfo.processInfo.environment["XNOOK_PERFORMANCE_OUTPUT"] else { return }
+        let output = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let result: [String: Any] = [
+            "scenario": name, "virtualDurationSecondsPerPhase": 60,
+            "driverHz": 60, "measurement": "injected driver callbacks; not kernel wakeups", "phases": samples
+        ]
+        try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+            .write(to: output.appendingPathComponent(name + ".json"), options: .atomic)
+    }
+
     private func makeGIF(frameCount: Int = 2) throws -> Data {
         let data = NSMutableData()
         let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, UTType.gif.identifier as CFString, frameCount, nil))
@@ -220,6 +293,23 @@ private final class Fixture {
         },
         clock: { [unowned self] in now }
     )
+
+    func advanceVirtualMinute(phase: String) -> [String: Any] {
+        let started = now
+        var callbackCount = 0
+        var frameUpdates = 0
+        for tick in 1...3_600 {
+            now = started + Double(tick) / 60
+            let previousFrame = imageView.image
+            for driver in drivers where driver.isRunning {
+                driver.fire()
+                callbackCount += 1
+            }
+            if imageView.image !== previousFrame { frameUpdates += 1 }
+        }
+        return ["phase": phase, "driverCallbacks": callbackCount, "frameUpdates": frameUpdates,
+                "activeDrivers": drivers.filter(\.isRunning).count]
+    }
 }
 
 private final class FakeDisplayLink: GifDisplayLinkDriving {
@@ -227,11 +317,12 @@ private final class FakeDisplayLink: GifDisplayLinkDriving {
     private(set) var resumeCount = 0
     private(set) var pauseCount = 0
     private(set) var isInvalidated = false
+    private(set) var isRunning = false
 
     init(callback: @escaping () -> Void) { self.callback = callback }
-    func resume() { resumeCount += 1 }
-    func pause() { pauseCount += 1 }
-    func invalidate() { isInvalidated = true }
+    func resume() { resumeCount += 1; isRunning = true }
+    func pause() { pauseCount += 1; isRunning = false }
+    func invalidate() { isInvalidated = true; isRunning = false }
     // 即使停止后也能送达一次回调，模拟已排队但尚未处理的刷新。
     func fire() { callback() }
 }

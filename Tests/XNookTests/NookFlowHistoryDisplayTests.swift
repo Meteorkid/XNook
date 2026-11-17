@@ -30,6 +30,18 @@ final class NookFlowHistoryDisplayTests: XCTestCase {
         XCTAssertEqual(SettingsDefaults.double(for: "panelBaseHeight"), 200, accuracy: 0.001)
     }
 
+    func testPanelAutomaticallyFitsContentByDefaultAndRetainsManualFallback() {
+        XCTAssertTrue(SettingsDefaults.bool(for: "panelAutoSize"))
+        XCTAssertEqual(SettingsDefaults.double(for: "panelWidth"), 800, accuracy: 0.001)
+        XCTAssertEqual(SettingsDefaults.double(for: "panelBaseHeight"), 200, accuracy: 0.001)
+    }
+
+    func testAdaptivePanelDoesNotEnableOptInBehaviorsByDefault() {
+        XCTAssertFalse(SettingsDefaults.bool(for: "launchAtLogin"))
+        XCTAssertFalse(SettingsDefaults.bool(for: "hoverToExpandPanel"))
+        XCTAssertFalse(SettingsDefaults.bool(for: "calendarReminderSoundEnabled"))
+    }
+
     func testHistoryDisplayLimitUsesDefaultAndClampsToSupportedRange() {
         XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(0), 1)
         XCTAssertEqual(FocusSessionView.sanitizedHistoryDisplayLimit(1), 1)

@@ -10,7 +10,7 @@ struct FocusSession: Codable, Identifiable, Equatable {
     var eventIdentifier: String?
     /// 会话开始时间
     var startedAt: Date
-    /// 日程计划结束时间（来自 EKEvent.endDate），可空
+    /// 计划结束时间（来自日历或用户设置的预计用时），可空
     var scheduledEndAt: Date?
     /// 实际结束时间，仅在 state == .ended 时非空
     var endedAt: Date?

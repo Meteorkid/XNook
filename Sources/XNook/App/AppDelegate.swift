@@ -220,8 +220,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 handleActivationURL(url)
                 continue
             }
+            if url.host == "permissions" {
+                handlePermissionsURL(url)
+                continue
+            }
             handleIslandCommand(url)
         }
+    }
+
+    /// `xnook://permissions?pane=screenRecording`
+    ///
+    /// 打开对应权限分页，并把可拖拽的应用图标浮到系统设置旁边。
+    /// 供引导文案、帮助文档与客服话术直接引用，省得让用户自己在设置里翻。
+    private func handlePermissionsURL(_ url: URL) {
+        let requested = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "pane" }?.value
+        let pane = requested.flatMap(SystemPrivacySettings.Pane.init(rawValue:)) ?? .screenRecording
+        PermissionDragAssistant.shared.begin(for: pane)
     }
 
     private func handleActivationURL(_ url: URL) {

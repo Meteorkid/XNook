@@ -125,31 +125,40 @@ struct PermissionCenterView: View {
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     .foregroundStyle(.tertiary)
                     .frame(width: 68, height: 68)
-                DraggableAppIcon(side: 52)
+                DraggableAppIcon(side: 52, onDragEnded: nil)
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.localized(zh: "按住图标拖进系统设置", en: "Drag the icon into System Settings"))
+                Text(L10n.localized(zh: "一步拖进系统设置", en: "Drag it into System Settings"))
                     .font(.system(size: 13, weight: .semibold))
                 Text(L10n.localized(
-                    zh: "把它拖到「屏幕与系统音频录制」列表里就等于添加 X Nook，松开后打开开关即可。两个窗口可以左右并排摆。",
-                    en: "Drop it into the Screen & System Audio Recording list to add X Nook, then switch it on. You can place the two windows side by side."
+                    zh: "点右边按钮会打开对应分页，并在系统设置旁边浮起一个图标，直接把它拖进列表就行——和把 App 拖进「应用程序」文件夹一样。",
+                    en: "The button opens the right pane and floats an icon next to System Settings. Drag it into the list — same as dropping an app into Applications."
                 ))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                Text(appPath)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(Bundle.main.bundleURL.path)
             }
 
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 6) {
-                Button(L10n.localized(zh: "打开设置", en: "Open Settings")) {
-                    SystemPrivacySettings.open(.screenRecording)
+                Button(L10n.localized(zh: "打开并浮起图标", en: "Open & float icon")) {
+                    PermissionDragAssistant.shared.begin(for: .screenRecording)
                 }
                 .controlSize(.small)
-                Text(L10n.localized(zh: "拖不动时改用按钮", en: "Use the button if dragging fails"))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+
+                Button(L10n.localized(zh: "在 Finder 中显示", en: "Show in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
             }
         }
         .padding(14)
@@ -161,6 +170,12 @@ struct PermissionCenterView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.accentColor.opacity(0.25), lineWidth: 0.5)
         )
+    }
+
+    /// 当前运行的 app 位置，让用户一眼确认拖的是哪一个（尤其是同时装了两份的时候）。
+    private var appPath: String {
+        let path = Bundle.main.bundleURL.path
+        return path.isEmpty ? L10n.localized(zh: "位置未知", en: "Location unknown") : path
     }
 
     // MARK: - 清单
@@ -175,7 +190,14 @@ struct PermissionCenterView: View {
                     highlighted: highlightedID == "permission-" + kind.rawValue,
                     canRequest: center.canRequest(kind),
                     canReset: center.canReset(kind),
-                    onOpen: { SystemPrivacySettings.open(kind.pane) },
+                    onOpen: {
+                        // 支持拖放的分页顺手把拖拽板浮起来，省掉「再去主窗口找图标」这一步。
+                        if kind.acceptsDrop {
+                            PermissionDragAssistant.shared.begin(for: kind.pane)
+                        } else {
+                            SystemPrivacySettings.open(kind.pane)
+                        }
+                    },
                     onRequest: { Task { await center.requestAccess(for: kind) } },
                     onRestart: { PermissionCenter.relaunch() },
                     onReset: { pendingReset = kind }

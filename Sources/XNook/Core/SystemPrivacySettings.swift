@@ -31,6 +31,26 @@ enum SystemPrivacySettings {
                 "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
             }
         }
+
+        /// 分页在系统设置里的叫法，用于「拖到右边『屏幕录制』列表里」这类指路文案。
+        var listTitle: String {
+            switch self {
+            case .privacy:
+                L10n.localized(zh: "隐私与安全性", en: "Privacy & Security")
+            case .screenRecording:
+                L10n.localized(zh: "屏幕录制", en: "Screen Recording")
+            case .speechRecognition:
+                L10n.localized(zh: "语音识别", en: "Speech Recognition")
+            case .calendars:
+                L10n.localized(zh: "日历", en: "Calendars")
+            case .automation:
+                L10n.localized(zh: "自动化", en: "Automation")
+            case .accessibility:
+                L10n.localized(zh: "辅助功能", en: "Accessibility")
+            case .loginItems:
+                L10n.localized(zh: "登录项", en: "Login Items")
+            }
+        }
     }
 
     static func open(_ pane: Pane) {

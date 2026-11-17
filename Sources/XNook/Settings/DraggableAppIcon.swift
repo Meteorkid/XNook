@@ -8,15 +8,19 @@ import SwiftUI
 struct DraggableAppIcon: NSViewRepresentable {
     var bundleURL: URL = Bundle.main.bundleURL
     var side: CGFloat = 52
+    /// 拖拽结束回调：浮动拖拽板靠它判断「已经放下」，自动收起来。
+    var onDragEnded: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> AppIconDragView {
         let view = AppIconDragView(frame: NSRect(x: 0, y: 0, width: side, height: side))
         view.bundleURL = bundleURL
+        view.onDragEnded = onDragEnded
         return view
     }
 
     func updateNSView(_ nsView: AppIconDragView, context: Context) {
         nsView.bundleURL = bundleURL
+        nsView.onDragEnded = onDragEnded
         if nsView.frame.size != NSSize(width: side, height: side) {
             nsView.setFrameSize(NSSize(width: side, height: side))
         }
@@ -32,6 +36,9 @@ final class AppIconDragView: NSView, NSDraggingSource {
     var bundleURL: URL = Bundle.main.bundleURL {
         didSet { needsDisplay = true }
     }
+
+    /// 拖拽会话结束时回调一次，参数表示目标是否接受了这个拖拽。
+    var onDragEnded: (() -> Void)?
 
     private var mouseDownEvent: NSEvent?
     private var hasStartedDrag = false
@@ -51,6 +58,10 @@ final class AppIconDragView: NSView, NSDraggingSource {
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .openHand)
     }
+
+    /// 浮动拖拽板是非激活面板：不做这个覆盖时，第一次按下只会去激活窗口，
+    /// 用户会以为「拖不动」，得按第二次才行。
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         mouseDownEvent = event
@@ -85,5 +96,8 @@ final class AppIconDragView: NSView, NSDraggingSource {
                          endedAt screenPoint: NSPoint,
                          operation: NSDragOperation) {
         hasStartedDrag = false
+        // 只有真正被接收（落到系统设置列表里）才收起浮动面板；
+        // 拖到空白处取消时保留，用户可以再试一次。
+        if operation != [] { onDragEnded?() }
     }
 }

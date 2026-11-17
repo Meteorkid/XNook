@@ -79,7 +79,7 @@ final class SettingsDiscoveryPreviewTests: XCTestCase {
                 XCTAssertTrue(search.results.contains { $0.id == "panelBaseHeight" })
                 try capture(host, at: output.appendingPathComponent("search-\(suffix).png"))
 
-                let ids = ["panelBaseHeight", "lyricsOffset", "expandedInactivity", "permissionCalendar",
+                let ids = ["panelBaseHeight", "lyricsOffset", "expandedInactivity", "permission-calendar",
                     "islandBackgroundStyle", "islandGlassDepth", "panelLayoutEditor", "panelAutoSize",
                     "activityNotificationsEnabled", "calendarReminderActivityEnabled", "claudeCompletionEnabled", "globalPanelShortcut",
                     "showTaskInboxShortcut"]

@@ -26,6 +26,20 @@ cp "scripts/claude-stop-hook.py" "${RESOURCES}/claude-stop-hook.py"
 # Copy executable
 cp "${BUILD_DIR}/release/XNook" "${MACOS}/${APP_NAME}"
 
+# MediaRemote 桥接：由 /usr/bin/perl 加载的动态库与脚本。
+# ad-hoc 签名的 app 进程读取 MediaRemote 会被系统返回空，
+# Apple 平台签名的 perl 具备访问权，故经此桥接读写系统播放中心。
+MR_HELPER="${RESOURCES}/MediaRemoteBridge"
+mkdir -p "${MR_HELPER}"
+MR_DYLIB="${BUILD_DIR}/release/libCMediaRemote.dylib"
+if [[ ! -f "${MR_DYLIB}" ]]; then
+    echo "ERROR: libCMediaRemote.dylib not found at ${MR_DYLIB}" >&2
+    exit 1
+fi
+cp "${MR_DYLIB}" "${MR_HELPER}/libCMediaRemote.dylib"
+cp "Sources/XNook/Resources/MediaRemoteBridge/run.pl" "${MR_HELPER}/run.pl"
+chmod +x "${MR_HELPER}/run.pl"
+
 # Copy and process Info.plist (replace placeholders)
 sed -e "s/\$(EXECUTABLE_NAME)/${APP_NAME}/g" \
     -e "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/com.meteorkid.xnook/g" \
@@ -66,16 +80,37 @@ fi
 
 ENTITLEMENTS="$(dirname "$0")/XNook.entitlements"
 
-# Re-sign the complete bundle after adding Info.plist and resources.
-# Entitlements are always embedded so that a future Developer ID / notarised
-# build (which requires Hardened Runtime) keeps working: without
-# com.apple.security.files.bookmarks.app-scope every security-scoped bookmark
-# in the tray, GIF picker and NookFlow history fails to resolve after relaunch.
+# 稳定签名身份。ad-hoc 签名（-s -）的 designated requirement 是 cdhash，
+# 每次重建都会变，macOS 会把新二进制当成另一个应用，已授权的 TCC 记录随即失效
+# （系统设置里的开关仍然是打开的，但应用读不到权限）。
+# 有本地自签名身份时优先用它，requirement 变成 certificate leaf，跨更新稳定。
+SIGN_KEYCHAIN="${XNOOK_SIGN_KEYCHAIN:-$HOME/Library/Keychains/xnook-signing.keychain-db}"
+SIGN_PASSWORD_FILE="${XNOOK_SIGN_PASSWORD_FILE:-$HOME/.xnook-signing/password}"
+SIGN_IDENTITY=""
+if [[ "${XNOOK_SIGN_ADHOC:-0}" != "1" && -f "${SIGN_KEYCHAIN}" ]]; then
+    if [[ -f "${SIGN_PASSWORD_FILE}" ]]; then
+        security unlock-keychain -p "$(cat "${SIGN_PASSWORD_FILE}")" "${SIGN_KEYCHAIN}" >/dev/null 2>&1 || true
+    fi
+    SIGN_IDENTITY="$(security find-identity -p codesigning "${SIGN_KEYCHAIN}" 2>/dev/null \
+        | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)"
+fi
+
+SIGN_ARGS=(--force --deep --entitlements "${ENTITLEMENTS}")
 if [[ "${XNOOK_ENABLE_HARDENED_RUNTIME:-0}" == "1" ]]; then
     # Opt-in switch to validate the bundle behaves under Hardened Runtime.
-    codesign --force --deep --sign - --entitlements "${ENTITLEMENTS}" --options runtime "${APP_BUNDLE}"
+    SIGN_ARGS+=(--options runtime)
+fi
+
+if [[ -n "${SIGN_IDENTITY}" ]]; then
+    echo "Signing with stable identity: ${SIGN_IDENTITY}"
+    ORIGINAL_KEYCHAINS="$(security list-keychains -d user | tr -d ' "')"
+    # codesign 只在搜索列表里找身份，构建结束后立刻恢复，不改动用户的长期配置。
+    security list-keychains -d user -s "${SIGN_KEYCHAIN}" ${ORIGINAL_KEYCHAINS}
+    codesign "${SIGN_ARGS[@]}" --sign "${SIGN_IDENTITY}" --keychain "${SIGN_KEYCHAIN}" "${APP_BUNDLE}"
+    security list-keychains -d user -s ${ORIGINAL_KEYCHAINS}
 else
-    codesign --force --deep --sign - --entitlements "${ENTITLEMENTS}" "${APP_BUNDLE}"
+    echo "Signing ad-hoc. TCC 授权会在下次重建后失效；运行 scripts/setup-signing-identity.sh 可固定身份。"
+    codesign "${SIGN_ARGS[@]}" --sign - "${APP_BUNDLE}"
 fi
 
 python3 "$(dirname "$0")/scripts/verify-app-permissions.py" "${APP_BUNDLE}"

@@ -404,10 +404,11 @@ enum L10n {
     static var sectionLiveCaptions: String { localized(zh: "实时字幕", en: "Live Captions") }
     static var showLiveCaptions: String { localized(zh: "显示实时字幕", en: "Show live captions") }
     static var showLiveCaptionsDesc: String { localized(
-        zh: "捕获系统正在播放的声音并在灵动岛下方显示转写文字。需要「屏幕录制」与「语音识别」授权，识别在本机完成；首次授权后需重启应用才生效。",
-        en: "Transcribe whatever the system is playing and show it below the island pill. Requires Screen Recording and Speech Recognition permission; recognition runs on device. Restart the app after granting Screen Recording.") }
-    static var captionScreenPermissionGranted: String { localized(zh: "屏幕录制已授权", en: "Screen Recording granted") }
-    static var captionScreenPermissionMissing: String { localized(zh: "屏幕录制未授权", en: "Screen Recording missing") }
+        zh: "捕获系统正在播放的声音并在灵动岛下方显示转写文字。需要「屏幕与系统音频录制」与「语音识别」授权，识别在本机完成；首次授权后需重启应用才生效。",
+        en: "Transcribe whatever the system is playing and show it below the island pill. Requires Screen & System Audio Recording and Speech Recognition permission; recognition runs on device. Restart the app after granting Screen Recording.") }
+    static var captionScreenPermissionGranted: String { localized(zh: "屏幕与系统音频录制已授权", en: "Screen & System Audio granted") }
+    static var captionScreenPermissionMissing: String { localized(zh: "屏幕与系统音频录制未授权", en: "Screen & System Audio missing") }
+    static var captionScreenPermissionNeedsRestart: String { localized(zh: "屏幕与系统音频录制已授权，需重启生效", en: "Screen & System Audio granted, restart to apply") }
     static var captionSpeechPermissionGranted: String { localized(zh: "语音识别已授权", en: "Speech Recognition granted") }
     static var captionSpeechPermissionMissing: String { localized(zh: "语音识别被拒绝", en: "Speech Recognition denied") }
     static var captionSpeechPermissionUndetermined: String { localized(zh: "语音识别待授权", en: "Speech Recognition not requested") }

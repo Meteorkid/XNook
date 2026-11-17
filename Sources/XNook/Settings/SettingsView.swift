@@ -236,6 +236,8 @@ struct SettingsView: View {
         switch search.pane {
         case .general:
             generalPane
+        case .permissions:
+            PermissionCenterView(highlightedID: search.targetID)
         case .display:
             displayPane
         case .integration:
@@ -282,15 +284,27 @@ struct SettingsView: View {
 
             section(L10n.sectionMacPrivacy) {
                 card {
-                    SettingsPermissionsView(permissions: permissions, highlightedID: search.targetID)
-                    dividerLine
-                    HStack {
-                        Button(L10n.settingsRefreshPermissions) { permissions.refresh() }
-                        Spacer()
-                        Button(L10n.openPrivacySecurityButton) { SystemPrivacySettings.openPrivacySecurity() }
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "hand.raised.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.localized(zh: "权限已集中到「权限」页", en: "Permissions moved to their own tab"))
+                                .font(.system(size: 13, weight: .medium))
+                            Text(L10n.localized(
+                                zh: "屏幕录制、语音识别、日历、自动化和登录项的状态与授权入口都在那里，并支持把应用图标直接拖进系统设置。",
+                                en: "Screen recording, speech, calendar, automation and login items all live there, with a draggable app icon."
+                            ))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        Button(L10n.localized(zh: "前往", en: "Open")) { search.selectPane(.permissions) }
+                            .controlSize(.small)
                     }
-                    .controlSize(.small)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
                 }
             }
 

@@ -348,16 +348,24 @@ final class CaptionManager {
     }
 
     /// 把两处权限状态压成一句可直接展示的说明。
-    static func permissionSummary() async -> String {
-        let audio = await hasAudioPermission()
-        let speech = speechAuthorization()
+    ///
+    /// 这里刻意不再调用 `SCShareableContent` 做探测：那会真的去请求屏幕内容，
+    /// 既可能触发系统弹窗，也只能回答「现在能不能抓」，答不出「授权了但需要重启」。
+    /// 状态统一由 PermissionCenter 判断，界面与权限页永远一致。
+    @MainActor
+    static func permissionSummary() -> String {
+        let center = PermissionCenter.shared
+        center.refreshCaptionStatuses()
         var parts: [String] = []
-        parts.append(audio ? L10n.captionScreenPermissionGranted : L10n.captionScreenPermissionMissing)
-        switch speech {
-        case .authorized: parts.append(L10n.captionSpeechPermissionGranted)
+        switch center.status(for: .screenRecording) {
+        case .allowed: parts.append(L10n.captionScreenPermissionGranted)
+        case .needsRestart: parts.append(L10n.captionScreenPermissionNeedsRestart)
+        default: parts.append(L10n.captionScreenPermissionMissing)
+        }
+        switch center.status(for: .speechRecognition) {
+        case .allowed: parts.append(L10n.captionSpeechPermissionGranted)
         case .denied, .restricted: parts.append(L10n.captionSpeechPermissionMissing)
-        case .notDetermined: parts.append(L10n.captionSpeechPermissionUndetermined)
-        @unknown default: parts.append(L10n.captionSpeechPermissionUndetermined)
+        default: parts.append(L10n.captionSpeechPermissionUndetermined)
         }
         return parts.joined(separator: " · ")
     }

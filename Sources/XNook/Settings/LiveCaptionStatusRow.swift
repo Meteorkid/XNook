@@ -2,12 +2,13 @@ import SwiftUI
 
 /// 实时字幕的权限与运行状态行。
 ///
-/// 字幕「没有出现」有两个完全不同的原因：捕获侧没拿到屏幕录制权限，或识别侧没拿到语音识别权限。
-/// 两者都是 TCC 授权，用户无法在应用内自行修复，因此这里必须直接给出结论与跳转入口，
-/// 而不是让用户对着一个没反应的开关猜。
+/// 字幕「没有出现」有三个不同原因：捕获侧没拿到屏幕与系统音频录制权限、识别侧没拿到语音识别权限、
+/// 或者权限刚授予但进程还没重启。三者都是 TCC 授权，用户无法在应用内自行修复，
+/// 所以这里必须直接给出结论与跳转入口，而不是让用户对着一个没反应的开关猜。
 struct LiveCaptionStatusRow: View {
 
     @State private var manager = CaptionManager.shared
+    @State private var center = PermissionCenter.shared
     @State private var summary: String = ""
     @State private var refreshToken = 0
 
@@ -53,6 +54,18 @@ struct LiveCaptionStatusRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if center.status(for: .screenRecording) == .needsRestart {
+                HStack(spacing: 6) {
+                    Text(L10n.localized(zh: "授权已写入系统，重启后字幕才能捕获声音。",
+                                        en: "Permission is granted; restart before captions can capture audio."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Button(L10n.localized(zh: "立即重启", en: "Restart now")) { PermissionCenter.relaunch() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                }
+            }
+
             if case .failed(let reason) = manager.state {
                 Text(reason)
                     .font(.system(size: 11))
@@ -73,7 +86,8 @@ struct LiveCaptionStatusRow: View {
         }
         .padding(.vertical, 8)
         .task(id: refreshToken) {
-            summary = await CaptionManager.permissionSummary()
+            center.refreshCaptionStatuses()
+            summary = CaptionManager.permissionSummary()
         }
     }
 

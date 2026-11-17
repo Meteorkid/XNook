@@ -75,15 +75,50 @@ enum MediaRemoteBridge {
 
     /// 系统级播放快照：任意接入 Now Playing 的播放器（音乐、视频、浏览器）都适用。
     ///
-    /// 元数据与来源 PID 必须串行取值：两个 IPC 之间若发生播放器切换，
-    /// 并发读取会把 A 的标题配到 B 的来源上。这里在取元数据前后各读一次 PID，
-    /// 不一致即判定为切换中，交由 `resolveSnapshot` 返回 fetchFailed 保留上一帧。
+    /// 优先走 Perl 桥接：ad-hoc 签名的 app 直接调 MediaRemote 读接口会被系统返回空，
+    /// 而 Apple 平台签名的 /usr/bin/perl 能读到完整信息。桥接的 get 命令在单次回调中
+    /// 同时取得元数据、PID 和播放态，天然避免了原先两次 IPC 之间的竞态。
+    /// 桥接不可用时（如开发态未打包 dylib）回退到进程内直连 + 前后 PID 校验。
     static func snapshot(now: Date = Date()) async -> [String: Any] {
+        if PerlMediaRemote.isAvailable, let track = await PerlMediaRemote.get() {
+            return normalizePerl(track, now: now)
+        }
         guard isAvailable else { return [:] }
         let pidBefore = await fetchApplicationPID()
         let rawInfo = await fetchNowPlayingInfo()
         let pidAfter = await fetchApplicationPID()
         return resolveSnapshot(rawInfo, pidBefore: pidBefore, pidAfter: pidAfter, now: now)
+    }
+
+    /// 把 Perl 桥接快照归一化为内部字段格式（与 normalize 对齐）。
+    static func normalizePerl(_ track: PerlTrackPayload, now: Date = Date()) -> [String: Any] {
+        var info: [String: Any] = [
+            "title": track.title ?? "",
+            "artist": track.artist ?? "",
+            "album": track.album ?? "",
+            "sourceKind": "mediaRemote",
+        ]
+        if let artwork = track.artworkData, !artwork.isEmpty {
+            info["artworkData"] = artwork
+        }
+        if let duration = track.durationMicros, duration >= 0 {
+            info["duration"] = duration / 1_000_000
+        }
+        if let rate = track.playbackRate, rate >= 0 {
+            info["playbackRate"] = rate
+        }
+        if let position = track.elapsedTime(at: now) {
+            info["playerPosition"] = position
+            info["positionTimestamp"] = now
+        }
+        if let bundleID = track.bundleIdentifier, !bundleID.isEmpty {
+            info["sourceBundleID"] = bundleID
+        }
+        if let name = track.applicationName, !name.isEmpty {
+            info["sourceName"] = name
+        }
+        // 脚本增强只识别 Music / Spotify；其他来源（含 B 站）靠桥接的精确位置即可。
+        return info
     }
 
     /// 私有框架回调偶尔不到达时，1s 后无条件兜底，避免轮询任务永久挂起。

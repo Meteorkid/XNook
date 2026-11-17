@@ -3,11 +3,12 @@ import SwiftUI
 import Observation
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, display, integration, license, about
+    case general, permissions, display, integration, license, about
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: L10n.general
+        case .permissions: L10n.localized(zh: "权限", en: "Permissions")
         case .display: L10n.display
         case .integration: L10n.integration
         case .license: L10n.license
@@ -17,6 +18,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: "gearshape.fill"
+        case .permissions: "hand.raised.fill"
         case .display: "paintbrush.fill"
         case .integration: "rectangle.connected.to.line.below"
         case .license: "checkmark.seal.fill"
@@ -49,9 +51,12 @@ struct SettingsSearchEntry: Identifiable, Equatable {
         .init(id: "expandedInactivity", pane: .general, title: L10n.expandedInactivityHide, keywords: "自动隐藏 自动收起 无操作 超时 auto hide inactivity timeout collapse"),
         .init(id: "hoverExit", pane: .general, title: L10n.hoverExitCollapseDelay, keywords: "自动隐藏 鼠标移出 收起延迟 hover exit delay collapse"),
         .init(id: "hideInFullscreen", pane: .general, title: L10n.hideInFullscreen, keywords: "全屏隐藏 自动隐藏 fullscreen full screen hide"),
-        .init(id: "permissionCalendar", pane: .general, title: L10n.openCalendarsButton, keywords: "日历权限 日历不显示 授权 隐私 calendar permission access authorization privacy"),
-        .init(id: "permissionAutomation", pane: .general, title: L10n.openAutomationButton, keywords: "自动化权限 音乐控制 Apple Music Spotify automation permission media playback"),
-        .init(id: "permissionLoginItems", pane: .general, title: L10n.openLoginItemsButton, keywords: "登录项权限 开机启动批准 login items approval permission startup"),
+        .init(id: "permission-screenRecording", pane: .permissions, title: L10n.localized(zh: "屏幕与系统音频录制", en: "Screen & System Audio Recording"), keywords: "屏幕录制 系统音频 字幕不显示 录屏 授权 隐私 screen recording system audio capture caption permission privacy"),
+        .init(id: "permission-speechRecognition", pane: .permissions, title: L10n.localized(zh: "语音识别", en: "Speech Recognition"), keywords: "语音识别 字幕 授权 隐私 speech recognition caption permission privacy"),
+        .init(id: "permission-calendar", pane: .permissions, title: L10n.openCalendarsButton, keywords: "日历权限 日历不显示 授权 隐私 calendar permission access authorization privacy"),
+        .init(id: "permission-automationMusic", pane: .permissions, title: L10n.localized(zh: "自动化 · Apple Music", en: "Automation · Apple Music"), keywords: "自动化权限 音乐控制 Apple Music 播放 automation permission media playback"),
+        .init(id: "permission-automationSpotify", pane: .permissions, title: L10n.localized(zh: "自动化 · Spotify", en: "Automation · Spotify"), keywords: "自动化权限 音乐控制 Spotify 播放 automation permission media playback"),
+        .init(id: "permission-loginItems", pane: .permissions, title: L10n.openLoginItemsButton, keywords: "登录项权限 开机启动批准 login items approval permission startup"),
         .init(id: "launchAtLogin", pane: .general, title: L10n.launchAtLogin, keywords: "开机启动 登录启动 launch login startup"),
         .init(id: "language", pane: .general, title: L10n.language, keywords: "语言 中文 英文 language chinese english"),
         .init(id: "showOnAllSpaces", pane: .general, title: L10n.showOnAllSpaces, keywords: "所有桌面空间 多桌面 all spaces desktops"),

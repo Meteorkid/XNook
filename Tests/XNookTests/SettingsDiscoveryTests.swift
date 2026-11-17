@@ -15,7 +15,7 @@ final class SettingsDiscoveryTests: XCTestCase {
             for (query, target) in [("高度", "panelBaseHeight"), ("panel HEIGHT", "panelBaseHeight"),
                 ("歌词延迟", "lyricsOffset"), ("lyric delay", "lyricsOffset"),
                 ("自动隐藏", "expandedInactivity"), ("full screen", "hideInFullscreen"),
-                ("日历权限", "permissionCalendar"), ("calendar access", "permissionCalendar"),
+                ("日历权限", "permission-calendar"), ("calendar access", "permission-calendar"),
                 ("背景", "islandBackgroundStyle"), ("background glass", "islandBackgroundStyle"),
                 ("玻璃深浅", "islandGlassDepth"), ("glass depth", "islandGlassDepth"),
                 ("网格", "panelLayoutEditor"), ("grid layout", "panelLayoutEditor"),
@@ -53,9 +53,16 @@ final class SettingsDiscoveryTests: XCTestCase {
     func testSearchTargetsCorrespondToActualSettingsRows() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let settings = try String(contentsOf: root.appendingPathComponent("Sources/XNook/Settings/SettingsView.swift"), encoding: .utf8)
-        let permissions = try String(contentsOf: root.appendingPathComponent("Sources/XNook/Settings/SettingsPermissionsView.swift"), encoding: .utf8)
+        let permissions = try String(contentsOf: root.appendingPathComponent("Sources/XNook/Settings/PermissionCenterView.swift"), encoding: .utf8)
         let background = try String(contentsOf: root.appendingPathComponent("Sources/XNook/Settings/IslandBackgroundSettingsView.swift"), encoding: .utf8)
+        // 权限行由 PermissionKind 枚举渲染，没有字面量 id：改为核对每个搜索项都能映射回一个真实权限项。
+        let dynamicPermissionIDs = Set(PermissionKind.allCases.map { "permission-" + $0.rawValue })
+        XCTAssertTrue(permissions.contains("\"permission-\" + kind.rawValue"), "权限行必须由枚举生成稳定锚点")
         for entry in SettingsSearchEntry.all {
+            if entry.id.hasPrefix("permission-") {
+                XCTAssertTrue(dynamicPermissionIDs.contains(entry.id), "悬空权限搜索目标 \(entry.id)")
+                continue
+            }
             XCTAssertTrue((settings + permissions + background).contains("id: \"\(entry.id)\""), "悬空搜索目标 \(entry.id)")
         }
     }
@@ -72,8 +79,8 @@ final class SettingsDiscoveryTests: XCTestCase {
         XCTAssertNil(search.targetID)
         let calendar = try XCTUnwrap(search.results.first)
         search.navigate(to: calendar)
-        XCTAssertEqual(search.pane, .general)
-        XCTAssertEqual(search.targetID, "permissionCalendar")
+        XCTAssertEqual(search.pane, .permissions)
+        XCTAssertEqual(search.targetID, "permission-calendar")
         search.selectPane(.about)
         XCTAssertNil(search.targetID)
         XCTAssertEqual(search.pane, .about)

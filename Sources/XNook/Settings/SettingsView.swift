@@ -537,6 +537,11 @@ struct SettingsView: View {
                         AppStorageToggle(key: "showLiveCaptions")
                     }
                     dividerLine
+                    settingRow(L10n.captionBudget, id: "captionBudget",
+                              description: L10n.captionBudgetDesc) {
+                        AppStorageSlider(key: "captionBudget", range: 0.4...1.5, format: "%.2fs")
+                    }
+                    dividerLine
                     LiveCaptionStatusRow()
                 }
             }

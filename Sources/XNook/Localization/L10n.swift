@@ -419,6 +419,12 @@ enum L10n {
     static var captionChainLength: String { localized(zh: "链长", en: "Chain length") }
     static var captionCertificates: String { localized(zh: "证书", en: "Certificates") }
     static var captionLevel: String { localized(zh: "等级", en: "Level") }
+    static var captionFrameText: String { localized(zh: "画面", en: "Frames") }
+    static var captionSkipped: String { localized(zh: "跳过", en: "skipped") }
+    static var captionBudget: String { localized(zh: "首帧预算", en: "First-line budget") }
+    static var captionBudgetDesc: String { localized(
+        zh: "一条字幕最多允许多少延迟。调小会把更耗时的来源裁出链路（延迟更稳、来源更少），调大则允许多来源并行。改动在下一次启用字幕时生效。",
+        en: "Upper bound on how late a caption line may appear. Smaller values drop the more expensive sources from the chain (tighter latency, fewer sources); larger values let more sources run. Takes effect next time captions start.") }
     static var refreshStatus: String { localized(zh: "刷新状态", en: "Refresh") }
 
     // MARK: - Custom GIF

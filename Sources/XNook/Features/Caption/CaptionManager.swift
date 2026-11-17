@@ -42,7 +42,11 @@ final class CaptionManager {
     // MARK: - 内部组件
 
     let clock = SourceClock()
-    let scheduler = CaptionScheduler()
+    /// 首帧预算从设置读取。它是「承诺」而不是常数：调小会把更贵的来源裁出链外，
+    /// 延迟上界随之收紧；调大则允许多个来源同时跑。
+    let scheduler = CaptionScheduler(
+        config: .init(deadlineBudget: CaptionManager.configuredBudget())
+    )
     private var tap: SystemAudioTap?
     private var speech: SpeechEvidenceProvider?
     private var lyricProvider: LyricEvidenceProvider?
@@ -126,9 +130,11 @@ final class CaptionManager {
             Task { @MainActor in self?.log(message) }
         }
         // 画面文字是链里唯一「按区间执行且可跳过」的来源：
-        // 证书一旦覆盖该区间，这里就直接返回 false，连截图与 OCR 都不发生。
+        // 该区间已被不低于画面等级的候选覆盖时，连截图与 OCR 都不发生。
         frameEvidence.runGate = { [weak self, weak frameEvidence] index in
             guard let self, let frameEvidence else { return false }
+            if self.scheduler.hasCoverage(unitIndex: index, atLeast: frameEvidence.level) { return false }
+            // 回看历史区间时证书已成立，同样不再执行。
             if self.scheduler.isShortCircuited(frameEvidence, unitIndex: index) { return false }
             return self.scheduler.shouldExecute(
                 frameEvidence,
@@ -324,6 +330,12 @@ final class CaptionManager {
     }
 
     // MARK: - 权限
+
+    /// 读取用户设定的首帧预算，夹到合理区间：太小会让链长为 0，太大就失去约束意义。
+    static func configuredBudget() -> TimeInterval {
+        let stored = UserDefaults.standard.object(forKey: "captionBudget") as? Double
+        return max(0.3, min(2.0, stored ?? 0.9))
+    }
 
     /// 屏幕录制权限（ScreenCaptureKit 抓系统音频走的就是这条 TCC 授权）。
     static func hasAudioPermission() async -> Bool {

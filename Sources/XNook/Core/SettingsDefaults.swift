@@ -27,6 +27,7 @@ enum SettingsDefaults {
         "mediaSourceCustomBundleID": "",
         "showLyrics": true,
         "showLiveCaptions": false,
+        "captionBudget": 0.9,
         "tickerSpeed": 25.0,
         "lyricsOffset": 0.0,
         "activityNotificationsEnabled": true,

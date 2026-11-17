@@ -32,6 +32,13 @@ struct LiveCaptionStatusRow: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                     }
+                    let executed = manager.frameExecutedIntervals
+                    let skipped = manager.frameSkippedIntervals
+                    if executed + skipped > 0 {
+                        Text("\(L10n.captionFrameText) \(executed)/\(executed + skipped) · \(L10n.captionSkipped) \(skipped)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 Spacer(minLength: 8)
                 Button(L10n.refreshStatus) { refreshToken += 1 }

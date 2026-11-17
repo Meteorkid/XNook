@@ -265,6 +265,24 @@ final class CaptionScheduler {
         certificates[unitIndex]?.verdict ?? .pending
     }
 
+    /// 某区间被「等级不低于 level」的候选覆盖的比例。
+    /// 与证书不同，这里不要求区间已终结——它回答的是「现在还有必要跑低等级来源吗」。
+    func coverageRatio(unitIndex: Int, atLeast level: EvidenceLevel) -> Double {
+        guard let bucket = store[unitIndex] else { return 0 }
+        let bounds = CaptionInterval.range(index: unitIndex, unit: unit)
+        let relevant = bucket.filter { $0.level >= level && $0.end > readBoundary }
+        return coverageRatio(of: relevant, in: bounds)
+    }
+
+    /// 该区间是否已被足够高等级的候选覆盖。
+    ///
+    /// 这是「什么时候可以不算了」的执行期判据：
+    /// 证书要求区间已终结，只适用于回看历史；而低等级来源通常要在区间进行中决定跑不跑，
+    /// 那时只能看覆盖，不能等证书。
+    func hasCoverage(unitIndex: Int, atLeast level: EvidenceLevel) -> Bool {
+        coverageRatio(unitIndex: unitIndex, atLeast: level) >= config.coverageThreshold
+    }
+
     private func coverageRatio(of candidates: [CaptionCandidate], in bounds: Range<TimeInterval>) -> Double {
         let length = bounds.upperBound - bounds.lowerBound
         guard length > 0 else { return 0 }

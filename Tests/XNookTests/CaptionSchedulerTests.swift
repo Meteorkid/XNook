@@ -212,6 +212,32 @@ final class CaptionSchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.chainLength(for: 50, prefetchability: 0), 1)
     }
 
+    // MARK: - 覆盖判定（执行期短路）
+
+    /// 执行期不能用证书做闸门：证书要求区间已终结，而低等级来源要在区间进行中就决定跑不跑。
+    func testHasCoverageSeesHigherLevelCandidateBeforeIntervalSettles() {
+        let clock = anchoredClock(100)
+        let lyrics = StubProvider(id: "lyrics", level: .alignedFullText, latency: 0.05)
+        let scheduler = makeScheduler(clock: clock, providers: [lyrics])
+
+        scheduler.ingest([candidate(lyrics, start: 100, end: 102, text: "整句", generation: clock.generation)])
+
+        XCTAssertTrue(scheduler.hasCoverage(unitIndex: 50, atLeast: .frameText))
+        // 等级不够的来源不算覆盖：画面文字要求 ≥3，这里给 6 级自然满足；反过来问 6 级则未覆盖
+        XCTAssertFalse(scheduler.hasCoverage(unitIndex: 50, atLeast: .appText))
+        // 同一时刻证书还不会成立（区间未终结），证明确实是两条不同的判据
+        XCTAssertNotEqual(scheduler.certificateVerdict(unitIndex: 50), .established)
+    }
+
+    func testHasCoverageIsFalseForPartlyCoveredInterval() {
+        let clock = anchoredClock(100)
+        let lyrics = StubProvider(id: "lyrics", level: .alignedFullText, latency: 0.05)
+        let scheduler = makeScheduler(clock: clock, providers: [lyrics])
+
+        scheduler.ingest([candidate(lyrics, start: 100, end: 101, text: "半句", generation: clock.generation)])
+        XCTAssertFalse(scheduler.hasCoverage(unitIndex: 50, atLeast: .frameText))
+    }
+
     // MARK: - 已读边界与代次
 
     func testEvidenceEndingBeforeReadBoundaryIsRejected() {

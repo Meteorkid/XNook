@@ -79,10 +79,44 @@ final class CaptionBudgetBenchmarkTests: XCTestCase {
         XCTAssertFalse(scheduler.shouldExecute(low, unitIndex: 0, prefetchability: 0))
     }
 
+    /// 没有歌词时，歌词来源不能占着预算把流式识别挤出链外——
+    /// 否则视频/会议场景会彻底没有字幕。
+    func testUnavailableProviderDoesNotConsumeBudget() {
+        let lyrics = LyricEvidenceProvider { 1 }
+        let speech = StubProvider(id: "speech", level: .streaming, latency: 0.35)
+        let scheduler = CaptionScheduler(config: .init())
+        scheduler.register([lyrics, speech])
+
+        XCTAssertEqual(scheduler.chainLength(for: 0, prefetchability: 0), 1)
+        XCTAssertTrue(scheduler.shouldExecute(speech, unitIndex: 0, prefetchability: 0))
+        XCTAssertFalse(scheduler.shouldExecute(lyrics, unitIndex: 0, prefetchability: 0))
+    }
+
+    /// 收紧首帧预算时，最耗时的来源被裁出链外——这就是「预算内选谁」的可操作形式。
+    func testTighteningBudgetDropsMostExpensiveSource() {
+        let lyrics = LyricEvidenceProvider { 1 }
+        lyrics.onCandidates = { _ in }
+        lyrics.submit([LyricsManager.LrcLine(time: 0, text: "第一句")], signature: "t")
+        let frame = StubProvider(id: "frame", level: .frameText, latency: 0.25)
+        let speech = StubProvider(id: "speech", level: .streaming, latency: 0.35)
+
+        let roomy = CaptionScheduler(config: .init(deadlineBudget: 0.90, renderReserve: 0.02))
+        roomy.register([lyrics, frame, speech])
+        XCTAssertEqual(roomy.chainLength(for: 0, prefetchability: 0.9), 3)
+
+        let tight = CaptionScheduler(config: .init(deadlineBudget: 0.50, renderReserve: 0.02))
+        tight.register([lyrics, frame, speech])
+        XCTAssertEqual(tight.chainLength(for: 0, prefetchability: 0.9), 2)
+        XCTAssertFalse(tight.shouldExecute(speech, unitIndex: 0, prefetchability: 0.9))
+    }
+
     /// 线上真实配置：歌词（5 级、05 s、需预取）+ 流式识别（1 级、0.35 s、不需预取），预算 0.9 s。
     /// 两源都应在链内，且歌词排在识别之前。
     func testProductionChainAdmitsBothSources() {
         let lyrics = LyricEvidenceProvider { 1 }
+        lyrics.onCandidates = { _ in }
+        // 先灌入一句歌词：没有歌词时歌词源处于「不可用」状态，不应参与预算竞争。
+        lyrics.submit([LyricsManager.LrcLine(time: 0, text: "第一句")], signature: "t")
         let speech = StubProvider(id: "speech", level: .streaming, latency: 0.35)
         let scheduler = CaptionScheduler(config: .init())
         scheduler.register([speech, lyrics])

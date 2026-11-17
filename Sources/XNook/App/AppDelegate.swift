@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ownsSharedData = false
     /// 统一的 isSwitchingApps 清除 WorkItem，确保只有一个活跃的清除计时器
     private var clearSwitchingAppsWorkItem: DispatchWorkItem?
+    /// 授权激活成功的观察者（仅在锁定状态注册）
+    private var licenseActivationObserver: NSObjectProtocol?
 
     /// 悬停自动展开是否关闭
     private var hoverToExpandDisabled: Bool {
@@ -65,6 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         IslandIntegrationSettings.registerDefaults()
         IslandIntegrationSettings.markProtocolAvailable(for: .xnook)
         CalendarReminderManager.shared.startMonitoring()
+
+        // 授权检查必须先于灵动岛创建。
+        // 试用到期时直接进入锁定流程，不创建 NotchWindow——
+        // 这样"硬锁"是真的不工作，而不是仅弹一个可被忽略的提示。
+        LicenseManager.shared.refresh()
+        if !LicenseManager.shared.state.allowsFullAccess {
+            setupLicenseLockdown()
+            return
+        }
 
         setupNotchWindow()
         if let pendingIslandShowURL { handleIslandCommand(pendingIslandShowURL) }
@@ -104,6 +115,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeUpdateState()
     }
 
+    // MARK: - 授权锁定
+
+    /// 试用到期或未授权时的启动路径。
+    ///
+    /// 刻意不创建灵动岛窗口、不注册全局滚动监听、不启动更新检查——
+    /// 未授权状态下这些功能一律不工作。仅保留：
+    /// 1. 一个激活窗口（用户填码的入口）
+    /// 2. 一个最小菜单栏图标（用于退出，避免用户无法关闭进程）
+    private func setupLicenseLockdown() {
+        // 监听激活成功，激活后立即恢复正常启动流程，无需用户重启
+        licenseActivationObserver = NotificationCenter.default.addObserver(
+            forName: .xnookLicenseActivated,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.recoverFromLockdown()
+            }
+        }
+
+        setupMenuBarItem()
+        LicenseExpiryWindowController.shared.show()
+    }
+
+    /// 激活成功后从锁定状态恢复。
+    private func recoverFromLockdown() {
+        guard notchWindow == nil else { return }
+
+        // 移除锁定期的观察者，避免重复恢复
+        if let licenseActivationObserver {
+            NotificationCenter.default.removeObserver(licenseActivationObserver)
+            self.licenseActivationObserver = nil
+        }
+
+        LicenseExpiryWindowController.shared.close()
+
+        // 走一遍正常的启动流程
+        setupNotchWindow()
+        setupScrollMonitor()
+        updateManager.startAutoCheck()
+        observeUpdateState()
+
+        showIsland(preferMouseScreen: false, hidePeers: true)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -125,7 +181,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard url.scheme == AppSwitcher.shared.currentURLScheme else { continue }
+
+            // 激活链接分流：xnook://activate?code=...
+            // 与灵动岛指令（xnook://{appName}/show）共用同一 scheme，靠 host 区分。
+            if url.host == "activate" {
+                handleActivationURL(url)
+                continue
+            }
+
             handleIslandCommand(url)
+        }
+    }
+
+    /// 处理一键激活链接。
+    ///
+    /// 购买邮件中的链接形如 `xnook://activate?code=XNK1…`，
+    /// 用户点击后自动填入邀请码并完成激活，免去复制粘贴长字符串。
+    private func handleActivationURL(_ url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
+              !code.isEmpty else {
+            LicenseExpiryWindowController.shared.show()
+            return
+        }
+
+        Task { @MainActor in
+            let outcome = await LicenseManager.shared.activate(input: code)
+            switch outcome {
+            case .success:
+                // 激活成功：通知由 LicenseManager 之后的流程统一处理
+                NotificationCenter.default.post(name: .xnookLicenseActivated, object: nil)
+            case .failure(let reason):
+                // 激活失败仍打开窗口，让用户看到具体原因并手工重试
+                LicenseExpiryWindowController.shared.show()
+                FileHandle.standardError.write(
+                    Data("license activation failed: \(reason)\n".utf8)
+                )
+            }
         }
     }
 

@@ -43,6 +43,11 @@ final class LyricsManager {
 
     /// 当前是否有同步歌词可供推进 — timer 启动条件之一
     var hasLyrics: Bool { !lyrics.isEmpty }
+    /// 已解析的同步歌词时间轴。为空表示没有可对齐的全文歌词。
+    var syncedLines: [LrcLine] { lyrics }
+    /// 歌词状态版本号：加载、切歌、清空时递增。
+    /// 视图层用它做 onChange 的触发源，不必去比较整份歌词数组。
+    private(set) var stateVersion: Int = 0
     /// 仅有纯歌词、无同步时间轴 — 由 UI 兜底显示
     private(set) var plainLyricsText: String = ""
 
@@ -116,6 +121,7 @@ final class LyricsManager {
 
     /// 在状态可能影响 timer 决策的变化点统一触发回调
     private func notifyStateChanged() {
+        stateVersion &+= 1
         onLyricsStateChanged?()
     }
 

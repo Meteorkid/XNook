@@ -350,6 +350,41 @@ enum L10n {
 
     static var sectionTicker: String { localized(zh: "曲目信息", en: "Track Info") }
 
+    static var mediaSource: String { localized(zh: "媒体来源", en: "Media Source") }
+    static var mediaSourceDesc: String { localized(
+        zh: "自动跟随系统当前播放的应用；锁定后只显示并控制指定应用。锁定 QQ 音乐等无脚本接口的应用时，需先让它成为系统正在播放的来源。",
+        en: "Follow the system's current player automatically, or lock display and controls to one app. Apps without a scripting interface (e.g. QQ Music) must be the active Now Playing source to appear.") }
+    static var mediaSourceAuto: String { localized(zh: "自动（当前播放）", en: "Auto (Now Playing)") }
+    static var mediaSourceCustom: String { localized(zh: "自定义 Bundle ID…", en: "Custom Bundle ID…") }
+    static var mediaSourceCustomDesc: String { localized(
+        zh: "输入目标应用的 Bundle ID，例如 com.example.player。",
+        en: "Enter the target app's bundle identifier, e.g. com.example.player.") }
+    static func waitingForSource(_ name: String) -> String {
+        localized(zh: "等待 \(name) 播放", en: "Waiting for \(name)")
+    }
+
+    // MARK: - Live Captions
+
+    static var sectionLiveCaptions: String { localized(zh: "实时字幕", en: "Live Captions") }
+    static var showLiveCaptions: String { localized(zh: "显示实时字幕", en: "Show live captions") }
+    static var showLiveCaptionsDesc: String { localized(
+        zh: "捕获系统正在播放的声音并在灵动岛下方显示转写文字。需要「屏幕录制」与「语音识别」授权，识别在本机完成；首次授权后需重启应用才生效。",
+        en: "Transcribe whatever the system is playing and show it below the island pill. Requires Screen Recording and Speech Recognition permission; recognition runs on device. Restart the app after granting Screen Recording.") }
+    static var captionScreenPermissionGranted: String { localized(zh: "屏幕录制已授权", en: "Screen Recording granted") }
+    static var captionScreenPermissionMissing: String { localized(zh: "屏幕录制未授权", en: "Screen Recording missing") }
+    static var captionSpeechPermissionGranted: String { localized(zh: "语音识别已授权", en: "Speech Recognition granted") }
+    static var captionSpeechPermissionMissing: String { localized(zh: "语音识别被拒绝", en: "Speech Recognition denied") }
+    static var captionSpeechPermissionUndetermined: String { localized(zh: "语音识别待授权", en: "Speech Recognition not requested") }
+    static var captionOpenScreenRecording: String { localized(zh: "屏幕录制设置", en: "Screen Recording") }
+    static var captionOpenSpeechRecognition: String { localized(zh: "语音识别设置", en: "Speech Recognition") }
+    static var captionStarting: String { localized(zh: "正在启动字幕…", en: "Starting captions…") }
+    static var captionRunning: String { localized(zh: "字幕运行中", en: "Captions running") }
+    static var captionIdle: String { localized(zh: "字幕未运行", en: "Captions idle") }
+    static var captionChainLength: String { localized(zh: "链长", en: "Chain length") }
+    static var captionCertificates: String { localized(zh: "证书", en: "Certificates") }
+    static var captionLevel: String { localized(zh: "等级", en: "Level") }
+    static var refreshStatus: String { localized(zh: "刷新状态", en: "Refresh") }
+
     // MARK: - Custom GIF
 
     static var customGif: String { localized(zh: "自定义 GIF", en: "Custom GIF") }

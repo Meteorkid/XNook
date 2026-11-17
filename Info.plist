@@ -39,5 +39,7 @@
     <string>X Nook needs access to your calendar to display upcoming events.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>X Nook needs to control other applications for app switching.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>X Nook transcribes the audio your Mac is playing so it can show live captions below the island. Recognition happens on this Mac.</string>
 </dict>
 </plist>

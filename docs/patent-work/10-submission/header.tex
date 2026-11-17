@@ -1,0 +1,9 @@
+\usepackage{longtable,booktabs,array}
+\usepackage{graphicx}
+\usepackage{etoolbox}
+% 表格较多且列宽，统一降一档字号，避免超出版心
+\AtBeginEnvironment{longtable}{\footnotesize}
+\AtBeginEnvironment{tabular}{\footnotesize}
+% 中文标点与断行
+\XeTeXlinebreaklocale "zh"
+\XeTeXlinebreakskip = 0pt plus 1pt

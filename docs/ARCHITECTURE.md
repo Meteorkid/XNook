@@ -370,14 +370,32 @@ BatteryManager      // 电池状态
 - FileManager：笔记、文件等大数据
 - 参考 NookX 的缓存模式
 
-### 4. 音乐集成
+### 4. 媒体集成
 
-**选择**：AppleScript + MediaPlayer
+**选择**：MediaRemote（主）+ AppleScript（增强）
 
-**原因**：
-- AppleScript：控制 Music.app 和 Spotify
-- MediaPlayer：系统媒体控制
-- 注意：MediaRemote 是私有 API，App Store 有限制
+**分层**：
+
+1. **MediaRemote 私有框架**：动态 `dlopen/dlsym` 读取系统 Now Playing 快照，并用
+   `MRMediaRemoteGetNowPlayingApplicationPID` 反查播放进程的 bundle identifier 和显示名。
+   这一层与具体播放器无关，任何接入系统播放中心的客户端（QQ 音乐、网易云音乐、
+   哔哩哔哩、爱奇艺等）以及浏览器网页播放都能识别；播放/暂停/切歌命令也由系统路由。
+2. **AppleScript（仅 Music / Spotify）**：这两个播放器有脚本词典，用 `player position`
+   提供比系统估算更精确的进度，并单独读取原始封面数据。脚本读取失败时保留系统快照，
+   两个播放器同时运行且来源不匹配时不会把标题和进度拼接错。
+3. **来源模型**：`MediaSource` 不依赖固定枚举，优先用运行时 PID 解析的真实身份；
+   已知应用只用于稳定的中文显示名，未知应用显示系统返回的名称。
+
+**来源锁定**：
+- 设置项 `mediaSourceMode` 可选自动或指定 bundle ID（含自定义输入）。
+- 锁定 Music / Spotify：走 AppleScript 独立取值，不依赖系统 Now Playing 归属；脚本失败也不回退系统命令，避免误控其他播放器。
+- 锁定其他应用：只能读系统快照且必须校验 `sourceBundleID` 匹配；不匹配时返回 `waitingForSource` 标记，上层清空曲目、显示「等待 ×× 播放」并禁用控制按钮。
+- 快照取值串行读取前后两次 PID，不一致判定为播放器切换中，返回 `fetchFailed` 保留上一帧。
+
+**约束**：
+- MediaRemote 是私有 API，仅用于非 App Store 分发；框架缺失时自动退回 AppleScript 链路。
+- 不发布 Now Playing 信息的应用无法被识别，这是系统接口的能力边界，不是白名单限制。
+- 不同播放器暴露的字段不一致：缺少时长或进度时，歌词时间轴不会伪造同步。
 
 ---
 

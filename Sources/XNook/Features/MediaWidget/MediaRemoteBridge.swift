@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// MediaRemote 私有框架动态桥接（dlopen/dlsym）
@@ -22,6 +23,9 @@ enum MediaRemoteBridge {
     private typealias MRMediaRemoteUnregisterFunction =
         @convention(c) () -> Void
 
+    private typealias MRMediaRemoteGetApplicationPIDFunction =
+        @convention(c) (DispatchQueue, @escaping (Int32) -> Void) -> Void
+
     // MARK: - Resolved Function Pointers
 
     private static let _getNowPlayingInfo: MRMediaRemoteGetNowPlayingInfoFunction? = {
@@ -44,6 +48,11 @@ enum MediaRemoteBridge {
         return unsafeBitCast(sym, to: MRMediaRemoteUnregisterFunction.self)
     }()
 
+    private static let _getApplicationPID: MRMediaRemoteGetApplicationPIDFunction? = {
+        guard let sym = dlsym(handle, "MRMediaRemoteGetNowPlayingApplicationPID") else { return nil }
+        return unsafeBitCast(sym, to: MRMediaRemoteGetApplicationPIDFunction.self)
+    }()
+
     // MARK: - Public API
 
     /// 获取当前播放信息
@@ -53,6 +62,118 @@ enum MediaRemoteBridge {
         } else {
             completion([:])
         }
+    }
+
+    /// 当前 Now Playing 应用的进程号。0 表示没有播放器在发布播放信息。
+    static func getNowPlayingApplicationPID(completion: @escaping (Int32) -> Void) {
+        if let fn = _getApplicationPID {
+            fn(DispatchQueue.main, completion)
+        } else {
+            completion(0)
+        }
+    }
+
+    /// 系统级播放快照：任意接入 Now Playing 的播放器（音乐、视频、浏览器）都适用。
+    ///
+    /// 元数据与来源 PID 必须串行取值：两个 IPC 之间若发生播放器切换，
+    /// 并发读取会把 A 的标题配到 B 的来源上。这里在取元数据前后各读一次 PID，
+    /// 不一致即判定为切换中，交由 `resolveSnapshot` 返回 fetchFailed 保留上一帧。
+    static func snapshot(now: Date = Date()) async -> [String: Any] {
+        guard isAvailable else { return [:] }
+        let pidBefore = await fetchApplicationPID()
+        let rawInfo = await fetchNowPlayingInfo()
+        let pidAfter = await fetchApplicationPID()
+        return resolveSnapshot(rawInfo, pidBefore: pidBefore, pidAfter: pidAfter, now: now)
+    }
+
+    /// 私有框架回调偶尔不到达时，1s 后无条件兜底，避免轮询任务永久挂起。
+    private static func fetchNowPlayingInfo() async -> [String: Any] {
+        await withCheckedContinuation { continuation in
+            let lock = NSLock()
+            var finished = false
+            let finish: ([String: Any]) -> Void = { value in
+                lock.lock()
+                guard !finished else { lock.unlock(); return }
+                finished = true
+                lock.unlock()
+                continuation.resume(returning: value)
+            }
+            getNowPlayingInfo { finish($0) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1) { finish([:]) }
+        }
+    }
+
+    private static func fetchApplicationPID() async -> Int32 {
+        await withCheckedContinuation { continuation in
+            let lock = NSLock()
+            var finished = false
+            let finish: (Int32) -> Void = { value in
+                lock.lock()
+                guard !finished else { lock.unlock(); return }
+                finished = true
+                lock.unlock()
+                continuation.resume(returning: value)
+            }
+            getNowPlayingApplicationPID { finish($0) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1) { finish(0) }
+        }
+    }
+
+    /// 前后 PID 不一致说明取元数据的瞬间播放器发生切换，这一帧的来源不可信。
+    /// 返回 fetchFailed 让上层保留最后一次可靠内容，等下一轮轮询校准。
+    static func resolveSnapshot(
+        _ raw: [String: Any],
+        pidBefore: Int32,
+        pidAfter: Int32,
+        now: Date = Date()
+    ) -> [String: Any] {
+        guard pidBefore == pidAfter else { return ["fetchFailed": true] }
+        return normalize(raw, pid: pidAfter, now: now)
+    }
+
+    /// 把 MediaRemote 的私有键名转换成项目内部统一的字段。
+    /// 标题为空视为没有播放内容；其余字段缺失时保持键不存在，交给上层保留旧值。
+    static func normalize(_ raw: [String: Any], pid: Int32, now: Date = Date()) -> [String: Any] {
+        guard let title = raw[InfoKey.title] as? String, !title.isEmpty else { return [:] }
+
+        var info: [String: Any] = [
+            "title": title,
+            "artist": raw[InfoKey.artist] as? String ?? "",
+            "album": raw[InfoKey.album] as? String ?? "",
+            "sourceKind": "mediaRemote",
+        ]
+
+        if let artwork = raw[InfoKey.artworkData] as? Data, !artwork.isEmpty {
+            info["artworkData"] = artwork
+        } else if let artwork = raw[InfoKey.artworkData] as? NSData, artwork.length > 0 {
+            info["artworkData"] = Data(referencing: artwork)
+        }
+        if let duration = nonNegativeNumber(raw[InfoKey.duration]) {
+            info["duration"] = duration
+        }
+        if let rate = nonNegativeNumber(raw[InfoKey.playbackRate]) {
+            info["playbackRate"] = rate
+        }
+        if let position = nonNegativeNumber(raw[InfoKey.elapsedTime]) {
+            info["playerPosition"] = position
+            info["positionTimestamp"] = now
+        }
+        if pid > 0, let app = NSRunningApplication(processIdentifier: pid) {
+            info["sourceBundleID"] = app.bundleIdentifier ?? ""
+            info["sourceName"] = app.localizedName ?? ""
+        }
+        return info
+    }
+
+    private static func nonNegativeNumber(_ value: Any?) -> Double? {
+        let number: Double?
+        if let value = value as? NSNumber {
+            number = value.doubleValue
+        } else {
+            number = value as? Double
+        }
+        guard let number, number.isFinite, number >= 0 else { return nil }
+        return number
     }
 
     /// 发送播放控制命令

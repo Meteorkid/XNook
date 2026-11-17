@@ -25,22 +25,36 @@ struct MediaWidgetView: View {
             }
             .buttonStyle(.plain)
             .disabled(mediaManager.currentSource == nil)
-            .help(mediaManager.currentSource?.rawValue ?? L10n.noTrack)
+            .help(mediaManager.isWaitingForPreferredSource
+                  ? L10n.waitingForSource(mediaManager.currentSource?.displayName ?? "")
+                  : mediaManager.currentSource?.displayName ?? L10n.noTrack)
 
             // 歌曲信息
             VStack(spacing: 2) {
-                Text(mediaManager.currentTitle.isEmpty ? L10n.noTrack : mediaManager.currentTitle)
+                Text(mediaManager.isWaitingForPreferredSource
+                     ? L10n.waitingForSource(mediaManager.currentSource?.displayName ?? "")
+                     : (mediaManager.currentTitle.isEmpty ? L10n.noTrack : mediaManager.currentTitle))
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
                     .foregroundColor(.primary)
 
-                Text(mediaManager.currentArtist.isEmpty ? L10n.unknownArtist : mediaManager.currentArtist)
-                    .font(.system(size: 9, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundColor(.secondary)
+                if !mediaManager.isWaitingForPreferredSource {
+                    Text(mediaManager.currentArtist.isEmpty ? L10n.unknownArtist : mediaManager.currentArtist)
+                        .font(.system(size: 9, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundColor(.secondary)
+                }
+
+                // 展开面板里标出来源，便于确认当前看到的是哪个播放器
+                if isDetail, let sourceName = mediaManager.currentSource?.displayName {
+                    Text(sourceName)
+                        .font(.system(size: 9))
+                        .lineLimit(1)
+                        .foregroundColor(.secondary.opacity(0.75))
+                }
             }
 
-            // 控制按钮 — 悬停时按封面强调色提亮
+            // 控制按钮 — 等待锁定来源时禁用，避免控制到别的播放器
             HStack(spacing: 16) {
                 controlButton(icon: "backward.fill", size: 11) { mediaManager.previousTrack() }
 
@@ -56,6 +70,8 @@ struct MediaWidgetView: View {
                 controlButton(icon: "forward.fill", size: 11) { mediaManager.nextTrack() }
             }
             .foregroundColor(.primary)
+            .disabled(mediaManager.isWaitingForPreferredSource)
+            .opacity(mediaManager.isWaitingForPreferredSource ? 0.4 : 1)
 
             if isDetail { Spacer() }
         }

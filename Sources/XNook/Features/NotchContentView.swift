@@ -12,6 +12,8 @@ struct NotchContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var mediaManager = MediaManager()
+    /// 实时字幕与 MediaManager 同属进程级单例：音频捕获只能有一份。
+    @State private var captionManager = CaptionManager.shared
     @State private var calendarManager = CalendarManager()
     @State private var notesManager = NotesManager()
     @State private var trayManager = TrayManager()
@@ -90,6 +92,7 @@ struct NotchContentView: View {
     private var shouldReduceMotion: Bool { reduceMotion || systemReduceMotion }
     @AppStorage("showTickerLine") private var showTickerLine = SettingsDefaults.bool(for: "showTickerLine", fallback: true)
     @AppStorage("showLyrics") private var showLyrics = SettingsDefaults.bool(for: "showLyrics")
+    @AppStorage("showLiveCaptions") private var showLiveCaptions = SettingsDefaults.bool(for: "showLiveCaptions")
     @AppStorage("tickerSpeed") private var tickerSpeed = SettingsDefaults.double(for: "tickerSpeed")
     @AppStorage("showNookFlowHistory") private var showNookFlowHistory = SettingsDefaults.bool(for: "showNookFlowHistory", fallback: true)
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
@@ -140,9 +143,20 @@ struct NotchContentView: View {
 
     // MARK: - 尺寸计算
 
-    /// 收起高度：开启歌词时使用带歌词的高度，否则使用默认高度
+    /// 实时字幕是否正在产出一行可见文字。
+    /// 只有在真的有字可显示时才算「在用」，否则空行会把药丸撑大却不显示内容。
+    private var captionLineActive: Bool {
+        showLiveCaptions && captionManager.isRunning && !captionManager.line.isEmpty
+    }
+
+    /// 需要「带歌词」那套更宽的收起尺寸：歌词或实时字幕任一在用。
+    private var needsWideTicker: Bool {
+        (showLyrics && showTicker) || captionLineActive
+    }
+
+    /// 收起高度：开启歌词或实时字幕时使用带歌词的高度，否则使用默认高度
     private var collapsedShapeHeight: CGFloat {
-        showLyrics && showTicker
+        needsWideTicker
             ? IslandSizeCalculator.collapsedShapeHeightWithLyrics
             : IslandSizeCalculator.collapsedShapeHeight
     }
@@ -150,9 +164,11 @@ struct NotchContentView: View {
     /// Ticker 行高度
     private let tickerLineHeight: CGFloat = 18
 
-    /// 是否显示 Ticker（播放中 + 曲目信息或歌词任一开启 + 收起状态）
+    /// 是否显示 Ticker（播放中 + 曲目信息或歌词任一开启，或实时字幕正在出字 + 收起状态）
     private var showTicker: Bool {
-        mediaManager.isPlaying && (showTickerLine || showLyrics) && !isExpanded
+        guard !isExpanded else { return false }
+        if captionLineActive { return true }
+        return mediaManager.isPlaying && (showTickerLine || showLyrics)
     }
 
     /// 收起状态总高度（含 Ticker）
@@ -197,9 +213,9 @@ struct NotchContentView: View {
         isExpanded ? expandedHeight : collapsedTotalHeight
     }
 
-    /// 收起宽度：开启歌词时使用带歌词的宽度，否则使用默认宽度
+    /// 收起宽度：开启歌词或实时字幕时使用带歌词的宽度，否则使用默认宽度
     private var pillWidth: CGFloat {
-        showLyrics && showTicker
+        needsWideTicker
             ? IslandSizeCalculator.collapsedPillWidthWithLyrics
             : IslandSizeCalculator.pillWidth(
                 islandObscuredByNotch: islandObscuredByNotch,
@@ -291,7 +307,7 @@ struct NotchContentView: View {
             ZStack(alignment: .top) {
                 CollapsedPillView(
                     isExpanded: isExpanded,
-                    isPlaying: mediaManager.isPlaying && isWindowVisible && !isExpanded && !expandPending && !collapseAnimating && !shouldReduceMotion,
+                    isPlaying: (mediaManager.isPlaying || captionLineActive) && isWindowVisible && !isExpanded && !expandPending && !collapseAnimating && !shouldReduceMotion,
                     albumArt: mediaManager.currentArtwork,
                     albumArtData: mediaManager.currentArtworkData,
                     artworkVersion: mediaManager.artworkVersion,
@@ -404,6 +420,26 @@ struct NotchContentView: View {
                 }
             }
         }
+        .onChange(of: showLiveCaptions) { _, enabled in
+            applyCaptionPreference(enabled)
+        }
+        .onChange(of: mediaManager.elapsedTime) { _, elapsed in
+            // 时间轴对齐只为让媒体时间来源（歌词、缓存转写）进入同一条证据链；
+            // 对齐本身自带节流与跳变保护，20 Hz 调用不会造成重锚。
+            guard showLiveCaptions, captionManager.isRunning else { return }
+            captionManager.syncPlayback(
+                position: elapsed,
+                rate: mediaManager.playbackRate,
+                signature: "\(mediaManager.currentTitle)|\(mediaManager.currentArtist)|\(Int(mediaManager.duration))"
+            )
+        }
+        .onChange(of: mediaManager.currentTitle) { _, _ in
+            // 换源后重新信任播放器位置，避免被上一首歌的抖动永久降级。
+            captionManager.resetTimelinePreference()
+        }
+        .onChange(of: mediaManager.lyricsManager.stateVersion) { _, _ in
+            pushLyricsToCaption()
+        }
         .onAppear {
             AppDelegate.shared?.notesManagerForTermination = notesManager
             enabledWidgets = WidgetType.enabledWidgets
@@ -444,6 +480,12 @@ struct NotchContentView: View {
             }
             startHoverPolling()
             loadGifData()
+
+            // 上次退出时若开着字幕，这次启动直接恢复；TCC 已授权时不会弹窗。
+            if showLiveCaptions {
+                captionManager.startIfNeeded()
+                pushLyricsToCaption()
+            }
 
             // 应用退出时恢复光标（防止崩溃导致光标残留隐藏）
             terminateObserver = NotificationCenter.default.addObserver(
@@ -1098,8 +1140,15 @@ struct NotchContentView: View {
     /// Ticker 显示文本优先级：
     /// 1. 同步歌词当前行
     /// 2. 纯歌词首句兜底（无时间轴，仍有歌词可读）
-    /// 3. 标题 — 艺术家
+    /// 3. 实时字幕当前行
+    /// 4. 标题 — 艺术家
+    ///
+    /// 歌词排在字幕之前：音乐场景下歌词是人工校对过的高等级证据，
+    /// 而语音识别转唱腔的准确率明显更低。
     private var tickerText: String {
+        if mediaManager.isWaitingForPreferredSource {
+            return L10n.waitingForSource(mediaManager.currentSource?.displayName ?? "")
+        }
         if showLyrics {
             let syncedLine = mediaManager.currentLyricLine
             if !syncedLine.isEmpty { return syncedLine }
@@ -1107,12 +1156,41 @@ struct NotchContentView: View {
             if !plainPreview.isEmpty { return plainPreview }
         }
 
+        if captionLineActive { return captionManager.line }
+
         let title = mediaManager.currentTitle
         let artist = mediaManager.currentArtist
         if title.isEmpty && artist.isEmpty { return L10n.nowPlaying }
         else if artist.isEmpty { return title }
         else if title.isEmpty { return artist }
         else { return "\(title) — \(artist)" }
+    }
+
+    // MARK: - 实时字幕
+
+    /// 设置项是唯一开关：打开即申请授权并开始捕获，关闭立刻释放 SCStream。
+    private func applyCaptionPreference(_ enabled: Bool) {
+        if enabled {
+            captionManager.startIfNeeded()
+            // start 是异步的，这里先把当前歌词交过去；未运行时它会被暂存，启动后补灌。
+            pushLyricsToCaption()
+        } else {
+            Task { await captionManager.stop() }
+        }
+    }
+
+    /// 把已对齐歌词送进证据链。歌词是 5 级证据，能让证书成立、也能稳定压过识别文本。
+    private func pushLyricsToCaption() {
+        let lyrics = mediaManager.lyricsManager
+        let lines = lyrics.syncedLines
+        let signature = [
+            mediaManager.currentTitle,
+            mediaManager.currentArtist,
+            "\(lines.count)",
+            "\(lines.first?.time ?? -1)",
+            "\(lines.last?.time ?? -1)",
+        ].joined(separator: "|")
+        captionManager.updateLyrics(lines, signature: signature)
     }
 
     private func loadGifData() {

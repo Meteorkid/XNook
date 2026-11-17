@@ -8,6 +8,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     case general
     case display
     case integration
+    case license
     case about
 
     var id: String { rawValue }
@@ -17,6 +18,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: L10n.general
         case .display: L10n.display
         case .integration: L10n.integration
+        case .license: L10n.license
         case .about: L10n.about
         }
     }
@@ -26,6 +28,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "gearshape.fill"
         case .display: "paintbrush.fill"
         case .integration: "rectangle.connected.to.line.below"
+        case .license: "checkmark.seal.fill"
         case .about: "info.circle.fill"
         }
     }
@@ -46,6 +49,8 @@ struct SettingsView: View {
     @AppStorage("nookFlowHistoryDisplayLimit") private var nookFlowHistoryDisplayLimit = SettingsDefaults.int(for: "nookFlowHistoryDisplayLimit", fallback: FocusSessionView.defaultHistoryDisplayLimit)
     @AppStorage("panelBaseHeight") private var panelBaseHeight = SettingsDefaults.double(for: "panelBaseHeight")
     @AppStorage("panelWidth") private var panelWidth = SettingsDefaults.double(for: "panelWidth")
+    @AppStorage(MediaSourcePreference.modeKey) private var mediaSourceMode = MediaSourcePreference.autoMode
+    @AppStorage(MediaSourcePreference.customKey) private var mediaSourceCustom = ""
 
     private var panelHeightRange: ClosedRange<Double> {
         160...Double(panelContentSizeLimit.height)
@@ -123,8 +128,30 @@ struct SettingsView: View {
             displayPane
         case .integration:
             integrationPane
+        case .license:
+            licensePane
         case .about:
             aboutPane
+        }
+    }
+
+    // MARK: - License 面板
+
+    /// 授权页。状态展示与激活动作全部委托给 `LicenseActivationView`，
+    /// 与试用到期时的独立窗口共用同一份实现。
+    private var licensePane: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            LicenseActivationView()
+
+            section(L10n.licenseSectionHowToGet) {
+                card {
+                    Text(L10n.licenseHowToGetBody)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 8)
+                }
+            }
         }
     }
 
@@ -345,6 +372,26 @@ struct SettingsView: View {
 
             section(L10n.sectionTicker) {
                 card {
+                    settingRow(L10n.mediaSource, id: "mediaSource",
+                              description: L10n.mediaSourceDesc) {
+                        Picker("", selection: $mediaSourceMode) {
+                            ForEach(MediaSourcePreference.options) { option in
+                                Text(option.title).tag(option.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 170)
+                    }
+                    if mediaSourceMode == MediaSourcePreference.customMode {
+                        dividerLine
+                        settingRow(L10n.mediaSourceCustom, id: "mediaSourceCustom",
+                                   description: L10n.mediaSourceCustomDesc) {
+                            TextField("com.example.player", text: $mediaSourceCustom)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 190)
+                        }
+                    }
+                    dividerLine
                     settingRow(L10n.showTickerLine, id: "showTickerLine",
                               description: L10n.showTickerLineDesc) {
                         AppStorageToggle(key: "showTickerLine")
@@ -359,6 +406,17 @@ struct SettingsView: View {
                               description: L10n.tickerSpeedDesc) {
                         AppStorageSlider(key: "tickerSpeed", range: 1...200, format: "%.2fpt/s")
                     }
+                }
+            }
+
+            section(L10n.sectionLiveCaptions) {
+                card {
+                    settingRow(L10n.showLiveCaptions, id: "showLiveCaptions",
+                              description: L10n.showLiveCaptionsDesc) {
+                        AppStorageToggle(key: "showLiveCaptions")
+                    }
+                    dividerLine
+                    LiveCaptionStatusRow()
                 }
             }
 

@@ -23,6 +23,15 @@ enum SystemPrivacySettings {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
     }
 
+    /// 实时字幕：ScreenCaptureKit 抓系统音频依赖此项。
+    static func openScreenRecording() {
+        open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+    }
+
+    static func openSpeechRecognition() {
+        open("x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")
+    }
+
     static func openLoginItems() {
         if #available(macOS 13.0, *) {
             open("x-apple.systempreferences:com.apple.LoginItems-Settings.extension")

@@ -111,7 +111,9 @@ final class MediaManager {
     var duration: TimeInterval = 0
     var elapsedTime: TimeInterval = 0
     var isAvailable = false
-    private(set) var currentSource: ScriptingBridgeHelper.SupportedApp?
+    private(set) var currentSource: MediaSource?
+    /// 锁定来源尚未成为当前播放源：此时不显示其他播放器的内容，也不发送控制命令。
+    private(set) var isWaitingForPreferredSource = false
 
     /// 缓存的 NSImage 实例，仅在 currentArtworkData 变化时重建
     private var cachedArtworkImage: NSImage?
@@ -161,7 +163,11 @@ final class MediaManager {
         startMonitoring: Bool = true,
         defaults: UserDefaults = .standard,
         lyricsManager: LyricsManager? = nil,
-        infoProvider: @escaping @MainActor () async -> [String: Any] = { await ScriptingBridgeHelper.getNowPlayingInfo() },
+        infoProvider: @escaping @MainActor () async -> [String: Any] = {
+            await NowPlayingProvider.getNowPlayingInfo(
+                preferredBundleID: MediaSourcePreference.resolvedBundleID(defaults: .standard)
+            )
+        },
         artworkProvider: @escaping @MainActor ([String: Any]) async -> Data? = { await ScriptingBridgeHelper.getArtwork(for: $0) },
         clock: @escaping () -> Date = Date.init
     ) {
@@ -394,6 +400,33 @@ final class MediaManager {
     }
 
     private func applyNowPlayingInfo(_ info: [String: Any]) {
+        // 锁定来源不在播放：清空内容并显示等待提示，绝不沿用其他播放器的曲目，
+        // 也绝不把控制命令发给系统当前 Now Playing 的那个应用。
+        if info[NowPlayingProvider.waitingKey] as? Bool == true {
+            isWaitingForPreferredSource = true
+            isPlaying = false
+            playbackRate = 0
+            currentTitle = ""
+            currentArtist = ""
+            currentAlbum = ""
+            currentLyricLine = ""
+            currentArtworkData = nil
+            currentSource = MediaSource.from(info: info)
+            hasAuthoritativePlaybackPosition = false
+            syncedElapsedTime = 0
+            elapsedTime = 0
+            duration = 0
+            lyricsManager.reset()
+            lastFetchedTitle = ""
+            lastFetchedArtist = ""
+            lastFetchedAlbum = ""
+            lastFetchedDuration = nil
+            lastLyricsEnabled = false
+            stopProgressTimer()
+            return
+        }
+        isWaitingForPreferredSource = false
+
         // 临时超时不是“播放器已关闭”，保留最后一次可靠内容，等下次轮询校准。
         if info["fetchFailed"] as? Bool == true {
             if !defaults.bool(forKey: "showLyrics") {
@@ -412,7 +445,7 @@ final class MediaManager {
         let newTitle = info["title"] as? String ?? ""
         let newArtist = info["artist"] as? String ?? ""
         let newAlbum = info["album"] as? String ?? ""
-        let newSource = ScriptingBridgeHelper.supportedApp(from: info)
+        let newSource = MediaSource.from(info: info)
         let trackChanged = newSource != currentSource || Self.hasTrackIdentityChanged(
             title: newTitle,
             artist: newArtist,
@@ -534,7 +567,8 @@ final class MediaManager {
     }
 
     private func requestArtworkIfNeeded(for info: [String: Any]) {
-        guard currentSource == .music, isPlaying, !currentTitle.isEmpty,
+        guard currentSource?.bundleIdentifier == ScriptingBridgeHelper.SupportedApp.music.bundleIdentifier,
+              isPlaying, !currentTitle.isEmpty,
               currentArtworkData == nil, artworkTask == nil, clock() >= nextArtworkRetry else { return }
         artworkRequestID += 1
         let requestID = artworkRequestID
@@ -585,6 +619,7 @@ final class MediaManager {
     // MARK: - 播放控制
 
     func play() {
+        guard !isWaitingForPreferredSource else { return }
         sendPlaybackCommand(.play, fallback: .play)
         isPlaying = true
         userActionDeadline = Date().addingTimeInterval(2.0) // 2s 保护期
@@ -592,6 +627,7 @@ final class MediaManager {
     }
 
     func pause() {
+        guard !isWaitingForPreferredSource else { return }
         sendPlaybackCommand(.pause, fallback: .pause)
         isPlaying = false
         userActionDeadline = Date().addingTimeInterval(2.0)
@@ -599,13 +635,22 @@ final class MediaManager {
     }
 
     func togglePlayPause() {
-        MediaRemoteBridge.sendCommand(.togglePlayPause)
+        guard !isWaitingForPreferredSource else { return }
+        // 锁定脚本来源时走 AppleScript，且按当前状态选 play / pause；
+        // 锁定其他来源时系统 Now Playing 必为锁定应用（等待态已排除其他来源），
+        // 直接发系统命令即可。
+        if currentSource?.scriptingApp != nil, lockedBundleID != nil {
+            sendPlaybackCommand(isPlaying ? .pause : .play, fallback: .togglePlayPause)
+        } else {
+            MediaRemoteBridge.sendCommand(.togglePlayPause)
+        }
         isPlaying.toggle()
         userActionDeadline = Date().addingTimeInterval(2.0)
         startProgressTimerIfNeeded()
     }
 
     func nextTrack() {
+        guard !isWaitingForPreferredSource else { return }
         sendPlaybackCommand(.nextTrack, fallback: .nextTrack)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.fetchNowPlayingInfo()
@@ -613,29 +658,40 @@ final class MediaManager {
     }
 
     func previousTrack() {
+        guard !isWaitingForPreferredSource else { return }
         sendPlaybackCommand(.previousTrack, fallback: .previousTrack)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.fetchNowPlayingInfo()
         }
     }
 
+    /// 当前锁定的来源 bundle ID（从设置读取，实时生效）。
+    private var lockedBundleID: String? {
+        MediaSourcePreference.resolvedBundleID(defaults: defaults)
+    }
+
     func openCurrentPlayer() {
-        guard let currentSource else { return }
-        ScriptingBridgeHelper.activate(currentSource)
+        currentSource?.activate()
     }
 
     private func sendPlaybackCommand(
         _ command: ScriptingBridgeHelper.PlaybackCommand,
         fallback: MediaRemoteCommand
     ) {
-        guard let currentSource else {
+        // 只有带 AppleScript 词典的播放器走脚本；QQ 音乐、哔哩哔哩等
+        // 直接交给系统 MediaRemote，它会把命令路由给当前 Now Playing 应用。
+        guard let app = currentSource?.scriptingApp else {
+            // 锁定非脚本来源时，系统 Now Playing 只在匹配时才会被显示，
+            // 因此这里的系统命令目标就是锁定应用本身。
             MediaRemoteBridge.sendCommand(fallback)
             return
         }
 
         Task {
-            let succeeded = await ScriptingBridgeHelper.sendCommand(command, to: currentSource)
-            if !succeeded {
+            let succeeded = await ScriptingBridgeHelper.sendCommand(command, to: app)
+            // 锁定模式下绝不回退到系统命令：脚本失败时系统 Now Playing
+            // 可能是另一个应用，回退会控制错对象。
+            if !succeeded, lockedBundleID == nil {
                 MediaRemoteBridge.sendCommand(fallback)
             }
         }

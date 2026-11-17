@@ -126,7 +126,17 @@ final class MediaManager {
     var duration: TimeInterval = 0
     var elapsedTime: TimeInterval = 0
     var isAvailable = false
-    private(set) var currentSource: MediaSource?
+    private(set) var currentSource: MediaSource? {
+        didSet {
+            guard currentSource != oldValue else { return }
+            sourceIcon = currentSource.flatMap { Self.applicationIcon(for: $0) }
+        }
+    }
+    /// 没有封面时用来占位的来源应用图标。
+    ///
+    /// 哔哩哔哩、QQ 音乐这类播放器只发布曲目信息、不发布 artwork，
+    /// 之前会留下一块灰色空位。这里在来源变化时解析一次应用图标，视图直接取用。
+    private(set) var sourceIcon: NSImage?
     /// 锁定来源尚未成为当前播放源：此时不显示其他播放器的内容，也不发送控制命令。
     private(set) var isWaitingForPreferredSource = false
     private(set) var currentTrackIdentity: MediaTrackIdentity?
@@ -929,6 +939,17 @@ final class MediaManager {
     }
 
     /// 从 Now Playing 信息中提取封面 Data
+    /// 解析来源应用图标：先按 bundle id 找已安装的 .app，再退回正在运行的实例。
+    /// 只在来源变化时调用一次，避免视图每帧都走 LaunchServices 查询。
+    private static func applicationIcon(for source: MediaSource) -> NSImage? {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: source.bundleIdentifier) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return NSRunningApplication
+            .runningApplications(withBundleIdentifier: source.bundleIdentifier)
+            .first?.icon
+    }
+
     private static func extractArtworkData(from info: [String: Any]) -> Data? {
         // 尝试常见的封面键名
         let possibleKeys = [

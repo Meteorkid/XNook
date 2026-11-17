@@ -354,6 +354,15 @@ struct MediaWidgetView: View {
                 .frame(width: 100, height: 100)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .id(mediaManager.artworkVersion)
+        } else if let icon = mediaManager.sourceIcon {
+            // 播放器不提供封面时用来源应用图标占位：比一块灰底更像个"正在播放"的东西，
+            // 也顺带告诉用户声音是从哪个应用出来的。
+            Image(nsImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .id(mediaManager.artworkVersion)
         } else {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.primary.opacity(0.06))

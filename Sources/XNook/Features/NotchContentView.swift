@@ -412,6 +412,7 @@ struct NotchContentView: View {
                     isPlaying: (mediaManager.isPlaying || captionLineActive) && isWindowVisible && !isExpanded && !expandPending && !collapseAnimating && !shouldReduceMotion,
                     albumArt: mediaManager.currentArtwork,
                     albumArtData: mediaManager.currentArtworkData,
+                    sourceIcon: mediaManager.sourceIcon,
                     artworkVersion: mediaManager.artworkVersion,
                     gifData: cachedGifData,
                     containerWidth: shapeWidth,
@@ -1668,6 +1669,8 @@ struct CollapsedPillView: View {
     let isPlaying: Bool
     let albumArt: NSImage?
     let albumArtData: Data?
+    /// 播放器不上报封面时的占位图标（来源应用图标）。
+    var sourceIcon: NSImage? = nil
     let artworkVersion: Int
     let gifData: Data?
     let containerWidth: CGFloat
@@ -1684,8 +1687,8 @@ struct CollapsedPillView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 0) {
-                // 左侧：专辑封面
-                if let nsImage = albumArt {
+                // 左侧：专辑封面；播放器不提供封面时退回来源应用图标
+                if let nsImage = albumArt ?? sourceIcon {
                     Image(nsImage: nsImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)

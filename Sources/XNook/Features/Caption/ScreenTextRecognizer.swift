@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import ScreenCaptureKit
@@ -31,6 +32,64 @@ enum ScreenTextRecognizer {
     static let bottomBandRatio: CGFloat = 0.30
     /// 截图宽度。1280 足够让 24px 左右的字幕被稳定识别，又不至于让 OCR 变慢。
     static let captureWidth: CGFloat = 1280
+
+    /// 常见播放器的 bundle id：这些应用即使窗口没铺满屏幕，画面里也可能有内嵌字幕。
+    static let videoPlayerBundleIDs: Set<String> = [
+        "com.colliderli.iina",
+        "org.videolan.vlc",
+        "com.apple.QuickTimePlayerX",
+        "com.apple.TV",
+        "com.apple.Music"
+    ]
+
+    /// 当前屏幕是否值得做画面文字识别。
+    ///
+    /// 这条闸门是必须的：底部字幕带取的是**整个屏幕**的底部三成，
+    /// 用户只要在下方开着一个浏览器或文档，OCR 就会把那里的正文当成字幕读进来，
+    /// 而它的等级（3）压过语音（1），屏幕上于是长期挂着与音频无关的文字。
+    ///
+    /// 判据取「最前面的窗口是否真正全屏」——全屏放视频时成立，最大化工作窗口不成立
+    /// （最大化窗口比屏幕少一条菜单栏，用比例阈值会把两者混为一谈）。
+    /// 已知取舍：窗口化的视频播放不跑 OCR（仍可用语音识别兜底）。
+    static func isSubtitleLikelyOnScreen() -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+        let bundleID = front.bundleIdentifier ?? ""
+        if bundleID == Bundle.main.bundleIdentifier { return false }
+        if videoPlayerBundleIDs.contains(bundleID) { return true }
+        return hasFullscreenWindow(pid: front.processIdentifier)
+    }
+
+    /// 该进程是否有一个窗口真正全屏。
+    ///
+    /// 判据是**尺寸与显示器完全一致（±2 pt）**，不是「覆盖 95%」：
+    /// 最大化窗口的高度等于 `visibleFrame`，比屏幕少一条菜单栏（约 25 pt），
+    /// 占屏仍有 97%——用 95% 做阈值会把「最大化浏览器」误判成全屏视频，
+    /// 于是又回到读桌面正文的老路上。
+    static func hasFullscreenWindow(pid: pid_t) -> Bool {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return false }
+
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else { return false }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+        guard CGGetActiveDisplayList(displayCount, &displays, &displayCount) == .success else { return false }
+        let screens = displays.prefix(Int(displayCount)).map { CGDisplayBounds($0) }
+
+        for window in windows {
+            guard let owner = window[kCGWindowOwnerPID as String] as? Int, owner == Int(pid) else { continue }
+            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            guard let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
+            for screen in screens where screen.width > 0 && screen.height > 0 {
+                if rect.width >= screen.width - 2, rect.height >= screen.height - 2 {
+                    return true
+                }
+            }
+        }
+        return false
+    }
 
     /// 抓取主显示器的一帧并识别底部字幕带。
     static func recognizeSubtitle() async throws -> String? {
@@ -78,7 +137,9 @@ enum ScreenTextRecognizer {
     static func cropBottomBand(_ image: CGImage) -> CGImage? {
         let height = CGFloat(image.height)
         let bandHeight = max(1, (height * bottomBandRatio).rounded())
-        let rect = CGRect(x: 0, y: 0, width: CGFloat(image.width), height: bandHeight)
+        // CGImage 的裁剪矩形原点在左上角：底部带要从 height - bandHeight 起算。
+        // 写成 y: 0 取到的是顶部那条，也就是菜单栏——OCR 会把「帮助」「11月17日 周二」当字幕。
+        let rect = CGRect(x: 0, y: height - bandHeight, width: CGFloat(image.width), height: bandHeight)
         return image.cropping(to: rect)
     }
 

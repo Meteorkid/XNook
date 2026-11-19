@@ -73,6 +73,14 @@ struct LiveCaptionStatusRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // 选了多语言并行却跑在稳定引擎上，必须说出来：否则排查延迟时量的是旧引擎。
+            if let note = manager.speechEngineNote {
+                Text(note)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: 12) {
                 Button(L10n.captionOpenScreenRecording) {
                     SystemPrivacySettings.openScreenRecording()
@@ -88,6 +96,10 @@ struct LiveCaptionStatusRow: View {
         .task(id: refreshToken) {
             center.refreshCaptionStatuses()
             summary = CaptionManager.permissionSummary()
+        }
+        // 用户去系统设置授权后切回来，这一行也要自己更新，不用再点一次「刷新」。
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshToken += 1
         }
     }
 

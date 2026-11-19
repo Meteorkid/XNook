@@ -37,24 +37,60 @@ final class LicenseManager {
     }
 
     private convenience init() {
-        let store = KeychainLicenseStore(service: "com.meteorkid.xnook.software-license")
-        let deviceStore = KeychainLicenseStore(service: "com.meteorkid.xnook.software-license", account: "device")
-        let deviceID: String
-        let sessionStore: any LicenseCredentialStore
-        do {
-            deviceID = try LicenseDeviceIdentity.resolve(store: deviceStore)
-            sessionStore = store
-        } catch {
-            deviceID = ""
-            sessionStore = UnavailableLicenseStore()
-        }
+        let store = FileLicenseStore(name: "session")
+        let deviceStore = FileLicenseStore(name: "device")
+        // 必须在构造会话之前判定：会话的 `init` 会调用 `checkAccess()` →
+        // `persist()`，第一次运行就把一份空记录写进文件，之后再也看不出
+        // 「文件原本不存在」，迁移会被自己的守卫挡掉。
+        let needsLegacyMigration = (try? store.load()) == nil
+        let deviceID = (try? LicenseDeviceIdentity.resolve(store: deviceStore)) ?? ""
         let origin = Bundle.main.object(forInfoDictionaryKey: "SoftwareLicenseAPIBaseURL") as? String
         let api = SoftwareLicenseAPI(baseURL: URL(string: origin ?? "https://www.imagentx.top") ?? Self.purchaseURL)
         self.init(session: SoftwareLicenseSession(
             productId: "xnook", deviceId: deviceID, deviceName: String((Host.current().localizedName ?? "Mac").prefix(100)),
             publicKeyBase64: Bundle.main.object(forInfoDictionaryKey: "SoftwareLicensePublicKey") as? String,
-            api: api, store: sessionStore
+            api: api, store: store
         ))
+        if needsLegacyMigration { migrateLegacyKeychainIfNeeded(into: store) }
+    }
+
+    /// 旧版本把授权记录存在登录钥匙串里。第一次用文件存储时把旧条目搬过来，
+    /// 免得已激活的设备被判成未授权。
+    ///
+    /// 读取放到后台线程并给足 45 秒：系统那张「输入登录钥匙串密码」的授权框
+    /// 需要用户手动点一次「始终允许」，上限太短会在用户点下去之前就放弃；
+    /// 而这段时间绝不能占着主线程。读到之后热重载会话，界面自行恢复。
+    /// 失败则写一个标记，之后不再重试。搬迁成功后**不删除**旧条目：
+    /// 删除同样要走 ACL 授权，会再弹一次框。
+    private func migrateLegacyKeychainIfNeeded(into store: FileLicenseStore) {
+        let marker = store.fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("keychain-migration-attempted")
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+        // 无论成败都留一个标记：迁移只值得做一次，之后永不再碰钥匙串。
+        FileManager.default.createFile(atPath: marker.path, contents: Data())
+
+        Task { @MainActor [self] in
+            let migrated = await Task.detached(priority: .utility) { () -> Bool in
+                let legacy = KeychainLicenseStore(service: "com.meteorkid.xnook.software-license")
+                guard let data = try? legacy.load(timeout: 45) else {
+                    NSLog("[license] legacy keychain unreadable; migration skipped")
+                    return false
+                }
+                do {
+                    try store.save(data)
+                    NSLog("[license] migrated legacy keychain record into %@", store.fileURL.path)
+                    return true
+                } catch {
+                    NSLog("[license] legacy keychain migration failed: %@", String(describing: error))
+                    return false
+                }
+            }.value
+            guard migrated else { return }
+            session.reloadStoredRecord()
+            self.apply(session.state)
+            self.lastError = session.lastError
+        }
     }
 
     var isLicensed: Bool {

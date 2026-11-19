@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 // MARK: - 证据等级
@@ -107,6 +108,14 @@ protocol CaptionEvidenceProvider: AnyObject {
     /// 默认实现恒为 true，只有「需要外部内容才能工作」的来源才覆盖它。
     var isAvailable: Bool { get }
 
+    /// 未获准入时是否仍要保持运行。
+    ///
+    /// 准入闸门决定的是「这一轮值不值得为它执行」，默认也就等价于「不执行就停」。
+    /// 但有的来源是「先轮询、后才有内容」——本地预转写在没有已转写内容时被反解排除，
+    /// 而内容只能靠轮询攒出来。对这类来源，被拒只能表示不占执行预算，绝不能停掉，
+    /// 否则它永远等不到可用的那一天。
+    var survivesRejection: Bool { get }
+
     /// 产出的候选条目回调（可能多次调用，流式来源会反复产出）。
     var onCandidates: (([CaptionCandidate]) -> Void)? { get set }
     /// 产出的绝对源时间区间发生变化时回调（用于触发证书重判）。
@@ -118,6 +127,7 @@ protocol CaptionEvidenceProvider: AnyObject {
 
 extension CaptionEvidenceProvider {
     var isAvailable: Bool { true }
+    var survivesRejection: Bool { false }
 }
 
 // MARK: - 时间区间单元
@@ -153,4 +163,16 @@ struct CaptionSufficiencyCertificate: Sendable {
     var holders: Set<String> = []
     var intervalIndex: Int = 0
     var stamp: TimeInterval = 0
+}
+
+/// 语音识别来源的统一契约。
+///
+/// 两套引擎（旧 `SFSpeechRecognizer` 与 macOS 26 的 `SpeechAnalyzer`）能力不同，
+/// 但字幕链路只关心「喂音频 → 吐候选」。把这句话固定成协议，调度器与 UI 就不必知道底下是哪套。
+protocol SpeechEvidenceProviding: CaptionEvidenceProvider {
+    var onFailure: ((Error) -> Void)? { get set }
+    var onDiagnostics: ((String) -> Void)? { get set }
+    /// 内容语种线索，供「自动」模式解析识别语言。
+    func updateContentHint(_ text: String)
+    func append(buffer: AVAudioPCMBuffer, hostTime: TimeInterval)
 }

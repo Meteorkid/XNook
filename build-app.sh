@@ -64,6 +64,18 @@ if public_key:
         raise SystemExit("SOFTWARE_LICENSE_PUBLIC_KEY must contain a non-placeholder 32-byte public key")
 elif os.environ.get("XNOOK_BUILD_DMG", "0") == "1":
     raise SystemExit("Cannot package a paid release without SOFTWARE_LICENSE_PUBLIC_KEY")
+elif os.environ.get("XNOOK_ALLOW_UNLICENSED", "0") != "1":
+    # 这个坑踩过两次：漏传公钥的包能正常编译、能正常启动，但启动后弹「尚未配置授权公钥」，
+    # 而那个窗口在无 Dock 图标的辅助应用里很容易看不见，表现为「软件打不开」。
+    # 所以默认直接失败，只在明确要做无授权开发包时放行。
+    raise SystemExit(
+        "Refusing to build without SOFTWARE_LICENSE_PUBLIC_KEY.\n"
+        "Without it the app shows「此版本尚未配置授权公钥」and looks like it cannot open.\n"
+        "Pass SOFTWARE_LICENSE_PUBLIC_KEY=<base64 Ed25519 public key>,\n"
+        "or set XNOOK_ALLOW_UNLICENSED=1 for a licence-free UI build."
+    )
+else:
+    print("WARNING: building WITHOUT a license public key (XNOOK_ALLOW_UNLICENSED=1)")
 with open(sys.argv[1], "rb") as stream:
     info = plistlib.load(stream)
 info["SoftwareLicenseAPIBaseURL"] = "https://www.imagentx.top"

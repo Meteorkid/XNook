@@ -44,6 +44,8 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
     private var inFlight = false
     private var consecutiveFailures = 0
     private var lastText = ""
+    /// 上一次是否因「屏幕上没有全屏画面」而跳过，用于只记录状态变化。
+    private var gateRefused = false
 
     init(clock: SourceClock) {
         self.clock = clock
@@ -77,7 +79,23 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
         guard now - intervalStart >= captureDelay else { return }
         guard index != lastRequestedInterval else { return }
 
-        // 短路判定先于一切：证书成立就不执行，连闸门后面的捕获都不发生。
+        // 屏幕闸门先于一切：没有全屏视频时，底部三成读到的是用户正在写的文档、浏览器的正文，
+        // 那不是字幕。等级 3 会直接压过语音（1），屏幕上就会长期挂着与音频无关的文字。
+        guard ScreenTextRecognizer.isSubtitleLikelyOnScreen() else {
+            lastRequestedInterval = index
+            skippedIntervals += 1
+            if !gateRefused {
+                gateRefused = true
+                onDiagnostics?("ocr idle: 屏幕最前置窗口未铺满，跳过画面文字")
+            }
+            return
+        }
+        if gateRefused {
+            gateRefused = false
+            onDiagnostics?("ocr resume: 检测到全屏画面")
+        }
+
+        // 短路判定：证书成立就不执行，连闸门后面的捕获都不发生。
         if let runGate, !runGate(index) {
             lastRequestedInterval = index
             skippedIntervals += 1

@@ -294,18 +294,37 @@ final class PermissionCenter {
     /// 旧记录绑在旧身份上，开关看着是开的却对这个二进制无效。重置后系统会重新请求授权。
     @discardableResult
     func resetAuthorization(for kind: PermissionKind) -> Bool {
-        guard let service = kind.tccService else { return false }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        process.arguments = ["reset", service, Bundle.main.bundleIdentifier ?? "com.meteorkid.xnook"]
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return false
+        let services = Self.resetServices(for: kind)
+        guard !services.isEmpty else { return false }
+
+        var primarySucceeded = false
+        for (index, service) in services.enumerated() {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            process.arguments = ["reset", service, Bundle.main.bundleIdentifier ?? "com.meteorkid.xnook"]
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                continue
+            }
+            // 第一条是本项的主服务；随附服务（如音频捕获）可缺可无，失败不影响结论。
+            if index == 0 { primarySucceeded = process.terminationStatus == 0 }
         }
         refreshSynchronously()
-        return process.terminationStatus == 0
+        return primarySucceeded
+    }
+
+    /// 清一项授权要连带清掉的服务。
+    ///
+    /// 屏幕录制在 Sequoia 之后拆成两条 TCC 记录：`ScreenCapture` 管画面、`AudioCapture` 管系统音频。
+    /// 只清前者会留下「屏幕已重新授权、音频仍绑在旧 cdhash 上」的半新半旧组合，
+    /// 表现为字幕能起来但没有声音。所以这一项必须成对清。
+    static func resetServices(for kind: PermissionKind) -> [String] {
+        switch kind {
+        case .screenRecording: ["ScreenCapture", "AudioCapture"]
+        default: kind.tccService.map { [$0] } ?? []
+        }
     }
 
     /// 重启自身：先让 LaunchServices 起一个新实例，再退出当前进程。

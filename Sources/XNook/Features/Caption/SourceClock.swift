@@ -53,6 +53,14 @@ final class SourceClock: @unchecked Sendable {
         sourceTime(atHost: SourceClock.hostNow())
     }
 
+    /// 把绝对源时间换算回宿主时刻。用于测量「这段音频说完 → 文字上屏」的真实延迟。
+    func hostTime(atSource source: TimeInterval) -> TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        guard rate > 0 else { return hostAnchor + (source - sourceAnchor) }
+        return hostAnchor + (source - sourceAnchor) / rate
+    }
+
     /// 以播放器自报的位置对齐。返回是否判定为跳变（跳变时代次标识已递增）。
     @discardableResult
     func align(sourceTime observed: TimeInterval, rate newRate: Double, signature newSignature: String) -> Bool {

@@ -32,6 +32,7 @@ public final class SoftwareLicenseSession {
     private var isBusy = false
     private var storageFailed = false
     private var needsStorageReload = false
+    private var storageRetryTask: Task<Void, Never>?
 
     public init(productId: String, deviceId: String, deviceName: String, publicKeyBase64: String?,
                 api: SoftwareLicenseAPI, store: any LicenseCredentialStore, now: Date = Date()) {
@@ -50,9 +51,26 @@ public final class SoftwareLicenseSession {
         } catch {
             storageFailed = true
             needsStorageReload = true
-            lastError = "无法读取已保存的授权，请检查钥匙串访问权限。"
+            lastError = "无法读取已保存的授权，请稍后重试或重新联网验证。"
+            // 启动时这次读取失败以前不会重试，界面就一直停在错误状态；
+            // 和后续写入失败一样交给统一的重试流程。
+            scheduleStorageRetry()
         }
         checkAccess(now: now)
+    }
+
+    /// 存储里的记录可能在别处被补写（例如从旧钥匙串迁移过来），重新读一次并重算状态。
+    public func reloadStoredRecord() {
+        // `try?` 会把 `Data?` 压成单层可选，这里 data 已经是 Data。
+        guard let data = try? store.load() else { return }
+        guard let decoded = try? JSONDecoder().decode(Record.self, from: data) else { return }
+        record = decoded
+        needsStorageReload = false
+        storageFailed = false
+        lastError = nil
+        anchorTime = max(anchorTime, record.lastSeen)
+        anchorUptime = ProcessInfo.processInfo.systemUptime
+        checkAccess()
     }
 
     public func effectiveNow(now: Date = Date()) -> Date {
@@ -202,5 +220,29 @@ public final class SoftwareLicenseSession {
         storageFailed = true
         lastError = error.localizedDescription
         state = .blocked(error.localizedDescription)
+        scheduleStorageRetry()
+    }
+
+    /// 钥匙串读取失败往往是「授权弹窗还没人处理」这种临时状态。
+    /// 用户点掉弹窗后不该还要手动重启应用，所以在这里自己重试几次；
+    /// 成功就恢复授权，仍失败就安静放弃，保留现有的错误提示。
+    private func scheduleStorageRetry() {
+        guard storageRetryTask == nil else { return }
+        storageRetryTask = Task { @MainActor [weak self] in
+            defer { self?.storageRetryTask = nil }
+            for delay in [8.0, 25.0, 60.0] as [TimeInterval] {
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self, self.storageFailed else { return }
+                guard (try? self.recoverStorageAccess()) != nil else { continue }
+                self.checkAccess()
+                guard self.verifier != nil, !self.storageFailed, !self.isBusy else { return }
+                if self.record.deviceToken != nil {
+                    try? await self.refreshOnline()
+                } else if !self.record.serverBlocked {
+                    try? await self.requestTrial()
+                }
+                return
+            }
+        }
     }
 }

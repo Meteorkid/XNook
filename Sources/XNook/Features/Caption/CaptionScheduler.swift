@@ -51,6 +51,8 @@ final class CaptionScheduler {
 
     /// 当前应显示的字幕行。
     private(set) var currentLine: String = ""
+    /// 当前行对应的音频区间右端（绝对源时间）。用于测量「说完 → 上屏」的真实延迟。
+    private(set) var currentLineEnd: TimeInterval?
     /// 当前行的证据来源等级，UI 可据此决定是否弱化显示（低等级用更淡的颜色）。
     private(set) var currentLevel: EvidenceLevel?
 
@@ -340,7 +342,7 @@ final class CaptionScheduler {
         diagnostics.certificatesEstablished = certificates.values.filter { $0.verdict == .established }.count
 
         if let best = bestCandidate(at: now) {
-            publish(text: best.text, level: best.level)
+            publish(text: best.text, level: best.level, end: best.end)
         }
 
         prune(now: now)
@@ -373,7 +375,8 @@ final class CaptionScheduler {
         }
     }
 
-    private func publish(text: String, level: EvidenceLevel) {
+    private func publish(text: String, level: EvidenceLevel, end: TimeInterval) {
+        currentLineEnd = end
         guard text != currentLine else {
             currentLevel = level
             return

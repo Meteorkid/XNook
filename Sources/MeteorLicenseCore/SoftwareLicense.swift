@@ -47,7 +47,7 @@ public enum SoftwareLicenseError: Error, LocalizedError, Equatable {
         case .legacyCode: return "这是旧版离线激活码，请联系管理员迁移为新版激活码。"
         case .busy: return "正在处理授权请求，请稍后再试。"
         case .server(_, _, let message): return message
-        case .storage: return "无法安全保存授权，请检查钥匙串访问权限后重试。"
+        case .storage: return "无法保存授权状态，请重试。"
         case .network: return "暂时无法连接授权服务；已有授权可在离线期限内继续使用。"
         }
     }

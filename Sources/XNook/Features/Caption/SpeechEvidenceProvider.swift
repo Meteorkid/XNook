@@ -12,7 +12,7 @@ import Speech
 /// 识别引擎用系统内置的本地识别（`requiresOnDeviceRecognition`），不联网、无模型下载。
 /// 单次识别请求有约一分钟的时长上限，这里按 50 s 主动换会话，并把新会话的音频起点作为新的时间原点——
 /// 时间原点一换，旧会话的迟到分段就会被代次标识过滤掉（对应权 6 的迟到结果丢弃）。
-final class SpeechEvidenceProvider: NSObject, CaptionEvidenceProvider, @unchecked Sendable {
+final class SpeechEvidenceProvider: NSObject, SpeechEvidenceProviding, @unchecked Sendable {
 
     // MARK: - 契约字段
 
@@ -79,6 +79,27 @@ final class SpeechEvidenceProvider: NSObject, CaptionEvidenceProvider, @unchecke
     private let clock: SourceClock
     private let generation: () -> Int
 
+    /// 内容语种线索（当前歌词或刚出的字幕行）。由主线程写入、识别队列读取，用锁隔开。
+    private let hintLock = NSLock()
+    private var contentHintText = ""
+    /// 上次检查语言是否变化的时刻，避免每帧都解析一次。
+    private var lastLanguageCheck: TimeInterval = 0
+    /// 换语言的滞后判据，防止语种线索抖动导致会话反复重建。
+    private var languageGuard = CaptionLanguageSwitchGuard()
+
+    /// 供上层（主线程）更新语种线索。
+    func updateContentHint(_ text: String) {
+        hintLock.lock()
+        contentHintText = text
+        hintLock.unlock()
+    }
+
+    private var contentHintSnapshot: String {
+        hintLock.lock()
+        defer { hintLock.unlock() }
+        return contentHintText
+    }
+
     init(clock: SourceClock, generation: @escaping () -> Int) {
         self.clock = clock
         self.generation = generation
@@ -117,13 +138,28 @@ final class SpeechEvidenceProvider: NSObject, CaptionEvidenceProvider, @unchecke
     }
 
     private func currentLocale() -> Locale {
-        let preferred = UserDefaults.standard.string(forKey: "captionLocale")
-        if let preferred, !preferred.isEmpty, preferred != "auto" {
-            return Locale(identifier: preferred)
-        }
-        // 系统中文环境用 zh-CN；其余按系统语言，交给系统识别器判断是否支持。
-        let language = Locale.preferredLanguages.first ?? "en-US"
-        return Locale(identifier: language.hasPrefix("zh") ? "zh-CN" : language)
+        CaptionLanguageResolver.resolve(
+            preference: CaptionRecognitionLanguage.current,
+            contentHint: contentHintSnapshot,
+            systemLanguage: Locale.preferredLanguages.first ?? "en-US"
+        )
+    }
+
+    /// 语言选项或内容语种变化时是否要换会话。每 2 秒最多解析一次。
+    ///
+    /// 换语言要过 `CaptionLanguageSwitchGuard`：同一目标连续成立才换。
+    /// 这里曾经直接比较 locale，结果 OCR 读到的桌面中文与歌词里的西文交替喂进线索，
+    /// 识别会话每 2–4 秒重建一次，识别结果永远追不上音频。
+    private func shouldRestartForLanguageChange() -> Bool {
+        let now = SourceClock.hostNow()
+        guard now - lastLanguageCheck > 2 else { return false }
+        lastLanguageCheck = now
+        guard let recognizer else { return false }
+        return languageGuard.shouldSwitch(
+            to: currentLocale().identifier,
+            from: recognizer.locale.identifier,
+            now: now
+        )
     }
 
     private func beginSession() {
@@ -138,6 +174,7 @@ final class SpeechEvidenceProvider: NSObject, CaptionEvidenceProvider, @unchecke
             return
         }
         self.recognizer = recognizer
+        lastLanguageCheck = SourceClock.hostNow()
 
         let newRequest = SFSpeechAudioBufferRecognitionRequest()
         newRequest.shouldReportPartialResults = true
@@ -151,6 +188,7 @@ final class SpeechEvidenceProvider: NSObject, CaptionEvidenceProvider, @unchecke
         request = newRequest
         sessionOriginHost = 0
         sessionStartedAt = SourceClock.hostNow()
+        languageGuard.sessionStarted(at: sessionStartedAt)
         lastEmitted.removeAll(keepingCapacity: true)
         pipelineKey = "speech.v1.\(locale.identifier).\(recognizer.supportsOnDeviceRecognition ? "ondevice" : "server")"
         let currentSession = sessionID
@@ -192,6 +230,10 @@ final class SpeechEvidenceProvider: NSObject, CaptionEvidenceProvider, @unchecke
 
             // 单会话超过上限即换会话：旧会话的音频已经送完，新会话以当前帧为新原点。
             if SourceClock.hostNow() - self.sessionStartedAt > self.sessionLimit {
+                self.beginSession()
+                if self.sessionOriginHost == 0 { self.sessionOriginHost = hostTime }
+            } else if self.shouldRestartForLanguageChange() {
+                // 用户改了语言选项，或内容语种变了：立刻换会话，不必等 50 秒会话到期。
                 self.beginSession()
                 if self.sessionOriginHost == 0 { self.sessionOriginHost = hostTime }
             }

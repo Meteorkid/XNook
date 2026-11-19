@@ -110,10 +110,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
         setupMenuBarItem()
-        LicenseManager.shared.onAccessChange = { [weak self] allowed in self?.applyLicenseAccess(allowed) }
-        LicenseManager.shared.refresh()
-        applyLicenseAccess(LicenseManager.shared.state.allowsAccess)
-        LicenseManager.shared.startMonitoring()
+        // 授权初始化会读钥匙串。钥匙串偶发被系统授权弹窗或 securityd 卡住时，
+        // 如果同步跑在 applicationDidFinishLaunching 里，进程会停在 mach_msg 上，
+        // 一个窗口都建不出来（用户看到的就是「点了图标没反应」）。
+        // 因此推迟到本轮启动完成之后，让菜单栏与主窗口先立起来。
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            LicenseManager.shared.onAccessChange = { [weak self] allowed in self?.applyLicenseAccess(allowed) }
+            self.applyLicenseAccess(LicenseManager.shared.state.allowsAccess)
+            LicenseManager.shared.refresh()
+            LicenseManager.shared.startMonitoring()
+        }
 
         // 监听跨进程通知：对方应用请求本应用隐藏
         // 通知名格式：island.switch.hide.{targetAppName}

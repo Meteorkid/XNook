@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 权限总览。把所有 TCC 授权收在一页：状态、为什么需要、怎么授权、授权后要不要重启。
@@ -22,6 +23,11 @@ struct PermissionCenterView: View {
             troubleshooting
         }
         .task { await center.refresh() }
+        // 授权动作发生在系统设置里：用户切回来时必须自己重算一遍，
+        // 否则页面还挂着离开前的「未授权」，会让人以为授权没生效。
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await center.refresh() }
+        }
         .confirmationDialog(
             L10n.localized(zh: "重置这项授权记录？", en: "Reset this permission record?"),
             isPresented: Binding(get: { pendingReset != nil }, set: { if !$0 { pendingReset = nil } }),
@@ -38,10 +44,15 @@ struct PermissionCenterView: View {
             }
             Button(L10n.localized(zh: "取消", en: "Cancel"), role: .cancel) { pendingReset = nil }
         } message: {
-            Text(L10n.localized(
-                zh: "会清除 X Nook 在这一项下的系统授权记录（tccutil reset），之后需要重新允许一次。用于修复「开关是打开的但应用仍报未授权」。",
-                en: "Clears X Nook's record for this service (tccutil reset). You will need to allow it again. Use it when the switch is on but the app still reports no access."
-            ))
+            Text(pendingReset == .screenRecording
+                 ? L10n.localized(
+                    zh: "会清除 X Nook 在「屏幕录制」和「系统音频捕获」两条记录下的授权（tccutil reset），之后需要重新允许一次。用于修复「开关是打开的但应用仍报未授权」或「字幕能起来但没有声音」。",
+                    en: "Clears X Nook's records for both Screen Recording and System Audio Capture (tccutil reset). You will need to allow them again. Use it when the switch is on but the app still reports no access, or when captions run without sound."
+                 )
+                 : L10n.localized(
+                    zh: "会清除 X Nook 在这一项下的系统授权记录（tccutil reset），之后需要重新允许一次。用于修复「开关是打开的但应用仍报未授权」。",
+                    en: "Clears X Nook's record for this service (tccutil reset). You will need to allow it again. Use it when the switch is on but the app still reports no access."
+                 ))
         }
     }
 
@@ -190,6 +201,7 @@ struct PermissionCenterView: View {
                     highlighted: highlightedID == "permission-" + kind.rawValue,
                     canRequest: center.canRequest(kind),
                     canReset: center.canReset(kind),
+                    canReauthorize: kind.tccService != nil && center.status(for: kind) == .allowed,
                     onOpen: {
                         // 支持拖放的分页顺手把拖拽板浮起来，省掉「再去主窗口找图标」这一步。
                         if kind.acceptsDrop {
@@ -200,7 +212,12 @@ struct PermissionCenterView: View {
                     },
                     onRequest: { Task { await center.requestAccess(for: kind) } },
                     onRestart: { PermissionCenter.relaunch() },
-                    onReset: { pendingReset = kind }
+                    onReset: { pendingReset = kind },
+                    onReauthorize: {
+                        // 旧记录现在可能是「看着已授权、对当前二进制无效」，先清再请求。
+                        center.resetAuthorization(for: kind)
+                        Task { await center.requestAccess(for: kind) }
+                    }
                 )
             }
         }
@@ -283,10 +300,14 @@ private struct PermissionRowView: View {
     let highlighted: Bool
     let canRequest: Bool
     let canReset: Bool
+    /// 已经显示「已授权」、但功能仍不正常时，仍然要给一条重新来过的路。
+    /// 典型场景：屏幕录制已经允许，可孪生的系统音频记录还绑在旧二进制上，字幕因此没有声音。
+    let canReauthorize: Bool
     let onOpen: () -> Void
     let onRequest: () -> Void
     let onRestart: () -> Void
     let onReset: () -> Void
+    let onReauthorize: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -371,6 +392,16 @@ private struct PermissionRowView: View {
                         .buttonStyle(.link)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                }
+                if canReauthorize {
+                    Button(L10n.localized(zh: "重新授权", en: "Re-authorize")) { onReauthorize() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .help(L10n.localized(
+                            zh: "状态显示已授权但功能不工作（例如字幕没有声音）时，清掉这一项的旧记录再重新允许一次。",
+                            en: "Use when the status says allowed but the feature does not work (for example captions have no sound): clears the old record and asks again."
+                        ))
                 }
                 if kind.acceptsDrop {
                     Text(L10n.localized(zh: "可拖拽图标添加", en: "Drag the icon to add"))

@@ -561,6 +561,11 @@ struct NotchContentView: View {
             // 换源后重新信任播放器位置，避免被上一首歌的抖动永久降级。
             captionManager.resetTimelinePreference()
         }
+        .onChange(of: mediaManager.isPlaying) { _, _ in
+            // 播放/暂停都重新结算一次歌词：暂停时清空，恢复时按当前曲目重灌。
+            guard showLiveCaptions, captionManager.isRunning else { return }
+            pushLyricsToCaption()
+        }
         .onChange(of: mediaManager.lyricsManager.stateVersion) { _, _ in
             pushLyricsToCaption()
         }
@@ -1590,7 +1595,9 @@ struct NotchContentView: View {
         if mediaManager.isWaitingForPreferredSource {
             return L10n.waitingForSource(mediaManager.currentSource?.displayName ?? "")
         }
-        if showLyrics {
+        // 暂停时不出歌词：`currentLyricLine` 是按播放位置算的，暂停后它会定格在
+        // 暂停那一刻的那句，看上去就像「没播放却还在识别歌词」。
+        if showLyrics, mediaManager.isPlaying {
             let syncedLine = mediaManager.currentLyricLine
             if !syncedLine.isEmpty { return syncedLine }
             let plainPreview = mediaManager.plainLyricPreview
@@ -1621,7 +1628,14 @@ struct NotchContentView: View {
     }
 
     /// 把已对齐歌词送进证据链。歌词是 5 级证据，能让证书成立、也能稳定压过识别文本。
+    ///
+    /// 只有正在播放时才灌入：暂停的歌曲若继续占据 5 级证据，
+    /// 用户切去看视频时会发现字幕还是那首歌的，永远回不到视频的声音。
     private func pushLyricsToCaption() {
+        guard mediaManager.isPlaying else {
+            captionManager.updateLyrics([], signature: "")
+            return
+        }
         let lyrics = mediaManager.lyricsManager
         let lines = lyrics.syncedLines
         let signature = [

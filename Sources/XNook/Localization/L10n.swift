@@ -428,6 +428,45 @@ enum L10n {
         en: "Upper bound on how late a caption line may appear. Smaller values drop the more expensive sources from the chain (tighter latency, fewer sources); larger values let more sources run. Takes effect next time captions start.") }
     static var refreshStatus: String { localized(zh: "刷新状态", en: "Refresh") }
 
+    static var captionSpeechEngine: String {
+        localized(zh: "语音引擎", en: "Speech engine")
+    }
+    static var captionSpeechEngineDesc: String {
+        localized(
+            zh: "「多语言并行」需要 macOS 26 及以上并已下载语言模型：中英两路同时识别，按文本脚本择优，且没有会话时长上限。切换后在下次开启字幕时生效；系统不满足条件时自动回落。",
+            en: "\"Multilingual\" requires macOS 26 or later with language models installed: Chinese and English run in parallel and the better script wins, with no session length limit. Applies next time captions start; falls back automatically when unsupported.")
+    }
+
+    static var captionRecognitionLanguage: String {
+        localized(zh: "识别语言", en: "Recognition language")
+    }
+
+    static var captionRecognitionLanguageDesc: String {
+        localized(
+            zh: "语音识别使用的语言。「自动」会按歌词或已出字幕判断内容语种，看不出时用系统语言；中英混排偏向中文。改动在下一个识别会话生效，通常几秒内。",
+            en: "Language used for speech recognition. \"Automatic\" infers the content language from lyrics or recent caption lines and falls back to the system language; mixed Chinese/English leans Chinese. Applies from the next recognition session, usually within seconds.")
+    }
+
+    static var captionSourcePreference: String {
+        localized(zh: "字幕来源", en: "Caption source")
+    }
+
+    static var captionSourcePreferenceDesc: String {
+        localized(
+            zh: "决定哪几路证据参与字幕。音乐与视频同时出声时，「优先视频画面」会忽略正在播放歌曲的歌词，「优先音乐歌词」则不读画面。暂停播放时歌词自动撤出，不占用字幕。",
+            en: "Which evidence sources feed the captions. When music and video play at the same time, \"Prefer on-screen text\" ignores the track's lyrics, while \"Prefer lyrics\" skips screen OCR. Lyrics are dropped automatically when playback pauses.")
+    }
+
+    static var pretranscriptTitle: String {
+        localized(zh: "本地视频预转写", en: "Pre-transcribe local video")
+    }
+
+    static var pretranscriptDesc: String {
+        localized(
+            zh: "用 QuickTime 播放本地文件时，提前读取播放位置之后的音频并转写，字幕可领先声音，不再有识别延迟。首次开启需要允许控制 QuickTime；浏览器里的视频不适用。",
+            en: "When playing a local file in QuickTime, audio ahead of the playhead is transcribed in advance, so captions arrive on time with no recognition delay. Requires permission to control QuickTime; browser video does not benefit.")
+    }
+
     // MARK: - Custom GIF
 
     static var customGif: String { localized(zh: "自定义 GIF", en: "Custom GIF") }

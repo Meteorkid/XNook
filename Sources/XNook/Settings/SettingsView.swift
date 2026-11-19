@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Environment(UpdateManager.self) private var updateManager
     @State private var search: SettingsSearchState
     @State private var permissions: SettingsPermissions
+    @State private var pretranscriptEnabled = PreTranscriptSettings.isEnabled
     @State private var globalPanelShortcut: GlobalPanelShortcutController
     @State private var claudeReceiver: ClaudeCompletionReceiver
     @State private var claudeConfigurationCopied = false
@@ -438,6 +439,33 @@ struct SettingsView: View {
         )
     }
 
+    /// 识别语言存在 UserDefaults 的 `captionLocale` 里，识别器每次开会话都会重新读，
+    /// 所以这里不需要额外的发布机制。
+    private var captionLanguageBinding: Binding<CaptionRecognitionLanguage> {
+        Binding(
+            get: { CaptionRecognitionLanguage.current },
+            set: { CaptionRecognitionLanguage.current = $0 }
+        )
+    }
+
+    private var speechEngineBinding: Binding<CaptionSpeechEngine> {
+        Binding(
+            get: { CaptionSpeechEngine.current },
+            set: { CaptionSpeechEngine.current = $0 }
+        )
+    }
+
+    /// 来源偏好可运行中切换：改完立刻重挂证据链，不用重开字幕。
+    private var captionSourceBinding: Binding<CaptionSourcePreference> {
+        Binding(
+            get: { CaptionSourcePreference.current },
+            set: { newValue in
+                CaptionSourcePreference.current = newValue
+                CaptionManager.shared.applySourcePreference()
+            }
+        )
+    }
+
     private var displayPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             section(L10n.sectionAppearance) {
@@ -554,6 +582,55 @@ struct SettingsView: View {
                     settingRow(L10n.captionBudget, id: "captionBudget",
                               description: L10n.captionBudgetDesc) {
                         AppStorageSlider(key: "captionBudget", range: 0.4...1.5, format: "%.2fs")
+                    }
+                    dividerLine
+                    settingRow(L10n.captionSpeechEngine, id: "captionSpeechEngine",
+                              description: L10n.captionSpeechEngineDesc) {
+                        Picker("", selection: speechEngineBinding) {
+                            ForEach(CaptionSpeechEngine.allCases) { engine in
+                                Text(engine.title).tag(engine)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 170)
+                        .disabled(!CaptionSpeechEngine.supportsMultilingual)
+                    }
+                    dividerLine
+                    settingRow(L10n.captionRecognitionLanguage, id: "captionLanguage",
+                              description: L10n.captionRecognitionLanguageDesc) {
+                        Picker("", selection: captionLanguageBinding) {
+                            ForEach(CaptionRecognitionLanguage.allCases) { language in
+                                Text(language.title).tag(language)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 150)
+                    }
+                    dividerLine
+                    settingRow(L10n.captionSourcePreference, id: "captionSource",
+                              description: L10n.captionSourcePreferenceDesc) {
+                        Picker("", selection: captionSourceBinding) {
+                            ForEach(CaptionSourcePreference.allCases) { preference in
+                                Text(preference.title).tag(preference)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 170)
+                    }
+                    dividerLine
+                    settingRow(L10n.pretranscriptTitle, id: "pretranscript",
+                              description: L10n.pretranscriptDesc) {
+                        Toggle("", isOn: Binding(
+                            get: { pretranscriptEnabled },
+                            set: { newValue in
+                                pretranscriptEnabled = newValue
+                                PreTranscriptSettings.isEnabled = newValue
+                                CaptionManager.shared.restartForPreferenceChange()
+                            }
+                        ))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .controlSize(.small)
                     }
                     dividerLine
                     LiveCaptionStatusRow()

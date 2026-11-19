@@ -27,6 +27,9 @@ final class PermissionDragAssistant {
                 guard !Task.isCancelled else { return }
                 guard let self else { return }
                 if let frame = Self.systemSettingsFrame() {
+                    // 系统设置可能是被别的窗口盖着打开的；先提到最前，
+                    // 否则拖拽板会孤零零浮在一个不相干的窗口上，看着像跑偏了。
+                    Self.activateSystemSettings()
                     self.show(near: frame, target: target)
                     return
                 }
@@ -43,16 +46,25 @@ final class PermissionDragAssistant {
     }
 
     private func show(near settingsFrame: CGRect?, target: String) {
+        // 先量高度：宽度固定、方向只影响箭头，所以先按一个方向试排，拿到尺寸再决定摆哪儿。
+        let probe = NSHostingView(rootView: PermissionDragChip(
+            target: target,
+            direction: .right,
+            onDragEnded: {},
+            onClose: {}
+        ))
+        probe.layoutSubtreeIfNeeded()
+        let size = CGSize(width: 340, height: max(96, ceil(probe.fittingSize.height)))
+        let (origin, direction) = Self.placement(near: settingsFrame, size: size)
+
         let host = NSHostingView(rootView: PermissionDragChip(
             target: target,
+            direction: direction,
             onDragEnded: { [weak self] in self?.close() },
             onClose: { [weak self] in self?.close() }
         ))
         host.layoutSubtreeIfNeeded()
-        // 让面板贴着内容走，避免底部拖出一大块空白。
-        let fitted = host.fittingSize
-        let size = CGSize(width: 132, height: max(140, min(220, fitted.height)))
-        let frame = CGRect(origin: Self.origin(near: settingsFrame, size: size), size: size)
+        let frame = CGRect(origin: origin, size: size)
 
         let panel: NSPanel
         if let existing = self.panel {
@@ -66,14 +78,16 @@ final class PermissionDragAssistant {
             panel.isFloatingPanel = true
             panel.becomesKeyOnlyIfNeeded = true
             panel.hidesOnDeactivate = false
-            panel.isMovableByWindowBackground = true
+            // 面板位置由 placement 自动决定。开启「拖动背景移动窗口」会让
+            // 落在条目之外的按下变成移动整块卡片，正是用户看到的「拖着整个浮窗在动」。
+            panel.isMovableByWindowBackground = false
             panel.backgroundColor = .clear
             panel.isOpaque = false
             panel.hasShadow = true
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             self.panel = panel
         }
-        // 每次重建内容：提示语随目标分页变化，面板尺寸也跟着贴合。
+        // 每次重建内容：提示语与箭头方向随位置变化。
         panel.contentView = host
         panel.setContentSize(size)
         panel.setFrame(frame, display: true)
@@ -81,6 +95,13 @@ final class PermissionDragAssistant {
     }
 
     // MARK: - 定位
+
+    private static func activateSystemSettings() {
+        NSRunningApplication
+            .runningApplications(withBundleIdentifier: "com.apple.systempreferences")
+            .first?
+            .activate()
+    }
 
     /// 系统设置主窗口的位置（CGWindowList 是左上原点，这里换算成 Cocoa 的左下原点）。
     static func systemSettingsFrame() -> CGRect? {
@@ -104,18 +125,39 @@ final class PermissionDragAssistant {
         return CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
     }
 
-    private static func origin(near settingsFrame: CGRect?, size: CGSize) -> CGPoint {
+    /// 决定面板摆在哪一侧，以及箭头该指哪边。
+    ///
+    /// 优先级：左侧（不挡系统设置，也不挡列表）→ 右侧 → 下方 → 贴左边缘兜底。
+    /// 箭头方向必须和实际位置一致，否则「往哪拖」这件事又变回猜。
+    static func placement(
+        near settingsFrame: CGRect?,
+        size: CGSize
+    ) -> (CGPoint, PermissionDragChip.ArrowDirection) {
         let screen = (settingsFrame.flatMap { frame in
             NSScreen.screens.first { $0.frame.intersects(frame) }
         } ?? NSScreen.main)?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
 
+        let gap: CGFloat = 12
         guard let settingsFrame else {
-            return CGPoint(x: screen.maxX - size.width - 24, y: screen.maxY - size.height - 120)
+            return (CGPoint(x: screen.maxX - size.width - 24, y: screen.maxY - size.height - 120), .right)
         }
-        // 贴在系统设置左侧、顶部对齐；屏幕放不下时退到屏幕边缘。
-        let x = max(screen.minX + 12, settingsFrame.minX - size.width - 12)
-        let y = min(max(screen.minY + 12, settingsFrame.maxY - size.height - 28),
-                    screen.maxY - size.height - 12)
-        return CGPoint(x: x, y: y)
+
+        // 与系统设置顶部对齐，但不越出屏幕。
+        let alignedY = min(
+            max(screen.minY + gap, settingsFrame.maxY - size.height - 28),
+            screen.maxY - size.height - gap
+        )
+
+        if settingsFrame.minX - size.width - gap >= screen.minX + gap {
+            return (CGPoint(x: settingsFrame.minX - size.width - gap, y: alignedY), .right)
+        }
+        if settingsFrame.maxX + size.width + gap <= screen.maxX - gap {
+            return (CGPoint(x: settingsFrame.maxX + gap, y: alignedY), .left)
+        }
+        if settingsFrame.minY - size.height - gap >= screen.minY + gap {
+            return (CGPoint(x: max(screen.minX + gap, settingsFrame.minX), y: settingsFrame.minY - size.height - gap), .up)
+        }
+        // 空间实在不够：贴左边缘，允许压住系统设置边缘，但箭头仍然指向列表。
+        return (CGPoint(x: max(screen.minX + gap, settingsFrame.minX - size.width - gap), y: alignedY), .right)
     }
 }

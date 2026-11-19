@@ -39,6 +39,10 @@ final class CaptionManager {
     var frameExecutedIntervals: Int { frameProvider?.executedIntervals ?? 0 }
     var frameSkippedIntervals: Int { frameProvider?.skippedIntervals ?? 0 }
 
+    /// 语音引擎的换路说明。非空表示「用户选了多语言并行，但实际跑的是稳定引擎」。
+    /// 必须让用户看见：否则他以为在对比新引擎的延迟，其实量的是旧引擎。
+    private(set) var speechEngineNote: String?
+
     // MARK: - 内部组件
 
     let clock = SourceClock()
@@ -48,12 +52,16 @@ final class CaptionManager {
         config: .init(deadlineBudget: CaptionManager.configuredBudget())
     )
     private var tap: SystemAudioTap?
-    private var speech: SpeechEvidenceProvider?
+    private var speech: (any SpeechEvidenceProviding)?
     private var lyricProvider: LyricEvidenceProvider?
     private var frameProvider: FrameTextEvidenceProvider?
+    private var preTranscriptProvider: PreTranscriptProvider?
     private var tickTimer: Timer?
     private var logHandle: FileHandle?
     private var lastLoggedLine: String = ""
+    /// 端到端延迟采样：音频区间右端 → 文字上屏的墙钟差。
+    private var displayLagSamples: [TimeInterval] = []
+    private var displayLagTotal = 0
 
     /// 启动前就已加载好的歌词：等捕获真正跑起来再灌入，避免白算一遍。
     private var pendingLyrics: [LyricsManager.LrcLine] = []
@@ -71,6 +79,9 @@ final class CaptionManager {
 
     /// 调度周期：60 ms。远小于 L_budget(300 ms)，保证「到点即取」不会因为轮询粒度而迟到。
     private let tickInterval: TimeInterval = 0.06
+    /// 语种线索用的最近一行字幕。排除本地预转写自己的输出——它一旦用错语言，
+    /// 产生的拉丁乱码会让线索自证成英文，然后一直错下去。
+    private var languageHintLine = ""
     /// 音乐场景下歌词与元数据不需要音频前瞻，可预取度按高值处理；
     /// 系统音频捕获场景读不到播放前沿之后的音频，恒为 0。
     private var prefetchability: Double = 0
@@ -92,8 +103,14 @@ final class CaptionManager {
         jumpTimestamps.removeAll()
         lastAlignAt = 0
 
-        let speechProvider = SpeechEvidenceProvider(clock: clock) { [weak clock] in
+        let speechProvider = Self.makeSpeechProvider(clock: clock) { [weak clock] in
             clock?.generation ?? 1
+        }
+        speechEngineNote = nil
+        if let router = speechProvider as? SpeechEngineRouter {
+            router.onEngineChanged = { [weak self] note in
+                Task { @MainActor in self?.speechEngineNote = note }
+            }
         }
         speechProvider.onFailure = { [weak self] error in
             Task { @MainActor in
@@ -112,6 +129,9 @@ final class CaptionManager {
         let newTap = SystemAudioTap()
         newTap.onBuffer = { [weak speechProvider] buffer, host in
             speechProvider?.append(buffer: buffer, hostTime: host)
+        }
+        newTap.onDiagnostics = { [weak self] message in
+            Task { @MainActor in self?.log(message) }
         }
         newTap.onError = { [weak self] error in
             Task { @MainActor in
@@ -144,16 +164,49 @@ final class CaptionManager {
         }
 
         scheduler.attach(clock: clock)
-        // 注册顺序无关：调度器按证据等级自行排序（歌词 5、画面 3、流式 1）。
-        scheduler.register([frameEvidence, lyricEvidence, speechProvider])
         scheduler.onLineChange = { [weak self] text, level in
             guard let self else { return }
             self.line = text
             self.level = level
+            // 语种线索只认歌词（等级 5）。画面文字与语音自己的输出都不能当线索：
+            // OCR 读的是用户桌面上的中文，语音输出本身又是由当前语言决定的——
+            // 拿它们当线索会让「自动」在中英之间来回跳，识别会话随之反复重建。
+            if !text.isEmpty, level == .alignedFullText,
+               CaptionRecognitionLanguage.current == .automatic {
+                self.speech?.updateContentHint(text)
+            }
             if !text.isEmpty, text != self.lastLoggedLine {
                 self.lastLoggedLine = text
                 self.log("line[\(level?.rawValue ?? 0)] \(text)")
             }
+            if let level, level != .localCache, !text.isEmpty {
+                self.languageHintLine = text
+            }
+            self.recordDisplayLag()
+        }
+
+        let quickTimeLocator = QuickTimeMediaLocator()
+        quickTimeLocator.onDiagnostics = { [weak self] message in
+            Task { @MainActor in self?.log(message) }
+        }
+        let preTranscriptEvidence: PreTranscriptProvider? = PreTranscriptSettings.isEnabled
+            ? PreTranscriptProvider(
+                locator: quickTimeLocator,
+                generation: { [weak clock] in clock?.generation ?? 1 },
+                locale: { [weak self] in
+                    // 先用实时的字幕内容判定语种：本地预转写在第一块之前拿不到内容，
+                    // 只靠系统语言会在「中文系统看英文片」时整段听成乱码。
+                    CaptionLanguageResolver.resolve(
+                        preference: CaptionRecognitionLanguage.current,
+                        contentHint: self?.languageHintLine,
+                        systemLanguage: Locale.preferredLanguages.first ?? "en-US"
+                    )
+                },
+                sourceNow: { [weak clock] in clock?.sourceNow() ?? 0 }
+            )
+            : nil
+        preTranscriptEvidence?.onDiagnostics = { [weak self] message in
+            Task { @MainActor in self?.log(message) }
         }
 
         speechProvider.start()
@@ -171,7 +224,12 @@ final class CaptionManager {
         speech = speechProvider
         lyricProvider = lyricEvidence
         frameProvider = frameEvidence
+        preTranscriptProvider = preTranscriptEvidence
+        preTranscriptEvidence?.start()
         state = .running
+        // 注册顺序无关：调度器按证据等级自行排序（歌词 5、画面 3、流式 1）。
+        // 具体注册哪几路由「字幕来源」偏好决定，可在运行中切换。
+        applySourcePreference()
         startTicking()
 
         // 启动前已就位的歌词补灌一次，否则用户「先放歌、后开字幕」时链路里只有识别。
@@ -192,6 +250,8 @@ final class CaptionManager {
         lyricProvider = nil
         frameProvider?.stop()
         frameProvider = nil
+        preTranscriptProvider?.stop()
+        preTranscriptProvider = nil
         await tap?.stop()
         tap = nil
         scheduler.reset()
@@ -199,6 +259,17 @@ final class CaptionManager {
         level = nil
         state = .idle
         log("stopped")
+    }
+
+    /// 开关变化后整链重建：预转写来源是在 `start()` 里装配的，
+    /// 只在运行中改偏好不会把它建出来。
+    func restartForPreferenceChange() {
+        guard state.isRunning else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.stop()
+            await self.start()
+        }
     }
 
     /// 非 async 的入口，供 SwiftUI 生命周期回调（onAppear / onChange）直接调用。
@@ -235,6 +306,7 @@ final class CaptionManager {
             scheduler.reset()
             // 代次已变，已灌入的歌词条目全部作废，必须按新代次重灌。
             lyricProvider?.resubmit()
+            preTranscriptProvider?.resubmit()
             frameProvider?.reset()
             log("player timeline unstable → fall back to capture clock")
             return
@@ -242,6 +314,7 @@ final class CaptionManager {
 
         scheduler.reset()
         lyricProvider?.resubmit()
+        preTranscriptProvider?.resubmit()
         frameProvider?.reset()
         log("timeline jump → generation \(clock.generation) at \(String(format: "%.2f", position))")
     }
@@ -268,6 +341,20 @@ final class CaptionManager {
         pendingLyrics = lines
         pendingLyricsSignature = lines.isEmpty ? "" : signature
 
+        // 选了「优先视频画面」就完全不采信歌词：既不灌入，也把已有条目撤掉，
+        // 否则暂停中的那首歌会一直占着 5 级证据，视频的声音永远抢不过它。
+        guard CaptionSourcePreference.current.includesLyrics else {
+            lyricProvider?.clear()
+            return
+        }
+
+        // 歌词是最可靠的语种线索：中文歌配英文标题、英文歌配中文界面都很常见。
+        // 只在「自动」模式下用它，用户显式选了语言就不要被内容带偏。
+        if CaptionRecognitionLanguage.current == .automatic {
+            let sample = lines.prefix(4).map(\.text).joined(separator: " ")
+            if !sample.isEmpty { speech?.updateContentHint(sample) }
+        }
+
         // 有全文歌词意味着该音源可预取（播放前沿之后的内容已知），
         // 这正是权 1 里 P 的物理含义；视频/会议没有全文，保持 0。
         setPrefetchability(lines.isEmpty ? 0 : 0.9)
@@ -279,6 +366,33 @@ final class CaptionManager {
             lyricProvider.submit(lines, signature: signature)
         }
         applyAdmissionGate()
+    }
+
+    /// 按「字幕来源」偏好重新组装证据链。
+    ///
+    /// 只改变「哪几路参与」，不改变等级次序——等级是可信度，偏好是用户意图。
+    /// 运行中切换也安全：`register` 会覆盖旧链并重挂回调。
+    func applySourcePreference() {
+        guard state.isRunning else { return }
+        let preference = CaptionSourcePreference.current
+        var providers: [any CaptionEvidenceProvider] = []
+        if let speech { providers.append(speech) }
+        if preference.includesLyrics, let lyricProvider { providers.append(lyricProvider) }
+        if preference.includesFrameText, let frameProvider { providers.append(frameProvider) }
+        if let preTranscriptProvider { providers.append(preTranscriptProvider) }
+        scheduler.register(providers)
+        if preference.includesLyrics {
+            // 从「优先视频画面」切回来时补灌一次：歌词内容一直留在 pending 里，
+            // 但重新注册不会自动提交，不补的话要等到下一次播放状态变化才出现。
+            if !pendingLyrics.isEmpty {
+                lyricProvider?.submit(pendingLyrics, signature: pendingLyricsSignature)
+            }
+        } else {
+            lyricProvider?.clear()
+            setPrefetchability(0)
+        }
+        applyAdmissionGate()
+        log("source preference=\(preference.rawValue) providers=\(providers.map(\.providerID))")
     }
 
     // MARK: - 来源准入
@@ -299,7 +413,9 @@ final class CaptionManager {
                 provider.start()
                 admitted.append(provider.providerID)
             } else {
-                provider.stop()
+                // 「不占预算」不等于「停掉」：靠轮询攒内容的来源必须继续跑，
+                // 否则它永远变不成可用，闸门也就永远把它挡在外面。
+                if !provider.survivesRejection { provider.stop() }
                 rejected.append(provider.providerID)
             }
         }
@@ -310,12 +426,30 @@ final class CaptionManager {
 
     // MARK: - 调度驱动
 
+    /// 一行字幕过了自己的结束时间就清掉。
+    ///
+    /// `line` 原来只在 `stop()` 时清空，于是音频停了、播放器关了，最后一句仍挂在
+    /// 顶部信息条上，看起来像「明明没播放，字幕还在识别」。判定用候选自带的结束时间，
+    /// 比「多久没新行」更准：连续语音里句子之间本来就有停顿。
+    private func expireCaptionLineIfNeeded() {
+        guard !line.isEmpty, let end = scheduler.currentLineEnd else { return }
+        let now = clock.sourceNow()
+        guard now > end + 2.5 else { return }
+        line = ""
+        level = nil
+        log(String(format: "caption line expired (now=%.1f end=%.1f)", now, end))
+    }
+
     private func startTicking() {
         tickTimer?.invalidate()
         let timer = Timer(timeInterval: tickInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state.isRunning else { return }
                 self.scheduler.tick(prefetchability: self.prefetchability)
+                // 预转写的轮询搭在这条已确认工作的 60 ms 定时器上：
+                // 它内部按 1.5 秒节流，实际开销可以忽略。
+                self.preTranscriptProvider?.pump()
+                self.expireCaptionLineIfNeeded()
                 self.frameProvider?.advance(
                     now: self.clock.sourceNow(),
                     unit: self.scheduler.config.unit
@@ -335,6 +469,36 @@ final class CaptionManager {
     static func configuredBudget() -> TimeInterval {
         let stored = UserDefaults.standard.object(forKey: "captionBudget") as? Double
         return max(0.3, min(2.0, stored ?? 0.9))
+    }
+
+    /// 选择语音识别引擎。
+    ///
+    /// 不走「多语言并行」时直接用稳定引擎；走了则交给 `SpeechEngineRouter`——
+    /// 它在分析器起不来时自动回落，用户不会因为换引擎而彻底失去字幕。
+    static func makeSpeechProvider(
+        clock: SourceClock,
+        generation: @escaping () -> Int
+    ) -> any SpeechEvidenceProviding {
+        guard CaptionSpeechEngine.current == .multilingual else {
+            return SpeechEvidenceProvider(clock: clock, generation: generation)
+        }
+        return SpeechEngineRouter(
+            clock: clock,
+            generation: generation,
+            locales: analyzerLocales()
+        )
+    }
+
+    /// 分析器要挂的语言模块。
+    ///
+    /// 显式选了语言就只挂一路（省一半算力）；「自动」同时挂中英，由合并层按脚本归属择优——
+    /// 这才是多语言并行真正解决的问题：不必事先猜对内容语种。
+    static func analyzerLocales() -> [Locale] {
+        switch CaptionRecognitionLanguage.current {
+        case .chinese: [Locale(identifier: "zh-CN")]
+        case .english: [Locale(identifier: "en-US")]
+        case .automatic: [Locale(identifier: "zh-CN"), Locale(identifier: "en-US")]
+        }
     }
 
     /// 屏幕录制权限（ScreenCaptureKit 抓系统音频走的就是这条 TCC 授权）。
@@ -392,5 +556,23 @@ final class CaptionManager {
         if let data = text.data(using: .utf8) {
             handle.write(data)
         }
+    }
+
+    /// 真实端到端延迟：这段音频「说完」到文字真正上屏，中间隔了多久。
+    ///
+    /// 与 `analyzer latency` 口径不同——后者只算识别器自身的处理时间，
+    /// 看不到采集侧缓冲与调度排队。这里用源时钟把候选区间右端换算回宿主时刻，
+    /// 差值才是用户实际看到的落后量。
+    private func recordDisplayLag() {
+        guard let end = scheduler.currentLineEnd else { return }
+        let lag = SourceClock.hostNow() - clock.hostTime(atSource: end)
+        guard lag.isFinite, lag >= 0, lag < 30 else { return }
+        displayLagSamples.append(lag)
+        displayLagTotal += 1
+        guard displayLagTotal % 20 == 0, !displayLagSamples.isEmpty else { return }
+        let average = displayLagSamples.reduce(0, +) / Double(displayLagSamples.count)
+        let worst = displayLagSamples.max() ?? 0
+        log(String(format: "display lag avg=%.2fs max=%.2fs n=%d", average, worst, displayLagTotal))
+        displayLagSamples.removeAll(keepingCapacity: true)
     }
 }

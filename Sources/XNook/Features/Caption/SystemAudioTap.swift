@@ -42,6 +42,8 @@ final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// 每帧音频回调：转换后的 PCM 缓冲 + 该帧到达捕获接口的宿主时刻（秒）。
     var onBuffer: ((AVAudioPCMBuffer, TimeInterval) -> Void)?
     var onError: ((Error) -> Void)?
+    /// 音频流是否在动的诊断信息（首帧格式、累计时长）。
+    var onDiagnostics: ((String) -> Void)?
 
     private let config: Config
     private let queue = DispatchQueue(label: "com.meteorkid.xnook.caption.audio", qos: .userInitiated)
@@ -50,6 +52,8 @@ final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private var inputFormat: AVAudioFormat?
     private var outputFormat: AVAudioFormat?
     private var isRunning = false
+    private var deliveredFrames: AVAudioFramePosition = 0
+    private var lastDeliveryReport: TimeInterval = 0
 
     init(config: Config = Config()) {
         self.config = config
@@ -191,7 +195,27 @@ final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
 
         guard conversionError == nil, outputBuffer.frameLength > 0 else { return }
+        noteDelivery(frameCount: outputBuffer.frameLength, format: outputBuffer.format)
         onBuffer?(outputBuffer, arrivalHost)
+    }
+
+    /// 记录音频是否真的在流动。
+    ///
+    /// 「字幕没有反应」最常见的原因是**根本没有音频进来**（权限、静音、音源不在这块屏上），
+    /// 而没有这条日志时它和「识别引擎不工作」在现象上完全一样。
+    private func noteDelivery(frameCount: AVAudioFrameCount, format: AVAudioFormat) {
+        deliveredFrames += AVAudioFramePosition(frameCount)
+        let now = SourceClock.hostNow()
+        if lastDeliveryReport == 0 {
+            lastDeliveryReport = now
+            onDiagnostics?(
+                "tap first buffer \(frameCount)f @ \(Int(format.sampleRate))Hz/\(format.channelCount)ch"
+            )
+        } else if now - lastDeliveryReport > 30 {
+            lastDeliveryReport = now
+            let seconds = Double(deliveredFrames) / max(1, format.sampleRate)
+            onDiagnostics?(String(format: "tap audio %.1fs received", seconds))
+        }
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {

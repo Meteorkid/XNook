@@ -124,13 +124,21 @@ struct ExpandedPanelView: View {
                             onAction: { activityCoordinator.performCurrentAction(event) })
                             .accessibilityIdentifier("panelActivitySummary")
                     }
-                    if selectedWidget == nil {
-                        overviewPage
-                            .transition(.asymmetric(insertion: Self.pageFadeIn, removal: Self.overviewPageOut))
-                    } else if let selectedWidget {
-                        detailPage(selectedWidget)
-                            .transition(.asymmetric(insertion: Self.detailPageIn, removal: Self.pageFadeOut))
+                    // 两页叠在同一位置，且**硬切**，不做交叉淡入。
+                    //
+                    // 试过三种写法，只有硬切是对的：
+                    // 1. 作为 VStack 兄弟节点 → 转场期间两页同时占位，高度先涨到两页之和再回落。
+                    // 2. 叠放 + 交叉淡入 → 面板宽度在换页瞬间就落到终值，而退场中的旧页仍按旧宽度
+                    //    布局，于是那几帧能看到「三列概览被裁掉右半截」叠着半透明的新页面。
+                    // 3. 叠放 + 硬切 → 新页在正确的宽度下一次性铺开，剩下的动效交给面板尺寸。
+                    ZStack(alignment: .topLeading) {
+                        if selectedWidget == nil {
+                            overviewPage
+                        } else if let selectedWidget {
+                            detailPage(selectedWidget)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .padding(ExpandedPanelLayout.outerPadding)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -433,31 +441,22 @@ struct ExpandedPanelView: View {
             .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
     }
 
-    // MARK: - 换页转场
+    // MARK: - 换页
 
-    /// 缩放锚在顶部：面板是从刘海往下长的，绕中心缩放会让文字先往外挤一下。
+    /// 换页统一入口。
     ///
-    /// 内容淡入淡出单独给一条短的 ease，不复用面板尺寸的弹簧：弹簧尾巴长，
-    /// 从详情退回概览时旧内容会在已经变矮的面板里拖出一条空洞。
-    private static let pageFadeIn = AnyTransition.opacity
-        .animation(.easeOut(duration: 0.16))
-    private static let pageFadeOut = AnyTransition.opacity
-        .animation(.easeOut(duration: 0.06))
-    private static let detailPageIn = AnyTransition.opacity
-        .combined(with: .scale(scale: 0.97, anchor: .top))
-        .animation(.easeOut(duration: 0.18))
-    private static let overviewPageOut = AnyTransition.opacity
-        .combined(with: .scale(scale: 0.985, anchor: .top))
-        .animation(.easeOut(duration: 0.06))
-
-    /// 换页统一入口：内容转场与面板尺寸共用同一条弹簧（reduce motion 时直接切换）。
+    /// 这里**不能**用 `withAnimation` 包住 `selectedWidget`：宽度一旦跟着弹簧走，
+    /// 新页面每一帧测出来的宽度都在变，而 `ExpandedPanelMeasurement.matches` 要求
+    /// 宽度误差 < 0.5pt，于是那一帧明明已经量到的新高度（317）会被一路丢弃，
+    /// 面板要等宽度动画收敛后才肯长高——先看到被裁掉的内容，再看到它跳一下。
+    ///
+    /// 宽度直接落到终值后，测量当帧生效，高度由 `applyPanelMeasurement` 用换页弹簧补上。
     private func select(_ widget: Widget?) {
         guard widget != selectedWidget else { return }
-        guard !shouldReduceMotion else { selectedWidget = widget; return }
-        withAnimation(IslandMotion.panelSwitch.animation) { selectedWidget = widget }
+        selectedWidget = widget
     }
 
-    /// 菜单里的 Picker 只能拿到 Binding，套一层让选择同样走转场。
+    /// 菜单里的 Picker 只能拿到 Binding，套一层让选择走同一条路径。
     private var selectionBinding: Binding<Widget?> {
         Binding(get: { selectedWidget }, set: { select($0) })
     }

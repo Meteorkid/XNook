@@ -404,6 +404,9 @@ struct NotchContentView: View {
                 y: jellyTrigger ? (jellySettled ? jellyScale.ySettle : jellyScale.yPop) : 1.0
             )
             .frame(width: shapeWidth, height: shapeHeight)
+            // 换页时宽度是硬切的（见 `select` 的注释）：形状与内容必须同一步到位，
+            // 只让高度按换页弹簧过渡。曾试过只给形状补 `.animation(value: selectedWidget)`，
+            // 实测无效——形状的实际绘制由玻璃背景宿主驱动，宽度仍然是一帧跳过去。
 
             // 展开内容
             if isExpanded || expandPending || collapseAnimating {
@@ -1312,10 +1315,12 @@ struct NotchContentView: View {
             || RunLoop.current.currentMode == .eventTracking
     }
 
-    /// 换页统一入口：让面板尺寸与内容走同一条弹簧（reduce motion 时直接切换）。
-    private func select(_ widget: WidgetType?) {        guard widget != selectedWidget else { return }
-        guard !shouldReduceMotion else { selectedWidget = widget; return }
-        withAnimation(IslandMotion.panelSwitch.animation) { selectedWidget = widget }
+    /// 换页统一入口。宽度必须直接落到终值：`ExpandedPanelMeasurement.matches` 要求
+    /// 宽度误差 < 0.5pt，宽度若跟着弹簧走，新页面的第一次测量会被丢弃，面板要等
+    /// 宽度收敛后才长高（中间那一帧内容是被裁的）。高度仍由测量走换页弹簧。
+    private func select(_ widget: WidgetType?) {
+        guard widget != selectedWidget else { return }
+        selectedWidget = widget
     }
 
     private func installKeyboardHandler(on window: NotchWindow) {

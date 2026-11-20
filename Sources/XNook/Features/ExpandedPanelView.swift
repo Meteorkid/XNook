@@ -124,48 +124,12 @@ struct ExpandedPanelView: View {
                             onAction: { activityCoordinator.performCurrentAction(event) })
                             .accessibilityIdentifier("panelActivitySummary")
                     }
-                    if selectedWidget == nil, let layoutStore {
-                        if let layoutEntryError { Text(layoutEntryError).font(.caption).foregroundStyle(.secondary) }
-                        if !layoutEditor.isEditing, let issue = layoutRecoveryError ?? layoutStore.loadError {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(issue).font(.caption).foregroundStyle(.secondary)
-                                Button(L10n.localized(zh: "恢复默认布局…", en: "Restore Default Layout…")) { confirmsLayoutRecovery = true }
-                            }
-                        }
-                        PanelDashboardGrid(
-                            configuration: Binding(get: { dashboardConfiguration }, set: { if layoutEditor.isEditing { layoutEditor.draft = $0 } }),
-                            selection: $layoutSelection, width: max(1, panelWidth - ExpandedPanelLayout.outerPadding * 2),
-                            isEditing: layoutEditor.isEditing, summary: moduleSummary, moduleFill: moduleFill,
-                            fitsContent: usesDefaultContentFit
-                        ) { item, size in moduleView(item.id, size: size) }
-                        if showTaskInboxShortcut, let pendingTasks, !layoutEditor.isEditing,
-                           !visibleModuleIDs.contains(.currentTask), !visibleModuleIDs.contains(.recentTasks) {
-                            Button { showsFallbackInbox = true } label: {
-                                Label("\(L10n.inboxShortTitle) \(pendingTasks.visibleTasks.count)", systemImage: "tray")
-                            }
-                            .accessibilityLabel(L10n.inboxTitle)
-                            .accessibilityIdentifier("panelTaskInboxFallback")
-                            .expandedPanelDebugFrame(id: "panelTaskInboxFallback")
-                            .popover(isPresented: $showsFallbackInbox) {
-                                TaskInboxView(coordinator: pendingTasks, onClose: { showsFallbackInbox = false })
-                            }
-                        }
-                    } else if selectedWidget == nil {
-                        if enabledWidgets.isEmpty {
-                            Text(L10n.panelNoWidgets)
-                                .font(.system(size: IslandTokens.Font.body))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, IslandTokens.Spacing.group)
-                        } else {
-                            overview
-                        }
-                        focusContent
+                    if selectedWidget == nil {
+                        overviewPage
+                            .transition(.asymmetric(insertion: Self.pageFadeIn, removal: Self.overviewPageOut))
                     } else if let selectedWidget {
-                        widgetView(for: selectedWidget, isDetail: true)
-                            .padding(ExpandedPanelLayout.cardPadding)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
+                        detailPage(selectedWidget)
+                            .transition(.asymmetric(insertion: Self.detailPageIn, removal: Self.pageFadeOut))
                     }
                 }
                 .padding(ExpandedPanelLayout.outerPadding)
@@ -237,7 +201,7 @@ struct ExpandedPanelView: View {
         .onExitCommand {
             if showsLayoutLibrary { showsLayoutLibrary = false }
             else if layoutEditor.isEditing { layoutEditor.cancel() }
-            else if selectedWidget != nil { selectedWidget = nil }
+            else if selectedWidget != nil { select(nil) }
             else { onClose() }
         }
     }
@@ -298,7 +262,7 @@ struct ExpandedPanelView: View {
             if selectedWidget != nil {
                 Button {
                     guard !notesManager.isEditing || notesManager.closeEditor() else { return }
-                    selectedWidget = nil
+                    select(nil)
                 } label: {
                     HStack(spacing: usesCompactDetailHeader ? 4 : 8) {
                         Image(systemName: "square.grid.2x2")
@@ -349,7 +313,7 @@ struct ExpandedPanelView: View {
 
     private var navigationMenu: some View {
         Menu {
-            Picker(L10n.panelNavigation, selection: $selectedWidget) {
+            Picker(L10n.panelNavigation, selection: selectionBinding) {
                 Label(L10n.panelOverview, systemImage: "square.grid.2x2").tag(nil as Widget?)
                 ForEach(navigationWidgets, id: \.self) { widget in
                     Label(widget.localizedName, systemImage: widget.icon).tag(Optional(widget))
@@ -379,7 +343,7 @@ struct ExpandedPanelView: View {
 
     private func navigationButton(title: String, icon: String, widget: Widget?, showsTitle: Bool) -> some View {
         let isSelected = selectedWidget == widget
-        return Button { selectedWidget = widget } label: {
+        return Button { select(widget) } label: {
             HStack(spacing: IslandTokens.Spacing.inline) {
                 Image(systemName: icon)
                 if showsTitle { Text(title) }
@@ -419,6 +383,85 @@ struct ExpandedPanelView: View {
         .expandedPanelDebugFrame(id: "expandedPanelRecentTasks")
     }
 
+    /// 概览页：配置了布局时走仪表盘网格，否则退回旧的等分概览 + 任务卡。
+    @ViewBuilder
+    private var overviewPage: some View {
+        if let layoutStore {
+            if let layoutEntryError { Text(layoutEntryError).font(.caption).foregroundStyle(.secondary) }
+            if !layoutEditor.isEditing, let issue = layoutRecoveryError ?? layoutStore.loadError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(issue).font(.caption).foregroundStyle(.secondary)
+                    Button(L10n.localized(zh: "恢复默认布局…", en: "Restore Default Layout…")) { confirmsLayoutRecovery = true }
+                }
+            }
+            PanelDashboardGrid(
+                configuration: Binding(get: { dashboardConfiguration }, set: { if layoutEditor.isEditing { layoutEditor.draft = $0 } }),
+                selection: $layoutSelection, width: max(1, panelWidth - ExpandedPanelLayout.outerPadding * 2),
+                isEditing: layoutEditor.isEditing, summary: moduleSummary, moduleFill: moduleFill,
+                fitsContent: usesDefaultContentFit
+            ) { item, size in moduleView(item.id, size: size) }
+            if showTaskInboxShortcut, let pendingTasks, !layoutEditor.isEditing,
+               !visibleModuleIDs.contains(.currentTask), !visibleModuleIDs.contains(.recentTasks) {
+                Button { showsFallbackInbox = true } label: {
+                    Label("\(L10n.inboxShortTitle) \(pendingTasks.visibleTasks.count)", systemImage: "tray")
+                }
+                .accessibilityLabel(L10n.inboxTitle)
+                .accessibilityIdentifier("panelTaskInboxFallback")
+                .expandedPanelDebugFrame(id: "panelTaskInboxFallback")
+                .popover(isPresented: $showsFallbackInbox) {
+                    TaskInboxView(coordinator: pendingTasks, onClose: { showsFallbackInbox = false })
+                }
+            }
+        } else {
+            if enabledWidgets.isEmpty {
+                Text(L10n.panelNoWidgets)
+                    .font(.system(size: IslandTokens.Font.body))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, IslandTokens.Spacing.group)
+            } else {
+                overview
+            }
+            focusContent
+        }
+    }
+
+    private func detailPage(_ widget: Widget) -> some View {
+        widgetView(for: widget, isDetail: true)
+            .padding(ExpandedPanelLayout.cardPadding)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
+    }
+
+    // MARK: - 换页转场
+
+    /// 缩放锚在顶部：面板是从刘海往下长的，绕中心缩放会让文字先往外挤一下。
+    ///
+    /// 内容淡入淡出单独给一条短的 ease，不复用面板尺寸的弹簧：弹簧尾巴长，
+    /// 从详情退回概览时旧内容会在已经变矮的面板里拖出一条空洞。
+    private static let pageFadeIn = AnyTransition.opacity
+        .animation(.easeOut(duration: 0.16))
+    private static let pageFadeOut = AnyTransition.opacity
+        .animation(.easeOut(duration: 0.06))
+    private static let detailPageIn = AnyTransition.opacity
+        .combined(with: .scale(scale: 0.97, anchor: .top))
+        .animation(.easeOut(duration: 0.18))
+    private static let overviewPageOut = AnyTransition.opacity
+        .combined(with: .scale(scale: 0.985, anchor: .top))
+        .animation(.easeOut(duration: 0.06))
+
+    /// 换页统一入口：内容转场与面板尺寸共用同一条弹簧（reduce motion 时直接切换）。
+    private func select(_ widget: Widget?) {
+        guard widget != selectedWidget else { return }
+        guard !shouldReduceMotion else { selectedWidget = widget; return }
+        withAnimation(IslandMotion.panelSwitch.animation) { selectedWidget = widget }
+    }
+
+    /// 菜单里的 Picker 只能拿到 Binding，套一层让选择同样走转场。
+    private var selectionBinding: Binding<Widget?> {
+        Binding(get: { selectedWidget }, set: { select($0) })
+    }
+
     private var overview: some View {
         let count = ExpandedPanelLayout.columnCount(width: panelWidth, widgetCount: enabledWidgets.count)
         let mediaColumn = count == enabledWidgets.count ? enabledWidgets.firstIndex(of: .media) : nil
@@ -451,19 +494,19 @@ struct ExpandedPanelView: View {
     private func widgetView(for widget: Widget, isDetail: Bool) -> some View {
         switch widget {
         case .media:
-            MediaWidgetView(mediaManager: mediaManager, isDetail: isDetail, onShowAll: { selectedWidget = .media })
+            MediaWidgetView(mediaManager: mediaManager, isDetail: isDetail, onShowAll: { select(.media) })
         case .calendar:
             CalendarWidgetView(
                 calendarManager: calendarManager,
                 recenterTrigger: $calendarRecenterTrigger,
                 onStartFocus: onStartFocus,
                 isDetail: isDetail,
-                onShowAll: { selectedWidget = .calendar }
+                onShowAll: { select(.calendar) }
             )
         case .notes:
-            NotesWidgetView(notesManager: notesManager, isDetail: isDetail, onShowAll: { selectedWidget = .notes }, onInteractionChanged: { reportModuleInteraction(.notes, active: $0) })
+            NotesWidgetView(notesManager: notesManager, isDetail: isDetail, onShowAll: { select(.notes) }, onInteractionChanged: { reportModuleInteraction(.notes, active: $0) })
         case .tray:
-            TrayWidgetView(trayManager: trayManager, isDetail: isDetail, onShowAll: { selectedWidget = .tray })
+            TrayWidgetView(trayManager: trayManager, isDetail: isDetail, onShowAll: { select(.tray) })
         }
     }
     private func beginLayoutEditing() {
@@ -474,7 +517,7 @@ struct ExpandedPanelView: View {
         }
         guard !notesManager.isEditing || notesManager.closeEditor() else { return }
         layoutEntryError = nil
-        selectedWidget = nil
+        select(nil)
         layoutEditor.begin(from: layoutStore)
         if layoutEditor.isEditing {
             if !layoutEditor.draft.visibleItems.contains(where: { $0.id == layoutSelection }) {
@@ -520,17 +563,17 @@ struct ExpandedPanelView: View {
     private func moduleView(_ id: PanelModuleID, size: CGSize) -> some View {
         switch id {
         case .media:
-            MediaWidgetView(mediaManager: mediaManager, isDetail: false, onShowAll: { selectedWidget = .media }, availableHeight: size.height)
+            MediaWidgetView(mediaManager: mediaManager, isDetail: false, onShowAll: { select(.media) }, availableHeight: size.height)
                 .environment(\.mediaAmbientAnimationEnabled,
                     ambientAnimationEnabled && visibleModuleIDs.contains(.media) && !layoutEditor.isEditing)
         case .calendar:
             CalendarWidgetView(calendarManager: calendarManager, recenterTrigger: $calendarRecenterTrigger,
-                onStartFocus: onStartFocus, isDetail: false, onShowAll: { selectedWidget = .calendar }, availableHeight: size.height)
+                onStartFocus: onStartFocus, isDetail: false, onShowAll: { select(.calendar) }, availableHeight: size.height)
         case .notes:
-            NotesWidgetView(notesManager: notesManager, isDetail: false, onShowAll: { selectedWidget = .notes },
+            NotesWidgetView(notesManager: notesManager, isDetail: false, onShowAll: { select(.notes) },
                 onInteractionChanged: { reportModuleInteraction(.notes, active: $0) }, availableHeight: size.height)
         case .tray:
-            TrayWidgetView(trayManager: trayManager, isDetail: false, onShowAll: { selectedWidget = .tray }, availableHeight: size.height)
+            TrayWidgetView(trayManager: trayManager, isDetail: false, onShowAll: { select(.tray) }, availableHeight: size.height)
         case .currentTask, .recentTasks:
             FocusSessionView(manager: focusSessionManager, historyDisplayLimit: historyDisplayLimit,
                 trayFileCount: trayManager.files.count, onCreateLinkedNote: onCreateLinkedNote,

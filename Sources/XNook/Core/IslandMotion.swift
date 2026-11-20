@@ -79,6 +79,14 @@ enum IslandMotion {
         preset(for: tier(forScreenWidth: width))
     }
 
+    // MARK: - 面板内部换页
+
+    /// 概览 ↔ 单个模块（媒体 / 日历 / 笔记 / 文件）。
+    ///
+    /// 和展开弹簧刻意分开：展开是「从刘海长出来」，需要一次回弹；换页只是同一块面板换内容，
+    /// 形变距离通常只有一两百点，回弹会显得晃。这里取高 damping，只保留极轻的收尾。
+    static let panelSwitch = Spring(response: 0.28, dampingFraction: 0.84)
+
     // MARK: - 时长推算
 
     /// 弹簧从开始到视觉稳定所需的近似时长。

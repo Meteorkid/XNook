@@ -45,6 +45,15 @@ struct NotchContentView: View {
     }
     @State private var expandedMeasurement: ExpandedPanelMeasurement?
     @State private var expandedResizeScheduled = false
+    /// 最近一次被接受的实测内容高度。
+    ///
+    /// 换页瞬间旧的测量会因 `selectedWidget` 不匹配被丢弃，`height(...)` 于是回退到默认 400pt，
+    /// 面板会先跳 400 再跳到真实高度（两段式）。用最后一次真实高度兜住这一帧。
+    @State private var lastMeasuredPanelHeight: CGFloat?
+    /// 换页缩小面板时，窗口需要临时保留的旧尺寸。
+    /// 窗口若立刻收缩，正在做动画的形状会被裁掉一截；动画结束后再缩窗口（透明区域看不出变化）。
+    @State private var panelResizeHold: CGSize?
+    @State private var panelResizeHoldToken = 0
     @State private var availablePanelSize = CGSize(width: 1600, height: 900)
     @State private var isPanelInteractionActive = false
     @State private var hoverTimer: Timer?
@@ -262,7 +271,9 @@ struct NotchContentView: View {
             $0.matches(width: effectivePanelWidth, selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature) ? $0.height : nil
         }
         return ExpandedPanelLayout.height(
-            measuredContentHeight: measurement,
+            // 换页那一帧新高度还没测出来，沿用上一次的真实高度而不是默认 400pt，
+            // 这样尺寸变化只有一段（旧高度 → 新高度），不会先跳到 400 再落回来。
+            measuredContentHeight: measurement ?? lastMeasuredPanelHeight,
             maximumHeight: ExpandedPanelLayout.maximumHeight(
                 availableHeight: availablePanelSize.height,
                 automaticallyFit: PanelHeightMode.resolved(storedValue: panelHeightMode,
@@ -479,12 +490,19 @@ struct NotchContentView: View {
         .onChange(of: isReadyForLinkedPreview, initial: true) { _, _ in
             updateLinkedPreviewReadiness()
         }
-        .onChange(of: expandedHeight) { _, newHeight in
+        .onChange(of: expandedHeight) { oldHeight, newHeight in
             guard isExpanded else { return }
+            if newHeight < oldHeight - 0.5 {
+                // 换页后内容变矮：窗口先留在旧尺寸，否则形状动画会被窗口裁掉一截。
+                holdPanelWindowSizeForShrink(from: CGSize(width: effectivePanelWidth, height: oldHeight))
+            }
             cachedExpandedShapeHeight = max(collapsedShapeHeight + 1, newHeight)
             scheduleExpandedWindowResize()
         }
-        .onChange(of: effectivePanelWidth) { _, _ in
+        .onChange(of: effectivePanelWidth) { oldWidth, newWidth in
+            if newWidth < oldWidth - 0.5 {
+                holdPanelWindowSizeForShrink(from: CGSize(width: oldWidth, height: naturalExpandedHeight))
+            }
             reconcileExpandedMeasurement()
             scheduleExpandedWindowResize()
         }
@@ -892,8 +910,39 @@ struct NotchContentView: View {
 
     private func targetSize(for state: IslandState) -> (width: CGFloat, height: CGFloat) {
         state == .expanded
-            ? (effectivePanelWidth, naturalExpandedHeight)
+            ? panelWindowSize
             : (pillWidth, collapsedTotalHeight)
+    }
+
+    /// 传给窗口的面板尺寸。换页缩小动画期间取「当前尺寸 ∪ 保留尺寸」的较大值，
+    /// 让形状有地方做完动画，动画收尾后再真正收缩窗口。
+    private var panelWindowSize: (width: CGFloat, height: CGFloat) {
+        var width = effectivePanelWidth
+        var height = naturalExpandedHeight
+        if let hold = panelResizeHold {
+            width = max(width, hold.width)
+            height = max(height, hold.height)
+        }
+        return (width, height)
+    }
+
+    /// 面板即将缩小：先把窗口保留在旧尺寸，动画结束后再缩。
+    private func holdPanelWindowSizeForShrink(from size: CGSize) {
+        guard !shouldReduceMotion, isExpanded else { return }
+        // 非有限值一律当 0：一旦把 NaN 存进来，max() 会一直返回 NaN，窗口就再也缩不回去。
+        let incoming = CGSize(width: size.width.isFinite ? size.width : 0,
+                              height: size.height.isFinite ? size.height : 0)
+        let current = panelResizeHold ?? .zero
+        panelResizeHold = CGSize(width: max(current.width, incoming.width),
+                                 height: max(current.height, incoming.height))
+        panelResizeHoldToken += 1
+        let token = panelResizeHoldToken
+        let delay = IslandMotion.settleDuration(for: IslandMotion.panelSwitch) + 0.06
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
+            guard token == panelResizeHoldToken else { return }
+            panelResizeHold = nil
+            if isExpanded { scheduleExpandedWindowResize() }
+        }
     }
 
     private func resizeCollapsedWindow() {
@@ -924,7 +973,8 @@ struct NotchContentView: View {
                 handoffResizePending = true
                 return
             }
-            onSizeChange?(effectivePanelWidth, naturalExpandedHeight)
+            let size = panelWindowSize
+            onSizeChange?(size.width, size.height)
         }
     }
 
@@ -1262,6 +1312,12 @@ struct NotchContentView: View {
             || RunLoop.current.currentMode == .eventTracking
     }
 
+    /// 换页统一入口：让面板尺寸与内容走同一条弹簧（reduce motion 时直接切换）。
+    private func select(_ widget: WidgetType?) {        guard widget != selectedWidget else { return }
+        guard !shouldReduceMotion else { selectedWidget = widget; return }
+        withAnimation(IslandMotion.panelSwitch.animation) { selectedWidget = widget }
+    }
+
     private func installKeyboardHandler(on window: NotchWindow) {
         window.keyEquivalentHandler = { event in
             guard isExpanded, let action = PanelKeyboardAction.resolve(
@@ -1271,13 +1327,13 @@ struct NotchContentView: View {
             guard !isEditingPanelLayout else { return false }
             switch action {
             case .overview:
-                selectedWidget = nil
+                select(nil)
             case .tool(let index):
                 let widget = WidgetType.allCases[index]
                 guard enabledWidgets.contains(widget) else { return false }
-                selectedWidget = widget
+                select(widget)
             case .newNote:
-                selectedWidget = .notes
+                select(.notes)
                 notesManager.createNote()
             case .saveNote:
                 guard selectedWidget == .notes, notesManager.isEditing else { return false }
@@ -1348,6 +1404,27 @@ struct NotchContentView: View {
             enabledWidgets: enabledWidgets, layoutSignature: layoutSignature)
     }
 
+    /// 接受新的内容测量。
+    ///
+    /// 展开过程中尺寸由 `expand(to:)` 决定，这里不叠加动画；已经稳定展开时用换页弹簧过渡，
+    /// 让「概览 → 媒体详情」这类高度变化是平滑的，而不是跳一下。
+    private func applyPanelMeasurement(_ measurement: ExpandedPanelMeasurement?) {
+        guard let accepted = Self.acceptedPanelMeasurement(measurement,
+            width: effectivePanelWidth, selectedWidget: selectedWidget,
+            enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature),
+            accepted.differs(from: expandedMeasurement) else { return }
+        if accepted.height.isFinite, accepted.height > 0 {
+            lastMeasuredPanelHeight = accepted.height
+        }
+        guard isExpanded, !expandPending, !collapseAnimating, !shouldReduceMotion else {
+            expandedMeasurement = accepted
+            return
+        }
+        withAnimation(IslandMotion.panelSwitch.animation) {
+            expandedMeasurement = accepted
+        }
+    }
+
     private func reconcileExpandedMeasurement() {
         Self.reconcilePanelMeasurement(&expandedMeasurement, width: effectivePanelWidth,
             selectedWidget: selectedWidget, enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature)
@@ -1386,13 +1463,7 @@ struct NotchContentView: View {
             },
             onSettings: openSettingsWindow,
             onClose: { collapse(force: true) },
-            onMeasurement: { measurement in
-                guard let accepted = Self.acceptedPanelMeasurement(measurement,
-                    width: effectivePanelWidth, selectedWidget: selectedWidget,
-                    enabledWidgets: enabledWidgets, layoutSignature: panelMeasurementSignature),
-                    accepted.differs(from: expandedMeasurement) else { return }
-                expandedMeasurement = accepted
-            },
+            onMeasurement: { applyPanelMeasurement($0) },
             deadZone: panelDeadZone,
             layoutStore: panelLayoutStore,
             editRequest: layoutEditRequest,

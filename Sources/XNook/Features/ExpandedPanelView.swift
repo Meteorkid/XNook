@@ -55,7 +55,11 @@ struct ExpandedPanelView: View {
     @State private var editorToolbarHeight: CGFloat = 0
     @State private var showsLayoutLibrary = false
     @State private var layoutProfiles: PanelLayoutProfileStore?
-    /// 两端卡片坐标系（面板内容区左上角），保证两个页面量出来的矩形可以直接比较。
+    /// 媒体卡片两端共用的坐标系：面板内容区左上角。
+    ///
+    /// 不能用 `.global`：它是**窗口内坐标**，而窗口换页时会居中缩放（800 ⇄ 460），
+    /// 同一个点在两种宽度下量到的 `minX` 差 170pt，直接当动画起点会让卡片横跳。
+    /// 内容区坐标系跟着内容走，窗口怎么缩放都不影响两端的相对位置。
     static let cardSpace = "panelMediaCardSpace"
 
     private var dashboardConfiguration: PanelLayoutConfiguration {
@@ -149,7 +153,13 @@ struct ExpandedPanelView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .coordinateSpace(name: Self.cardSpace)
                     .onPreferenceChange(MediaCardFrameKey.self) { frames in
-                        cardMorph.frames.merge(frames) { _, new in new }
+                        // 只收**当前页**那一端的测量。换页那一拍离场的卡片还会报一次
+                        // 被压扁的矩形（详情页退场时实测 444x124），收进来就会污染下一段
+                        // 转场的起点。
+                        let expected: Bool? = selectedWidget == nil ? false
+                            : (selectedWidget == .media ? true : nil)
+                        guard let expected, let rect = frames[expected], rect.width > 1, rect.height > 1 else { return }
+                        cardMorph.frames[expected] = rect
                     }
                 }
                 .padding(ExpandedPanelLayout.outerPadding)
@@ -454,8 +464,10 @@ struct ExpandedPanelView: View {
         return Group {
             if widget == .media {
                 card
-                    .modifier(MediaCardFrameReporter(isDetail: true))
+                    // 上报器必须在 `CardMorphIn` **外面**：`scaleEffect` 会缩放子树，
+                    // 挂在里面量到的是渲染后的矩形，缓存下来就成了下一段动画的错误起点。
                     .modifier(CardMorphIn(source: cardMorph.source(forDetail: true)))
+                    .modifier(MediaCardFrameReporter(isDetail: true))
             } else {
                 card
             }
@@ -585,9 +597,9 @@ struct ExpandedPanelView: View {
                     ambientAnimationEnabled && visibleModuleIDs.contains(.media) && !layoutEditor.isEditing)
                 // 概览端的矩形上报 + 反向变形（从详情卡片缩回网格位置）。
                 // 只在非编辑态挂，避免布局编辑器里的预览卡跟着动。
-                .modifier(MediaCardFrameReporter(isDetail: false, enabled: !layoutEditor.isEditing))
                 .modifier(CardMorphIn(source: layoutEditor.isEditing ? nil
                     : cardMorph.source(forDetail: false)))
+                .modifier(MediaCardFrameReporter(isDetail: false, enabled: !layoutEditor.isEditing))
         case .calendar:
             CalendarWidgetView(calendarManager: calendarManager, recenterTrigger: $calendarRecenterTrigger,
                 onStartFocus: onStartFocus, isDetail: false, onShowAll: { select(.calendar) }, availableHeight: size.height)
@@ -610,7 +622,7 @@ struct ExpandedPanelView: View {
 
 }
 
-/// 媒体卡片两端的矩形上报。两端都量到「面板内容区」坐标系里，换页时才能互相换算。
+/// 媒体卡片两端的矩形上报。两端都量同一个窗口坐标系，换页时才能互相换算。
 private struct MediaCardFrameReporter: ViewModifier {
     let isDetail: Bool
     var enabled = true
@@ -644,71 +656,91 @@ private struct MediaCardFrameKey: PreferenceKey {
 /// 只有原点是瞬移的。而且它需要换页过程带 `withAnimation`，那会把面板宽度也做成弹簧，
 /// 新页面的测量会被 `ExpandedPanelMeasurement.matches` 的 0.5pt 门限挡掉（1.4.2 的闪烁根因）。
 ///
-/// 这里改成完全显式：源矩形由 `select` 记录，目标矩形是本视图自己的布局 frame（`scaleEffect`
-/// 不参与布局，所以量到的一定是终态），插值只落在渲染层。
+/// 这里改成完全显式：源矩形由换页入口记录，目标就是卡片自己的**布局矩形**，
+/// 插值只落在渲染层（`scaleEffect` + `offset` 不参与布局）。
+///
+/// 三个必须踩过的坑：
+///   1. 偏移要按**实时**布局矩形算，不能冻结一份。窗口比内容矮的那一瞬整页会被顶上去
+///      47pt，冻结基线的话布局一落位，卡片就被"布局位移 + 旧偏移"顶出去。
+///   2. 两端必须量在**面板内容区**坐标系（`cardSpace`）里，不能用 `.global`：后者是窗口内
+///      坐标，窗口换页时居中缩放（800 ⇄ 460），同一段矩形在两种宽度下差 170pt，
+///      反向转场会从错的位置起飞。
+///   3. 量布局矩形必须挂在变换**外面**（`.background` 在 `.scaleEffect` 之后），
+///      挂在里面量到的是缩放/位移后的矩形，反过来改写缩放比会形成反馈。
 private struct CardMorphIn: ViewModifier {
     let source: CGRect?
+    var space: String = ExpandedPanelView.cardSpace
 
-    @State private var target: CGRect?
+    /// 卡片的布局矩形：不做转场时它会待的地方。
+    @State private var layout: CGRect = .zero
     @State private var progress: CGFloat = 0
+    @State private var started = false
+    /// 起跳闸门令牌：布局每变一次就换号，旧的那次起跳作废。
+    @State private var gate = 0
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     func body(content: Content) -> some View {
-        content
-            .background {
-                GeometryReader { geometry in
-                    Color.clear
-                        .onAppear { measure(geometry) }
-                        .onChange(of: geometry.size) { _, _ in measure(geometry) }
-                }
-            }
-            .scaleEffect(x: scaleX, y: scaleY, anchor: .topLeading)
-            .offset(x: offsetX, y: offsetY)
-            // 目标矩形要等这一帧布局完才量得到；在这之前按终态尺寸画出来会闪一下，
-            // 所以先藏着。通常 `onAppear` 就已经量好，最多藏一帧。
-            .opacity(source != nil && target == nil ? 0 : 1)
-    }
-
-    private var scaleX: CGFloat { scale(for: target?.width) }
-    private var scaleY: CGFloat { scale(for: target?.height) }
-
-    private func scale(for length: CGFloat?) -> CGFloat {
-        guard let source, let length, length > 1 else { return 1 }
-        let start = (source.width > 0 ? source.width : length) / length
-        return start + (1 - start) * progress
-    }
-
-    private var offsetX: CGFloat {
-        guard let source, let target else { return 0 }
-        return (source.minX - target.minX) * (1 - progress)
-    }
-
-    private var offsetY: CGFloat {
-        guard let source, let target else { return 0 }
-        return (source.minY - target.minY) * (1 - progress)
-    }
-
-    private func measure(_ geometry: GeometryProxy) {
-        let frame = geometry.frame(in: .named(ExpandedPanelView.cardSpace))
-        guard frame.width > 1, frame.height > 1 else { return }
-        guard target == nil else {
-            // `GeometryReader` 在被 `scaleEffect` 缩放的子树里，量到的是**渲染后**的矩形，
-            // 所以只在动画结束（progress == 1，变换为恒等）时刷新，否则会拿缩放中的尺寸
-            // 反过来改写缩放比例，形成反馈。
-            if progress == 1,
-               abs(frame.width - (target?.width ?? 0)) > 0.5 || abs(frame.height - (target?.height ?? 0)) > 0.5 {
-                target = frame
-            }
-            return
+        // 变换放在**内层**：`scaleEffect`/`offset` 只作用在 ZStack 的孩子身上，外层矩形
+        // 不受影响。串在一起的话量到的是缩放后的矩形，缓存下来就是下一段转场的错误起点。
+        ZStack(alignment: .topLeading) {
+            content
+                .scaleEffect(x: scaleX, y: scaleY, anchor: .topLeading)
+                .offset(x: offsetX, y: offsetY)
         }
-        target = frame
+        .background {
+            GeometryReader { geometry in
+                let rect = geometry.frame(in: .named(space))
+                Color.clear
+                    .onAppear { update(rect) }
+                    .onChange(of: rect) { _, newValue in update(newValue) }
+            }
+        }
+        // 源矩形出现之前按终态画会闪一帧，先藏着。通常同一帧就量好了。
+        .opacity(source != nil && layout.width <= 1 ? 0 : 1)
+        .onChange(of: source) { _, newValue in
+            guard newValue == nil else { return }
+            // 两段转场之间复位，下一次才开始重新起跳。
+            started = false
+            progress = 0
+        }
+    }
+
+    private var scaleX: CGFloat { scale(from: source?.width, to: layout.width) }
+    private var scaleY: CGFloat { scale(from: source?.height, to: layout.height) }
+
+    /// 起止尺寸之比按**同一条轴**换算：宽度比给 x、高度比给 y，不能混用（混用会把卡片画高）。
+    private func scale(from start: CGFloat?, to end: CGFloat) -> CGFloat {
+        guard let start, start > 0, end > 1 else { return 1 }
+        let ratio = start / end
+        return ratio + (1 - ratio) * progress
+    }
+
+    private var offsetX: CGFloat { offset(from: source?.minX, to: layout.minX) }
+    private var offsetY: CGFloat { offset(from: source?.minY, to: layout.minY) }
+
+    /// `progress == 0` 时把它顶到源矩形原点，`1` 时归零（卡片回到自己的布局位置）。
+    private func offset(from start: CGFloat?, to end: CGFloat) -> CGFloat {
+        guard let start else { return 0 }
+        return (start - end) * (1 - progress)
+    }
+
+    private func update(_ rect: CGRect) {
+        guard rect.width > 1, rect.height > 1, rect != layout else { return }
+        layout = rect
         guard source != nil, !systemReduceMotion else {
             progress = 1
             return
         }
-        progress = 0
-        // 下一拍再启动：让首帧先画在源矩形上。
+        guard !started else { return }
+        // 换页那一两帧布局还在动（窗口比内容矮，整页先被顶上去 47pt 再落回），
+        // 这时量到的原点不是终点。等本轮 runloop 里布局不再变再起跳：
+        // 偏移是拿**实时** `layout` 抵消的，等多久卡片都稳稳贴在源矩形上。
+        gate += 1
+        let token = gate
         DispatchQueue.main.async {
+            guard token == gate, !started, source != nil else { return }
+            started = true
+            progress = 0
             withAnimation(IslandMotion.panelSwitch.animation) { progress = 1 }
         }
     }

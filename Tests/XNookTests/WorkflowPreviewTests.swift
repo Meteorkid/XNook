@@ -47,6 +47,7 @@ final class WorkflowPreviewTests: XCTestCase {
         var measuredHeights: [CGFloat] = []
         let panel = ExpandedPanelView(
             selectedWidget: .constant(selected),
+            cardMorph: PanelCardMorphStore(),
             calendarRecenterTrigger: .constant(0),
             enabledWidgets: enabledWidgets,
             panelWidth: size.width,

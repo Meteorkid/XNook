@@ -778,7 +778,9 @@ private struct WorkflowPanelPreview: View {
     let deadZone: NotchDeadZone
 
     var body: some View {
-        ExpandedPanelView(selectedWidget: $model.selected, calendarRecenterTrigger: .constant(0),
+        ExpandedPanelView(selectedWidget: $model.selected,
+            cardMorph: PanelCardMorphStore(),
+            calendarRecenterTrigger: .constant(0),
             enabledWidgets: model.widgets, panelWidth: model.width, mediaManager: fixture.media,
             calendarManager: fixture.calendar, notesManager: fixture.notes, trayManager: fixture.tray,
             focusSessionManager: fixture.focus, showHistory: true, historyDisplayLimit: historyLimit,

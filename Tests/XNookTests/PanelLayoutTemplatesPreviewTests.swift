@@ -226,7 +226,9 @@ private struct TemplatePreviewSurface: View {
     let record: TemplatePreviewRecord
 
     var body: some View {
-        ExpandedPanelView(selectedWidget: .constant(nil), calendarRecenterTrigger: .constant(0),
+        ExpandedPanelView(selectedWidget: .constant(nil),
+            cardMorph: PanelCardMorphStore(),
+            calendarRecenterTrigger: .constant(0),
             enabledWidgets: store.configuration.visibleItems.compactMap {
                 NotchContentView.WidgetType(rawValue: $0.id.rawValue)
             }, panelWidth: model.width, mediaManager: fixture.media, calendarManager: fixture.calendar,

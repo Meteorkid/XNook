@@ -11,6 +11,8 @@ struct ExpandedPanelView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.mediaAmbientAnimationEnabled) private var ambientAnimationEnabled
     @Binding var selectedWidget: Widget?
+    /// 媒体卡片形变状态，由外壳 `NotchContentView` 持有（换页前要先写源矩形）。
+    @ObservedObject var cardMorph: PanelCardMorphStore
     @Binding var calendarRecenterTrigger: Int
     let enabledWidgets: [Widget]
     let panelWidth: CGFloat
@@ -53,6 +55,8 @@ struct ExpandedPanelView: View {
     @State private var editorToolbarHeight: CGFloat = 0
     @State private var showsLayoutLibrary = false
     @State private var layoutProfiles: PanelLayoutProfileStore?
+    /// 两端卡片坐标系（面板内容区左上角），保证两个页面量出来的矩形可以直接比较。
+    static let cardSpace = "panelMediaCardSpace"
 
     private var dashboardConfiguration: PanelLayoutConfiguration {
         layoutEditor.isEditing ? layoutEditor.draft : layoutStore?.configuration
@@ -126,11 +130,15 @@ struct ExpandedPanelView: View {
                     }
                     // 两页叠在同一位置，且**硬切**，不做交叉淡入。
                     //
-                    // 试过三种写法，只有硬切是对的：
-                    // 1. 作为 VStack 兄弟节点 → 转场期间两页同时占位，高度先涨到两页之和再回落。
-                    // 2. 叠放 + 交叉淡入 → 面板宽度在换页瞬间就落到终值，而退场中的旧页仍按旧宽度
-                    //    布局，于是那几帧能看到「三列概览被裁掉右半截」叠着半透明的新页面。
-                    // 3. 叠放 + 硬切 → 新页在正确的宽度下一次性铺开，剩下的动效交给面板尺寸。
+                    // 1.1.4.2 试过三种写法，只有硬切能保证新页一次铺开：
+                    //    a. 作为 VStack 兄弟节点 → 转场期间两页同时占位，高度先涨到两页之和再回落；
+                    //    b. 叠放 + 交叉淡入 → 退场中的旧页仍按旧宽度布局，被窄容器裁掉右半截；
+                    //    c. 叠放 + 硬切 → 新页在正确的宽度下一次性铺开。
+                    // 1.4.4 给媒体卡片加英雄转场时又踩了一次：`matchedGeometryEffect` 在这个
+                    // 自定义 Layout（`PanelDashboardLayout` 直接 place 到算好的 frame）里不插值，
+                    // 卡片是一帧到位的；而 `.animation(value:)` 还会给页面切换套上默认的
+                    // 透明度转场，于是详情页半透明地叠在概览上，出现重影。
+                    // 现在改成显式几何：见 `CardMorphIn`，由它把卡片从源矩形缩放到自身矩形。
                     ZStack(alignment: .topLeading) {
                         if selectedWidget == nil {
                             overviewPage
@@ -139,6 +147,10 @@ struct ExpandedPanelView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .coordinateSpace(name: Self.cardSpace)
+                    .onPreferenceChange(MediaCardFrameKey.self) { frames in
+                        cardMorph.frames.merge(frames) { _, new in new }
+                    }
                 }
                 .padding(ExpandedPanelLayout.outerPadding)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -435,24 +447,30 @@ struct ExpandedPanelView: View {
     }
 
     private func detailPage(_ widget: Widget) -> some View {
-        widgetView(for: widget, isDetail: true)
+        let card = widgetView(for: widget, isDetail: true)
             .padding(ExpandedPanelLayout.cardPadding)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background(moduleFill, in: RoundedRectangle(cornerRadius: IslandTokens.Radius.sheet))
+        return Group {
+            if widget == .media {
+                card
+                    .modifier(MediaCardFrameReporter(isDetail: true))
+                    .modifier(CardMorphIn(source: cardMorph.source(forDetail: true)))
+            } else {
+                card
+            }
+        }
     }
 
     // MARK: - 换页
 
-    /// 换页统一入口。
+    /// 换页时给卡片英雄转场准备源矩形。
     ///
-    /// 这里**不能**用 `withAnimation` 包住 `selectedWidget`：宽度一旦跟着弹簧走，
-    /// 新页面每一帧测出来的宽度都在变，而 `ExpandedPanelMeasurement.matches` 要求
-    /// 宽度误差 < 0.5pt，于是那一帧明明已经量到的新高度（317）会被一路丢弃，
-    /// 面板要等宽度动画收敛后才肯长高——先看到被裁掉的内容，再看到它跳一下。
-    ///
-    /// 宽度直接落到终值后，测量当帧生效，高度由 `applyPanelMeasurement` 用换页弹簧补上。
+    /// 必须**先**写形变、**再**改 `selectedWidget`，两处在同一个 runloop 里 SwiftUI 会合并成
+    /// 一次求值，详情卡片首帧就带着正确的 source；晚一拍补的话首帧已经是终态，动画整段不会出现。
     private func select(_ widget: Widget?) {
         guard widget != selectedWidget else { return }
+        cardMorph.beginTransition(toDetail: widget == .media ? true : (widget == nil ? false : nil))
         selectedWidget = widget
     }
 
@@ -565,6 +583,11 @@ struct ExpandedPanelView: View {
             MediaWidgetView(mediaManager: mediaManager, isDetail: false, onShowAll: { select(.media) }, availableHeight: size.height)
                 .environment(\.mediaAmbientAnimationEnabled,
                     ambientAnimationEnabled && visibleModuleIDs.contains(.media) && !layoutEditor.isEditing)
+                // 概览端的矩形上报 + 反向变形（从详情卡片缩回网格位置）。
+                // 只在非编辑态挂，避免布局编辑器里的预览卡跟着动。
+                .modifier(MediaCardFrameReporter(isDetail: false, enabled: !layoutEditor.isEditing))
+                .modifier(CardMorphIn(source: layoutEditor.isEditing ? nil
+                    : cardMorph.source(forDetail: false)))
         case .calendar:
             CalendarWidgetView(calendarManager: calendarManager, recenterTrigger: $calendarRecenterTrigger,
                 onStartFocus: onStartFocus, isDetail: false, onShowAll: { select(.calendar) }, availableHeight: size.height)
@@ -585,6 +608,110 @@ struct ExpandedPanelView: View {
         }
     }
 
+}
+
+/// 媒体卡片两端的矩形上报。两端都量到「面板内容区」坐标系里，换页时才能互相换算。
+private struct MediaCardFrameReporter: ViewModifier {
+    let isDetail: Bool
+    var enabled = true
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: MediaCardFrameKey.self,
+                                           value: [isDetail: geometry.frame(in: .named(ExpandedPanelView.cardSpace))])
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private struct MediaCardFrameKey: PreferenceKey {
+    static var defaultValue: [Bool: CGRect] = [:]
+    static func reduce(value: inout [Bool: CGRect], nextValue: () -> [Bool: CGRect]) {
+        value.merge(nextValue()) { _, next in next }
+    }
+}
+
+/// 换页时的卡片英雄转场：把卡片**从源矩形缩放到自身矩形**。
+///
+/// 为什么不用 `matchedGeometryEffect`：这里的网格是自定义 `Layout`（`PanelDashboardLayout`
+/// 直接 `place` 到算好的 frame），几何效果不会插值；实测详情卡片在换页那一帧就是终态尺寸，
+/// 只有原点是瞬移的。而且它需要换页过程带 `withAnimation`，那会把面板宽度也做成弹簧，
+/// 新页面的测量会被 `ExpandedPanelMeasurement.matches` 的 0.5pt 门限挡掉（1.4.2 的闪烁根因）。
+///
+/// 这里改成完全显式：源矩形由 `select` 记录，目标矩形是本视图自己的布局 frame（`scaleEffect`
+/// 不参与布局，所以量到的一定是终态），插值只落在渲染层。
+private struct CardMorphIn: ViewModifier {
+    let source: CGRect?
+
+    @State private var target: CGRect?
+    @State private var progress: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { geometry in
+                    Color.clear
+                        .onAppear { measure(geometry) }
+                        .onChange(of: geometry.size) { _, _ in measure(geometry) }
+                }
+            }
+            .scaleEffect(x: scaleX, y: scaleY, anchor: .topLeading)
+            .offset(x: offsetX, y: offsetY)
+            // 目标矩形要等这一帧布局完才量得到；在这之前按终态尺寸画出来会闪一下，
+            // 所以先藏着。通常 `onAppear` 就已经量好，最多藏一帧。
+            .opacity(source != nil && target == nil ? 0 : 1)
+    }
+
+    private var scaleX: CGFloat { scale(for: target?.width) }
+    private var scaleY: CGFloat { scale(for: target?.height) }
+
+    private func scale(for length: CGFloat?) -> CGFloat {
+        guard let source, let length, length > 1 else { return 1 }
+        let start = (source.width > 0 ? source.width : length) / length
+        return start + (1 - start) * progress
+    }
+
+    private var offsetX: CGFloat {
+        guard let source, let target else { return 0 }
+        return (source.minX - target.minX) * (1 - progress)
+    }
+
+    private var offsetY: CGFloat {
+        guard let source, let target else { return 0 }
+        return (source.minY - target.minY) * (1 - progress)
+    }
+
+    private func measure(_ geometry: GeometryProxy) {
+        let frame = geometry.frame(in: .named(ExpandedPanelView.cardSpace))
+        guard frame.width > 1, frame.height > 1 else { return }
+        guard target == nil else {
+            // `GeometryReader` 在被 `scaleEffect` 缩放的子树里，量到的是**渲染后**的矩形，
+            // 所以只在动画结束（progress == 1，变换为恒等）时刷新，否则会拿缩放中的尺寸
+            // 反过来改写缩放比例，形成反馈。
+            if progress == 1,
+               abs(frame.width - (target?.width ?? 0)) > 0.5 || abs(frame.height - (target?.height ?? 0)) > 0.5 {
+                target = frame
+            }
+            return
+        }
+        target = frame
+        guard source != nil, !systemReduceMotion else {
+            progress = 1
+            return
+        }
+        progress = 0
+        // 下一拍再启动：让首帧先画在源矩形上。
+        DispatchQueue.main.async {
+            withAnimation(IslandMotion.panelSwitch.animation) { progress = 1 }
+        }
+    }
 }
 
 struct ExpandedPanelDebugGeometryKey: PreferenceKey {
@@ -707,5 +834,44 @@ struct PanelWidgetGrid: Layout {
             heights[index / count] = max(heights[index / count], height.isFinite ? max(0, height) : 0)
         }
         return heights
+    }
+}
+
+/// 媒体卡片在「概览网格」与「详情页」两端的矩形，以及本次换页的形变起点。
+///
+/// 为什么要有这个共享对象：换页的入口有两个（面板内部的 `select`、外壳
+/// `NotchContentView` 直接改绑定）。两端矩形的测量结果住在面板里，而外壳改绑定的时候
+/// 面板还没机会插入一句「记下源矩形」。把状态提到外面后，外壳可以先 `beginTransition`
+/// 再改 `selectedWidget`——同一个 runloop 内 SwiftUI 合并成一次求值，新页面首帧就带着
+/// 正确的 source。晚一拍再补的话首帧已经画成终态，整段动画都不会出现。
+@MainActor
+final class PanelCardMorphStore: ObservableObject {
+    struct Morph: Equatable {
+        let source: CGRect
+        let toDetail: Bool
+    }
+
+    /// key 用 `isDetail` 区分：false 是概览网格里的卡片，true 是详情页里的卡片。
+    @Published var frames: [Bool: CGRect] = [:]
+    @Published var morph: Morph?
+
+    /// 换页前调用。`toDetail` 为 nil 表示这次不是媒体卡片的进出（例如切到日历）。
+    func beginTransition(toDetail: Bool?) {
+        switch toDetail {
+        case .some(true):
+            morph = frames[false].map { Morph(source: $0, toDetail: true) }
+        case .some(false):
+            morph = frames[true].map { Morph(source: $0, toDetail: false) }
+        case .none:
+            morph = nil
+        }
+        // 弹簧收敛后清掉，避免之后的布局变化把卡片重新拉回源矩形。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in self?.morph = nil }
+    }
+
+    /// 该端卡片这次是否要做入场形变。
+    func source(forDetail isDetail: Bool) -> CGRect? {
+        guard let morph, morph.toDetail == isDetail else { return nil }
+        return morph.source
     }
 }

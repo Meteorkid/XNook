@@ -175,7 +175,9 @@ private struct InboxShortcutPreviewSurface: View {
     let record: InboxShortcutPreviewRecord
 
     var body: some View {
-        ExpandedPanelView(selectedWidget: .constant(nil), calendarRecenterTrigger: .constant(0),
+        ExpandedPanelView(selectedWidget: .constant(nil),
+            cardMorph: PanelCardMorphStore(),
+            calendarRecenterTrigger: .constant(0),
             enabledWidgets: [.notes], panelWidth: model.width, mediaManager: fixture.media,
             calendarManager: fixture.calendar, notesManager: fixture.notes, trayManager: fixture.tray,
             focusSessionManager: fixture.focus, showHistory: true, historyDisplayLimit: 5,

@@ -375,7 +375,9 @@ private struct DefaultContentFitSurface: View {
     let scheme: ColorScheme
 
     var body: some View {
-        ExpandedPanelView(selectedWidget: $model.selected, calendarRecenterTrigger: $model.recenter,
+        ExpandedPanelView(selectedWidget: $model.selected,
+            cardMorph: PanelCardMorphStore(),
+            calendarRecenterTrigger: $model.recenter,
             enabledWidgets: store.configuration.visibleItems.compactMap { NotchContentView.WidgetType(rawValue: $0.id.rawValue) },
             panelWidth: model.width, mediaManager: fixture.media, calendarManager: model.calendarOverride ?? fixture.calendar,
             notesManager: fixture.notes, trayManager: fixture.tray, focusSessionManager: fixture.focus,

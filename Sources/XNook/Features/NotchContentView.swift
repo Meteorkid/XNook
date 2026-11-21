@@ -30,6 +30,8 @@ struct NotchContentView: View {
     @State private var state: IslandState = .collapsed
     @State private var showContent = false
     @State private var cachedExpandedShapeHeight: CGFloat = 220
+    /// 媒体卡片换页形变（两端矩形 + 本次起点），面板与外壳共用。
+    @StateObject private var cardMorph = PanelCardMorphStore()
     @State private var selectedWidget: WidgetType?
     @State private var panelLayoutStore = PanelLayoutStore()
     @State private var isEditingPanelLayout = false
@@ -1323,6 +1325,8 @@ struct NotchContentView: View {
     /// 宽度收敛后才长高（中间那一帧内容是被裁的）。高度仍由测量走换页弹簧。
     private func select(_ widget: WidgetType?) {
         guard widget != selectedWidget else { return }
+        // 先记形变起点、再改选中项：同一个 runloop 里合并成一次求值，新页面首帧才带得到 source。
+        cardMorph.beginTransition(toDetail: widget == .media ? true : (widget == nil ? false : nil))
         selectedWidget = widget
     }
 
@@ -1447,6 +1451,7 @@ struct NotchContentView: View {
     private var expandedContent: some View {
         ExpandedPanelView(
             selectedWidget: $selectedWidget,
+            cardMorph: cardMorph,
             calendarRecenterTrigger: $calendarRecenterTrigger,
             enabledWidgets: enabledWidgets,
             panelWidth: effectivePanelWidth,

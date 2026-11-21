@@ -573,7 +573,9 @@ private struct PanelGridNativeSurface: View {
     let scheme: ColorScheme
 
     var body: some View {
-        ExpandedPanelView(selectedWidget: $model.selected, calendarRecenterTrigger: $model.recenterTrigger,
+        ExpandedPanelView(selectedWidget: $model.selected,
+            cardMorph: PanelCardMorphStore(),
+            calendarRecenterTrigger: $model.recenterTrigger,
             enabledWidgets: store.configuration.visibleItems.compactMap { NotchContentView.WidgetType(rawValue: $0.id.rawValue) }, panelWidth: model.width,
             mediaManager: fixture.media, calendarManager: fixture.calendar, notesManager: fixture.notes,
             trayManager: fixture.tray, focusSessionManager: fixture.focus, showHistory: true, historyDisplayLimit: 5,

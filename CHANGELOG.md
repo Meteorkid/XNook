@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.4.4 (2026-11-21)
+
+点进媒体时，媒体卡片本身会从网格里的位置长到详情页的位置，内容一路可见。
+
+### 关键结论：`matchedGeometryEffect` 在这块布局里不可用
+
+第一版就是照常规写的：两端同一张卡片挂 `matchedGeometryEffect`，页面 `ZStack` 上加 `.animation(value: selectedWidget)`。逐帧量下来有三个问题，一个都不小：
+
+- **卡片不插值**。换页那一帧卡片就是终态尺寸，只有原点是瞬移的。原因是网格用的是自定义 `Layout`（`PanelDashboardLayout` 直接 `place` 到算好的 frame），几何效果在这里不生效。
+- **页面被套上了默认透明度转场**。`.animation(value:)` 会让 `if/else` 的插入/移除带上淡入淡出，于是详情页半透明地叠在概览上，截帧能看到日历卡片透出来、"变废为宝"标题重影。
+- **不改宽度就得改动画归属**。`matchedGeometryEffect` 要求换页带 `withAnimation`，而 `withAnimation` 会把面板宽度也做成弹簧——那正是 1.4.2 修掉的闪烁根因（`ExpandedPanelMeasurement.matches` 的 0.5pt 门限会丢弃换页那一帧的测量）。
+
+### 现在的做法：显式几何
+
+不再依赖几何效果，直接算：
+
+1. 两端卡片各自把矩形报进同一个坐标系（`MediaCardFrameReporter` + `MediaCardFrameKey`），key 用 `isDetail` 区分。
+2. 换页前记下**当前那端**的矩形，作为动画起点。
+3. 新页面的卡片用 `scaleEffect(anchor: .topLeading)` + `offset` 从起点矩形插值到自身矩形，弹簧仍是换页那条 `panelSwitch`（response 0.28 / damping 0.84）。
+
+插值只落在渲染层，不动布局，所以宽度还是一帧到位，1.4.2 的测量时序没有被破坏。反向（详情 → 概览）用同一套逻辑，卡片从详情矩形缩回网格格子。
+
+### 两个必须踩准的时序
+
+- **源矩形要在改 `selectedWidget` 之前写**。换页有两个入口（面板内部的 `select`、外壳直接改绑定），面板自己没机会在中间插一句。所以两端矩形和"这次从哪来"放进共享的 `PanelCardMorphStore`，由外壳先 `beginTransition` 再改选中项——同一个 runloop 内 SwiftUI 合并成一次求值，新页面首帧就带着 source。晚一拍补的话首帧已经画成终态，整段动画都不会出现（这一版实测踩到过，卡片直接跳到终点）。
+- **目标矩形量到之前先别画**。`GeometryReader` 在 `scaleEffect` 的子树里，量到的是渲染后的矩形，而目标矩形要等这一帧布局完才有。这中间按终态尺寸画出来会闪一下，所以加了一层"`source` 有了但 `target` 还没量到就 opacity 0"。动画只在这一帧之后启动，也避免了拿缩放中的尺寸反过来改写缩放比例。
+
+### 验证
+
+- 逐帧日志（`CardMorphIn` 的 `measure`）显示卡片矩形连续插值：232 → 242 → 275 → 308 → 351 → 396 → 417 → 428 → 435 → 440 → 443 → 444，跨约 0.28s，没有任何一帧跳变。
+- 慢速（1.1s）录屏逐帧比对：中途帧能看到详情卡片以网格位置为原点、按比例放大，标题/进度条/歌词全程在画面上；反向同样能看到卡片大于格子、缩回格子。
+- 截图确认没有空白帧，也没有"先按终态尺寸闪一下"。
+- 系统「减弱动态效果」开启时直接落位，不做形变。
+
+测试：XNookTests 1341 项（104 跳过）+ LicenseCoreTests 38 项，仍只有 `GifResourceTests.testLegacyBookmarkReadsThroughTheSameBudget` 一项失败——测试宿主缺 `com.apple.security.files.bookmarks.app-scope`，与本次改动无关。
+
+---
+
 ## v1.4.3 (2026-11-21)
 
 1.4.2 把换页做成了硬切，面板不再有"变形"过程——点进媒体就是直接跳过去。这一版把窗口动画补回来，同时保留 1.4.2 的时序修复。

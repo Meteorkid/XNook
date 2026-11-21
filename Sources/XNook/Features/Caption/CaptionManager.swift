@@ -71,6 +71,12 @@ final class CaptionManager {
     private var lastAlignAt: TimeInterval = 0
     private static let minimumAlignInterval: TimeInterval = 0.5
 
+    /// 播放是否处于暂停（时间轴已冻结）。反复收到同一状态时直接返回。
+    private(set) var isPlaybackPaused = false
+
+    /// 上一次记进日志的歌词条数，用来只在变化时记一行。
+    private var lastLyricsCount = -1
+
     /// 判定为跳变（seek / 切源）的时刻，用于识别「播放器位置不可信」。
     private var jumpTimestamps: [TimeInterval] = []
     /// 播放器自报位置连续多次剧烈跳变时，放弃对齐、退回捕获时钟，
@@ -257,6 +263,7 @@ final class CaptionManager {
         scheduler.reset()
         line = ""
         level = nil
+        isPlaybackPaused = false
         state = .idle
         log("stopped")
     }
@@ -287,6 +294,15 @@ final class CaptionManager {
     /// 因此当播放器位置明显不可信时，宁可退回捕获时钟，也不能让每次跳变都清空已建立的证书。
     func syncPlayback(position: TimeInterval, rate: Double, signature: String) {
         guard state.isRunning, usesPlayerTimeline, position > 0, position.isFinite else { return }
+
+        // 速率为 0 就是暂停：位置不再回调，这里必须把时钟钉住，否则它会按 1× 继续外推。
+        if !(rate > 0) {
+            setPlaybackPaused(true, position: position)
+            return
+        }
+        if isPlaybackPaused {
+            setPlaybackPaused(false, position: position)
+        }
 
         let host = SourceClock.hostNow()
         guard host - lastAlignAt >= Self.minimumAlignInterval else { return }
@@ -319,6 +335,33 @@ final class CaptionManager {
         log("timeline jump → generation \(clock.generation) at \(String(format: "%.2f", position))")
     }
 
+    /// 播放暂停 / 恢复时冻结或恢复字幕时间轴。
+    ///
+    /// 暂停后 `elapsedTime` 不再变化，`syncPlayback` 也就不会再被调用；只靠对齐
+    /// 无法让时钟停下来。这里显式冻结，暂停期间调度器不会推进下一条字幕，
+    /// 已上屏的那一行也不会因为时钟前移而到期消失。
+    ///
+    /// 冻结用「此刻的值」、恢复用「上报的位置」：前者保证暂停那一帧歌词不跳行，
+    /// 后者保证暂停期间拖过进度条也能从新位置接上。
+    func setPlaybackPaused(_ paused: Bool, position: TimeInterval) {
+        // 位置 0 也要接：新歌一开头就暂停，恢复时若被挡掉，时钟会一直冻着。
+        guard state.isRunning, usesPlayerTimeline,
+              position.isFinite, position >= 0 else { return }
+        guard paused != isPlaybackPaused else { return }
+        isPlaybackPaused = paused
+        if paused {
+            clock.freeze()
+        } else {
+            clock.thaw(at: position)
+            // 恢复后允许立刻重新对齐（否则会被 0.5s 节流挡掉一拍）。
+            lastAlignAt = 0
+        }
+        log(paused
+            ? String(format: "playback paused → clock frozen at %.2f (reported %.2f)",
+                     clock.sourceNow(), position)
+            : "playback resumed → clock unfrozen")
+    }
+
     /// 音源重新可信时（例如切到音乐播放器）重新启用播放器时间轴。
     func resetTimelinePreference() {
         usesPlayerTimeline = true
@@ -340,6 +383,13 @@ final class CaptionManager {
     func updateLyrics(_ lines: [LyricsManager.LrcLine], signature: String) {
         pendingLyrics = lines
         pendingLyricsSignature = lines.isEmpty ? "" : signature
+
+        // 「暂停后字幕还在动」这类问题，第一现场就是歌词到底有没有灌进来。
+        // 只在条数变化时记一行，正常播放不会刷屏。
+        if lines.count != lastLyricsCount {
+            lastLyricsCount = lines.count
+            log("lyrics count=\(lines.count) sig=\(signature)")
+        }
 
         // 选了「优先视频画面」就完全不采信歌词：既不灌入，也把已有条目撤掉，
         // 否则暂停中的那首歌会一直占着 5 级证据，视频的声音永远抢不过它。

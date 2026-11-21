@@ -587,10 +587,18 @@ struct NotchContentView: View {
             // 换源后重新信任播放器位置，避免被上一首歌的抖动永久降级。
             captionManager.resetTimelinePreference()
         }
-        .onChange(of: mediaManager.isPlaying) { _, _ in
+        .onChange(of: mediaManager.isPlaying) { _, playing in
             // 播放/暂停都重新结算一次歌词：暂停时清空，恢复时按当前曲目重灌。
             guard showLiveCaptions, captionManager.isRunning else { return }
+            // 暂停还要冻结字幕时间轴：`elapsedTime` 停更之后就不会再有对齐调用，
+            // 只靠 `syncPlayback` 拦不住，时钟会按最后一次的速率继续外推。
+            captionManager.setPlaybackPaused(!playing, position: mediaManager.elapsedTime)
             pushLyricsToCaption()
+        }
+        .onChange(of: captionManager.isRunning) { _, running in
+            // 暂停状态下才打开字幕：启动完成时补一次冻结，否则同样会自己往下走。
+            guard running, showLiveCaptions else { return }
+            captionManager.setPlaybackPaused(!mediaManager.isPlaying, position: mediaManager.elapsedTime)
         }
         .onChange(of: mediaManager.lyricsManager.stateVersion) { _, _ in
             pushLyricsToCaption()

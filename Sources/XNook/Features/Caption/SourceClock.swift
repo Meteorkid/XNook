@@ -22,6 +22,8 @@ final class SourceClock: @unchecked Sendable {
     private var hostAnchor: TimeInterval
     private var sourceAnchor: TimeInterval
     private var rate: Double = 1
+    /// 冻结前的速率，恢复时还原（1.5× 播客不能恢复成 1×）。
+    private var suspendedRate: Double = 1
     private var generationValue: Int = 1
     private var signature: String = ""
 
@@ -99,6 +101,50 @@ final class SourceClock: @unchecked Sendable {
             sourceAnchor = predicted
         }
         return false
+    }
+
+    /// 暂停：把时间轴钉在**此刻**的值上，不再外推。
+    ///
+    /// 为什么要有这一条：暂停后播放位置不再回调，`align` 也就不会再被调用，
+    /// 而 `sourceTime` 是 `sourceAnchor + (host - hostAnchor) * rate` 外推出来的——
+    /// 速率留着 1 的话，时钟会带着字幕一路走下去。
+    ///
+    /// 冻结不递增代次：已灌入的歌词条目仍然有效，恢复后沿同一条链继续，
+    /// 不会出现"暂停一下歌词全部重灌"的抖动。
+    ///
+    /// 基准取「此刻外推出的值」而不是播放器上报的位置：上报值最多差一次对齐节流
+    /// （0.5 s），直接按它冻会让暂停那一刻歌词跳一行。
+    func freeze() {
+        setFrozen(true, at: .nan)
+    }
+
+    /// 恢复：以播放器自报位置重锚，并还原冻结前的速率。
+    ///
+    /// 位置是权威的：暂停期间可能在进度条上拖过，恢复后必须从新位置继续。
+    func thaw(at observed: TimeInterval) {
+        setFrozen(false, at: observed)
+    }
+
+    /// 冻结 / 解冻的共同实现。`observed` 无效时以当前外推值为基准。
+    private func setFrozen(_ frozen: Bool, at observed: TimeInterval) {
+        lock.lock()
+        defer { lock.unlock() }
+        let host = CACurrentMediaTime()
+        // 冻结期间 rate 是 0，所以这一句在已冻结时算出的是原样（幂等）。
+        let predicted = sourceAnchor + (host - hostAnchor) * rate
+        let base = observed.isFinite ? max(0, observed) : predicted
+
+        if frozen {
+            // 记住当前速率：播客 1.5× 暂停再播放，恢复后还得是 1.5×。
+            if rate > 0 { suspendedRate = rate }
+            sourceAnchor = base
+            hostAnchor = host
+            rate = 0
+        } else {
+            sourceAnchor = base
+            hostAnchor = host
+            rate = suspendedRate > 0 ? suspendedRate : 1
+        }
     }
 
     /// 无播放位置时的零点重置（开始捕获、或捕获重启）。

@@ -320,6 +320,36 @@ final class CaptionSchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.diagnostics.chainLength, 0)
     }
 
+    // MARK: - 暂停冻结
+
+    /// 暂停后时间轴被钉住：宿主时钟照走，也不能把下一句推上屏。
+    ///
+    /// 这是「歌曲暂停了，字幕还在继续」的直接回归。暂停时歌词条目确实被清空了，
+    /// 但已经进 `store` 的候选不会因此消失，`tick` 只要拿到更大的 `now` 就继续往后取。
+    func testFrozenClockStopsLineAdvancement() {
+        let clock = anchoredClock(100)
+        let speech = StubProvider(id: "speech", level: .streaming, latency: 0.10)
+        let scheduler = makeScheduler(clock: clock, providers: [speech])
+        let generation = clock.generation
+
+        scheduler.ingest([
+            candidate(speech, start: 100, end: 100.2, text: "第一句", generation: generation),
+            candidate(speech, start: 100.9, end: 101.2, text: "第二句", generation: generation),
+        ])
+        scheduler.tick(prefetchability: 0)
+        XCTAssertEqual(scheduler.currentLine, "第一句")
+
+        clock.freeze()
+        Thread.sleep(forTimeInterval: 0.4)
+        scheduler.tick(prefetchability: 0)
+        XCTAssertEqual(scheduler.currentLine, "第一句", "暂停期间不能推进到下一句")
+
+        // 恢复：从冻结处继续，下一句照常上屏。
+        clock.thaw(at: 100.95)
+        scheduler.tick(prefetchability: 0)
+        XCTAssertEqual(scheduler.currentLine, "第二句")
+    }
+
     // MARK: - 区间单元
 
     func testIntervalIndexAndRangeAgree() {

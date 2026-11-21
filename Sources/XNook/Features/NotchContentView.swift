@@ -404,9 +404,12 @@ struct NotchContentView: View {
                 y: jellyTrigger ? (jellySettled ? jellyScale.ySettle : jellyScale.yPop) : 1.0
             )
             .frame(width: shapeWidth, height: shapeHeight)
-            // 换页时宽度是硬切的（见 `select` 的注释）：形状与内容必须同一步到位，
-            // 只让高度按换页弹簧过渡。曾试过只给形状补 `.animation(value: selectedWidget)`，
-            // 实测无效——形状的实际绘制由玻璃背景宿主驱动，宽度仍然是一帧跳过去。
+            // 换页时**内容的布局宽度**是硬切的（见 `select` 的注释），但背景形状这一层
+            // 仍按换页弹簧收窄/放宽——用户看到的"面板在变形"就是这一层。
+            // 内容宽度必须一帧到位，否则新页面的测量会被 `matches` 拒到动画结束；
+            // 形状晚 0.28s 收敛没有副作用：窗口在这段时间里保留旧宽度，
+            // 多出来的部分是透明的（`panelResizeHold`）。
+            .animation(shouldReduceMotion ? nil : IslandMotion.panelSwitch.animation, value: selectedWidget)
 
             // 展开内容
             if isExpanded || expandPending || collapseAnimating {

@@ -239,6 +239,16 @@ struct NotchContentView: View {
             && (showTickerLine || showLyrics)
     }
 
+    /// Ticker 是否仍在“活”的状态：暂停后的残留字幕可以静态留在原地，
+    /// 但不应该继续逐帧滚动，否则既误导状态又持续消耗 CPU。
+    private var isTickerLive: Bool {
+        // 播放已暂停：即使调度器还在收到 OCR/歌词候选，也不能继续滚动。
+        // 暂停是明确的产品状态，优先于“是否还有证据到达”。
+        if captionManager.isPlaybackPaused { return false }
+        if mediaManager.isPlaying || mediaManager.isWaitingForPreferredSource { return true }
+        return captionManager.isRunning && captionManager.lineIsFresh
+    }
+
     /// 收起状态总高度（含 Ticker）
     private var collapsedTotalHeight: CGFloat {
         collapsedShapeHeight + (showTicker ? tickerLineHeight + 4 : 0)
@@ -460,7 +470,7 @@ struct NotchContentView: View {
                         font: .system(size: 10, weight: .medium),
                         availableWidth: shapeWidth - 28,
                         speed: tickerSpeed,
-                        isAnimated: isWindowVisible && !shouldReduceMotion
+                        isAnimated: isWindowVisible && !shouldReduceMotion && isTickerLive
                     )
                     .foregroundColor(IslandStyle.tertiaryText(for: colorScheme))
                     .frame(width: shapeWidth, height: tickerLineHeight)

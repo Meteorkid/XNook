@@ -13,7 +13,7 @@ public struct FileLicenseStore: LicenseCredentialStore {
     public init(directory: URL? = nil, name: String) {
         let base = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("X Nook", isDirectory: true)
+            .appendingPathComponent("XNook", isDirectory: true)
         self.url = base
             .appendingPathComponent("License", isDirectory: true)
             .appendingPathComponent("\(name).json", isDirectory: false)

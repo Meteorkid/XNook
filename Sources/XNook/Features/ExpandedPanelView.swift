@@ -167,7 +167,7 @@ struct ExpandedPanelView: View {
                 .background {
                     GeometryReader { geometry in
                         Color.clear.preference(key: PanelContentHeightKey.self, value: ExpandedPanelMeasurement(
-                            width: geometry.size.width,
+                            width: panelWidth,
                             height: geometry.size.height + ExpandedPanelLayout.headerHeight + headerTopInset
                                 + (layoutEditor.isEditing ? editorToolbarHeight : 0),
                             selectedWidget: selectedWidget,
@@ -178,6 +178,9 @@ struct ExpandedPanelView: View {
                     }
                 }
             }
+            // 隐藏滚动条，避免传统 scroller 占用 17pt 宽度导致正文按“滚动条宽度”
+            // 反复重排：窄面板下曾在 400pt 高时量出 1063pt、放大窗口后又缩回 929pt。
+            .scrollIndicators(.never)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("expandedPanelBody")
             .expandedPanelDebugFrame(id: "expandedPanelBody")
@@ -414,45 +417,58 @@ struct ExpandedPanelView: View {
     }
 
     /// 概览页：配置了布局时走仪表盘网格，否则退回旧的等分概览 + 任务卡。
+    ///
+    /// 这两种分支都可能返回多个兄弟视图。`overviewPage` 外面是
+    /// `ZStack(alignment: .topLeading)`，把 TupleView 直接交给 ZStack 会让
+    /// 错误提示、组件网格、待办入口全部叠在同一坐标（实测待办入口与笔记卡片
+    /// 同为 y=49）。这里统一收进一个纵向容器，显式规定先网格后任务。
     @ViewBuilder
     private var overviewPage: some View {
         if let layoutStore {
-            if let layoutEntryError { Text(layoutEntryError).font(.caption).foregroundStyle(.secondary) }
-            if !layoutEditor.isEditing, let issue = layoutRecoveryError ?? layoutStore.loadError {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(issue).font(.caption).foregroundStyle(.secondary)
-                    Button(L10n.localized(zh: "恢复默认布局…", en: "Restore Default Layout…")) { confirmsLayoutRecovery = true }
+            VStack(alignment: .leading, spacing: ExpandedPanelLayout.columnSpacing) {
+                if let layoutEntryError {
+                    Text(layoutEntryError).font(.caption).foregroundStyle(.secondary)
+                }
+                if !layoutEditor.isEditing, let issue = layoutRecoveryError ?? layoutStore.loadError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(issue).font(.caption).foregroundStyle(.secondary)
+                        Button(L10n.localized(zh: "恢复默认布局…", en: "Restore Default Layout…")) { confirmsLayoutRecovery = true }
+                    }
+                }
+                PanelDashboardGrid(
+                    configuration: Binding(get: { dashboardConfiguration }, set: { if layoutEditor.isEditing { layoutEditor.draft = $0 } }),
+                    selection: $layoutSelection, width: max(1, panelWidth - ExpandedPanelLayout.outerPadding * 2),
+                    isEditing: layoutEditor.isEditing, summary: moduleSummary, moduleFill: moduleFill,
+                    fitsContent: usesDefaultContentFit
+                ) { item, size in moduleView(item.id, size: size) }
+                if showTaskInboxShortcut, let pendingTasks, !layoutEditor.isEditing,
+                   !visibleModuleIDs.contains(.currentTask), !visibleModuleIDs.contains(.recentTasks) {
+                    Button { showsFallbackInbox = true } label: {
+                        Label("\(L10n.inboxShortTitle) \(pendingTasks.visibleTasks.count)", systemImage: "tray")
+                    }
+                    .accessibilityLabel(L10n.inboxTitle)
+                    .accessibilityIdentifier("panelTaskInboxFallback")
+                    .expandedPanelDebugFrame(id: "panelTaskInboxFallback")
+                    .popover(isPresented: $showsFallbackInbox) {
+                        TaskInboxView(coordinator: pendingTasks, onClose: { showsFallbackInbox = false })
+                    }
                 }
             }
-            PanelDashboardGrid(
-                configuration: Binding(get: { dashboardConfiguration }, set: { if layoutEditor.isEditing { layoutEditor.draft = $0 } }),
-                selection: $layoutSelection, width: max(1, panelWidth - ExpandedPanelLayout.outerPadding * 2),
-                isEditing: layoutEditor.isEditing, summary: moduleSummary, moduleFill: moduleFill,
-                fitsContent: usesDefaultContentFit
-            ) { item, size in moduleView(item.id, size: size) }
-            if showTaskInboxShortcut, let pendingTasks, !layoutEditor.isEditing,
-               !visibleModuleIDs.contains(.currentTask), !visibleModuleIDs.contains(.recentTasks) {
-                Button { showsFallbackInbox = true } label: {
-                    Label("\(L10n.inboxShortTitle) \(pendingTasks.visibleTasks.count)", systemImage: "tray")
-                }
-                .accessibilityLabel(L10n.inboxTitle)
-                .accessibilityIdentifier("panelTaskInboxFallback")
-                .expandedPanelDebugFrame(id: "panelTaskInboxFallback")
-                .popover(isPresented: $showsFallbackInbox) {
-                    TaskInboxView(coordinator: pendingTasks, onClose: { showsFallbackInbox = false })
-                }
-            }
+            .frame(width: max(0, panelWidth - ExpandedPanelLayout.outerPadding * 2), alignment: .topLeading)
         } else {
-            if enabledWidgets.isEmpty {
-                Text(L10n.panelNoWidgets)
-                    .font(.system(size: IslandTokens.Font.body))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, IslandTokens.Spacing.group)
-            } else {
-                overview
+            VStack(alignment: .leading, spacing: ExpandedPanelLayout.columnSpacing) {
+                if enabledWidgets.isEmpty {
+                    Text(L10n.panelNoWidgets)
+                        .font(.system(size: IslandTokens.Font.body))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, IslandTokens.Spacing.group)
+                } else {
+                    overview
+                }
+                focusContent
             }
-            focusContent
+            .frame(width: max(0, panelWidth - ExpandedPanelLayout.outerPadding * 2), alignment: .topLeading)
         }
     }
 

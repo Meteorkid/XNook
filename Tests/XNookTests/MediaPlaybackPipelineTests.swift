@@ -79,6 +79,31 @@ final class MediaPlaybackPipelineTests: XCTestCase {
         XCTAssertFalse(fixture.media.lyricsManager.hasLyrics)
     }
 
+    func testStoppedLockedPlayerClearsPlayingAndLyrics() async {
+        let fixture = PlaybackFixture()
+        await initialLoad(fixture)
+        fixture.media.refreshLyricLine()
+        XCTAssertEqual(fixture.media.currentLyricLine, "Early")
+        XCTAssertTrue(fixture.media.isPlaying)
+
+        // 锁定 Apple Music 且播放器已停止时，脚本会返回带空标题、rate=0 的快照。
+        // 这不是“临时读取失败”，必须立即清掉播放态与歌词，不能继续显示上一首。
+        var stopped = fixture.sample()
+        stopped["title"] = ""
+        stopped["artist"] = ""
+        stopped["album"] = ""
+        stopped["playbackRate"] = 0.0
+        stopped["playerPosition"] = 0.0
+        fixture.snapshot = stopped
+        await fixture.media.refreshNowPlayingInfo()
+
+        XCTAssertFalse(fixture.media.isPlaying)
+        XCTAssertEqual(fixture.media.playbackRate, 0)
+        XCTAssertEqual(fixture.media.currentTitle, "")
+        XCTAssertEqual(fixture.media.currentLyricLine, "")
+        XCTAssertFalse(fixture.media.lyricsManager.hasLyrics)
+    }
+
     func testLocalClockDoesNotRunBeyondStalePlayerSample() async {
         let fixture = PlaybackFixture()
         await initialLoad(fixture)

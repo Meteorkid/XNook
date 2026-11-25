@@ -11,7 +11,7 @@ import Speech
 /// 边界写死在实现里：只对能拿到文件路径的本地播放器有效（当前是 QuickTime）。
 /// 浏览器里的流媒体缓冲在对方进程内，取不到，仍走实时识别。
 @MainActor
-final class PreTranscriptProvider: CaptionEvidenceProvider {
+final class PreTranscriptProvider: @preconcurrency CaptionEvidenceProvider {
 
     let providerID = "pretranscript.local"
     /// 「本地已转写缓存」正是这一级的语义，且高于流式识别。
@@ -114,11 +114,16 @@ final class PreTranscriptProvider: CaptionEvidenceProvider {
     /// 那条 Timer 是确定工作的——字幕本身就在动。复用它比自己再造一套可靠。
     func pump(now: TimeInterval = Date().timeIntervalSince1970) {
         guard isRunning else { return }
-        // 心跳：每 10 秒一条。没有它，「轮询在跑但定位器取不到东西」和
-        // 「轮询根本没跑」在日志上是同一副样子，排查会走弯路。
-        if now - lastTickLogAt >= 10 {
+        // 心跳：有文件时每 30 秒一条；没有文件时只在启动后和每 5 分钟各留一条。
+        // 静音/没播本地媒体时每 10 秒刷 `file=nil` 只会淹没真正有用的诊断。
+        let heartbeatInterval: TimeInterval = currentFile == nil ? 300 : 30
+        if now - lastTickLogAt >= heartbeatInterval {
             lastTickLogAt = now
-            onDiagnostics?("pretranscript: tick file=\(currentFile?.lastPathComponent ?? "nil") 已转写至=\(String(format: "%.1f", transcribedUntil))s")
+            if let file = currentFile {
+                onDiagnostics?("pretranscript: tick file=\(file.lastPathComponent) 已转写至=\(String(format: "%.1f", transcribedUntil))s")
+            } else {
+                onDiagnostics?("pretranscript: idle（未发现可预转写的本地媒体）")
+            }
         }
         guard now - lastPumpAt >= pollInterval, !isPolling else { return }
         lastPumpAt = now

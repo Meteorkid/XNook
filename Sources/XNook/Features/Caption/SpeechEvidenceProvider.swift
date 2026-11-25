@@ -57,6 +57,10 @@ final class SpeechEvidenceProvider: NSObject, SpeechEvidenceProviding, @unchecke
 
     private let queue = DispatchQueue(label: "com.meteorkid.xnook.caption.speech", qos: .userInitiated)
     private var recognizer: SFSpeechRecognizer?
+    /// 按 locale 缓存识别器。`SFSpeechRecognizer` 可连续创建多个识别任务，
+    /// 没必要每 50 秒换会话就重新分配一个（实测 8 天累计 4894 次，leaks 里留下
+    /// 124 个 SFSpeechRecognizer 相关节点）。缓存在识别队列上独占访问。
+    private var recognizers: [String: SFSpeechRecognizer] = [:]
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var isRunning = false
@@ -121,6 +125,8 @@ final class SpeechEvidenceProvider: NSObject, SpeechEvidenceProviding, @unchecke
         isRunning = false
         queue.async { [weak self] in
             self?.teardownSession()
+            self?.recognizers.removeAll()
+            self?.recognizer = nil
         }
     }
 
@@ -168,7 +174,13 @@ final class SpeechEvidenceProvider: NSObject, SpeechEvidenceProviding, @unchecke
         teardownSession()
 
         let locale = currentLocale()
-        guard let recognizer = SFSpeechRecognizer(locale: locale) else {
+        let recognizer: SFSpeechRecognizer
+        if let cached = recognizers[locale.identifier] {
+            recognizer = cached
+        } else if let created = SFSpeechRecognizer(locale: locale) {
+            recognizers[locale.identifier] = created
+            recognizer = created
+        } else {
             isRunning = false
             onFailure?(SpeechError.localeUnsupported)
             return

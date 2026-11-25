@@ -53,6 +53,11 @@ final class CaptionScheduler {
     private(set) var currentLine: String = ""
     /// 当前行对应的音频区间右端（绝对源时间）。用于测量「说完 → 上屏」的真实延迟。
     private(set) var currentLineEnd: TimeInterval?
+    /// 最近一次真正接收新证据的宿主时刻。
+    ///
+    /// 注意不能用 `sourceNow()` 判断「字幕是否还在产出」：暂停时时间轴被冻结，
+    /// sourceNow 不再前进，最后一行会被永久判定为新鲜。宿主时钟不受冻结影响。
+    private(set) var lastEvidenceHost: TimeInterval = 0
     /// 当前行的证据来源等级，UI 可据此决定是否弱化显示（低等级用更淡的颜色）。
     private(set) var currentLevel: EvidenceLevel?
 
@@ -123,6 +128,7 @@ final class CaptionScheduler {
         }
 
         guard accepted > 0 else { return }
+        lastEvidenceHost = SourceClock.hostNow()
         diagnostics.candidates += accepted
         diagnostics.lastProvider = candidates.first?.providerID ?? ""
 
@@ -287,11 +293,19 @@ final class CaptionScheduler {
 
     private func coverageRatio(of candidates: [CaptionCandidate], in bounds: Range<TimeInterval>) -> Double {
         let length = bounds.upperBound - bounds.lowerBound
-        guard length > 0 else { return 0 }
+        guard length > 0, length.isFinite else { return 0 }
 
-        var intervals: [Range<TimeInterval>] = candidates.map {
-            max($0.start, bounds.lowerBound)..<min($0.end, bounds.upperBound)
-        }.filter { $0.upperBound > $0.lowerBound }
+        var intervals: [Range<TimeInterval>] = []
+        intervals.reserveCapacity(candidates.count)
+        for candidate in candidates {
+            // 候选可能整段落在区间之外（例如时间轴重置前抓到的迟到 OCR 带负时间戳），
+            // 直接钳制后可能得到 lower > upper。这里必须先求交再判空，绝不能把倒置的
+            // 两个端点直接送进 Range，否则会触发 Swift 运行时 precondition 崩溃。
+            let lower = max(candidate.start, bounds.lowerBound)
+            let upper = min(candidate.end, bounds.upperBound)
+            guard lower.isFinite, upper.isFinite, lower < upper else { continue }
+            intervals.append(lower..<upper)
+        }
 
         guard !intervals.isEmpty else { return 0 }
         intervals.sort { $0.lowerBound < $1.lowerBound }
@@ -400,6 +414,7 @@ final class CaptionScheduler {
         currentLine = ""
         currentLevel = nil
         readBoundary = -.greatestFiniteMagnitude
+        lastEvidenceHost = 0
         diagnostics = Diagnostics()
         onLineChange?("", nil)
     }

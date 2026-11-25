@@ -1,5 +1,56 @@
 # Changelog
 
+## v1.5.0 (2026-11-25)
+
+**1.4.6 全量审计的修复版。** 这一版按 P0→P1→P2→P3 收口了字幕崩溃、暂停后残留滚动、面板多视图叠放、日志隐私与系统日志刷屏，并统一了授权数据目录。没有新增破坏性 API；升级后授权继续有效。
+
+### P0：实时字幕崩溃
+
+- `CaptionScheduler.coverageRatio` 不再把候选的两个端点直接塞进 `Range`。所有候选先与目标区间求交，再校验 `lower.isFinite`、`upper.isFinite`、`lower < upper`；负时间戳、空区间、倒置区间、NaN 一律跳过。
+- `FrameTextEvidenceProvider` 引入 `sessionEpoch`：`start/stop/reset` 递增代次，重置时清空 `inFlight`；抓帧同时捕获 epoch 与 `clock.generation`，完成时先验 epoch 再验 generation。时间轴重建前发出的迟到 OCR 结果整体丢弃。
+- 原崩溃输入 `CaptionCandidate(start:-1.5, end:-0.5)` 不再触发 `Range requires lowerBound <= upperBound`；`CaptionSchedulerTests` 20/20 通过。
+
+### P1：暂停后的字幕滚动与空闲功耗
+
+- `CaptionScheduler` 记录最近一次接收新证据的宿主时刻 `lastEvidenceHost`；`CaptionManager` 以 60ms tick 维护 `lineIsFresh`（8 秒窗口）。宿主时钟不受暂停冻结的源时间轴影响。
+- `NotchContentView.isTickerLive` 增加暂停硬门控：`isPlaybackPaused == true` 时直接停止 Ticker；播放中/等待源保持活跃；其余情况才看 `lineIsFresh`。
+- `MarqueeText` 从跟随屏幕刷新率改为 30fps `TimelineView`，滚动速度 25pt/s 下肉眼无差别，但不再为不到一像素的位移按 120fps 重建整行。
+- 真机对照：旧实例播放中 21.8% CPU，修复构建同场景 8.2%；旧 `sample` 中 `MarqueeText` 4 条、`TimelineView` 27 条，修复后分别为 0 和 7。最终安装包在 Music 停止、来源锁定 Apple Music 的冷启动场景：胶囊 **271×41**、无歌词、无均衡器，20 秒后仍为 41pt，`MarqueeText=0`、`TimelineView=0`，CPU **3.3%**。
+- **产品语义**：播放中按暂停时，最后一行字幕静态定格、胶囊保持 60pt，不再滚动；完全停止/无歌曲时回到 41pt。这是 1.4.6 “暂停后冻结字幕时间轴”的延续，不是残留 bug。
+
+### P1：自适应面板叠放
+
+- `ExpandedPanelView.overviewPage` 的配置分支与回退分支都收进单一 `VStack`，明确“错误提示/恢复入口 → 组件网格 → 待办入口”的顺序，避免 `ZStack` 把多个兄弟视图压在同一坐标。
+- 概览内容固定宽度 `panelWidth - outerPadding*2`；外层 `ScrollView` 使用 `.scrollIndicators(.never)`，消除传统 scroller 占 17pt 导致的宽度/高度震荡；测量宽度改用契约值 `panelWidth`。
+- `AdaptiveWorkflowPreviewTests` 16/16、`TaskInboxShortcutVisibilityTests` 通过；渲染全量 1353 项、8 跳过、0 失败。
+
+### P2：字幕日志轮转与隐私
+
+- `caption.log` 单文件上限 2MB，保留 `.1`、`.2` 两份；日志目录 `0700`，当前日志与轮转备份统一 `0600`。
+- 转写正文默认只记录 `chars=N` 与 `end=...`，不再把会议、私人播放内容写入磁盘；排障时可用 `defaults write com.meteorkid.xnook captionLogTranscripts -bool YES` 显式开启。
+- `pretranscript` 心跳降噪：无文件时 5 分钟一条，有文件时 30 秒一条；不再每 10 秒刷 `tick file=nil`。
+- 实测旧 4.96MB、约 7.3 万行日志在启动时轮转为 `caption.log.1`；新日志 12KB/0600，中文转写正文 0 条。
+
+### P2：ScreenCaptureKit 丢帧与 MediaRemote 错误日志
+
+- `SystemAudioTap` 同时挂 `.audio` 与 `.screen` 输出。SCK 即使不消费画面也会生成视频帧；只挂 audio 输出时帧会被系统每秒丢弃并写 `stream output NOT found`。新增的 2×2、1fps screen 输出在 handler 第一行按类型丢弃，不产生解码或内存负担。
+- `MediaManager` 在 Perl 桥可用时跳过本进程的 MediaRemote 通知注册；信息轮询从 1 秒放宽到 2 秒，减少每天约 8.6 万次 Perl 进程唤醒。
+- 按 PID 过滤统一日志：修复构建 0 条 `stream output NOT found`、0 条 `MRMediaRemoteGetNowPlayingInfo Code=35`；旧实例同窗口残留约 246 条丢帧、174 条 MediaRemote 错误（含旧进程日志）。
+
+### P3：资源、并发与数据目录
+
+- `SpeechEvidenceProvider` 按 locale 缓存 `SFSpeechRecognizer`，50 秒换会话只重建 request/task；`stop` 时清空缓存，避免长期运行累积 4,894 次识别器分配。
+- `FrameTextEvidenceProvider`、`PreTranscriptProvider` 的协议一致性改为 `@preconcurrency CaptionEvidenceProvider`，Swift 6 `ConformanceIsolation` 警告消失，全量构建 0 error。
+- 授权目录由 `Application Support/X Nook` 统一到 `Application Support/XNook`；启动时把旧 `License/session.json`、`device.json` 复制到新目录，旧目录保留回退。`LicenseDataExport` 排除 `License` 与 `.state`，授权凭据与试用锚点不再进入导出包。
+
+### 验证
+
+- Debug/Release 构建通过，0 error / 0 warning。
+- 默认全量：**1354 项，104 条件跳过，0 失败**（16.89 秒）。
+- 渲染全量：**1353 项，8 跳过，0 失败**（428.41 秒）。
+- `CaptionSchedulerTests` 20/20；`MediaPlaybackPipelineTests` 13/13（新增停止播放清态回归）；LicenseCore 38/38。
+- 安装包为 arm64，macOS 14+，本地固定自签名身份 `XNook Local Signing`，未公证。
+
 ## v1.4.6 (2026-11-21)
 
 修「歌曲暂停了，字幕还在继续」。

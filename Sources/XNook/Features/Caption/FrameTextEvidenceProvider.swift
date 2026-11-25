@@ -10,7 +10,7 @@ import Foundation
 /// 这也是「什么时候可以不算了」在工程上唯一能兑现的地方：
 /// 流式识别是连续音频，按区间跳过就再也接不上；只有按区间取数的来源才谈得上跳过。
 @MainActor
-final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
+final class FrameTextEvidenceProvider: @preconcurrency CaptionEvidenceProvider {
 
     let providerID = "frame.ocr"
     let level: EvidenceLevel = .frameText
@@ -44,6 +44,8 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
     private var inFlight = false
     private var consecutiveFailures = 0
     private var lastText = ""
+    /// 会话代次：start/stop/reset 时递增，用于作废仍在执行中的 OCR 结果。
+    private var sessionEpoch = 0
     /// 上一次是否因「屏幕上没有全屏画面」而跳过，用于只记录状态变化。
     private var gateRefused = false
 
@@ -54,17 +56,25 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
     var isEnabled: Bool { isRunning }
 
     func start() {
+        sessionEpoch &+= 1
         isRunning = true
+        inFlight = false
         lastRequestedInterval = -1
     }
 
     func stop() {
+        sessionEpoch &+= 1
         isRunning = false
+        inFlight = false
         lastRequestedInterval = -1
     }
 
     /// 时间轴重建后重新遍历区间。
     func reset() {
+        // 作废已发出的 OCR：它抓到的是旧时间轴上的帧，完成时算出的时间戳可能落在负区间。
+        sessionEpoch &+= 1
+        // 旧任务已被作废，闸门不能继续认为“有一帧在识别”，否则新时间轴永远排不上。
+        inFlight = false
         lastRequestedInterval = -1
         lastText = ""
     }
@@ -114,6 +124,8 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
 
     private func runInterval(index: Int, unit: TimeInterval) {
         let captureHost = SourceClock.hostNow()
+        let epoch = sessionEpoch
+        let generation = clock.generation
         Task { [weak self] in
             var text: String?
             var failure: String?
@@ -122,7 +134,15 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
             } catch {
                 failure = error.localizedDescription
             }
-            self?.finish(index: index, unit: unit, captureHost: captureHost, text: text, failure: failure)
+            self?.finish(
+                index: index,
+                unit: unit,
+                captureHost: captureHost,
+                epoch: epoch,
+                generation: generation,
+                text: text,
+                failure: failure
+            )
         }
     }
 
@@ -130,9 +150,13 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
         index: Int,
         unit: TimeInterval,
         captureHost: TimeInterval,
+        epoch: Int,
+        generation: Int,
         text: String?,
         failure: String?
     ) {
+        // 会话已重置/停止：这次 OCR 读到的是旧时间轴上的画面，必须整体丢弃。
+        guard epoch == sessionEpoch else { return }
         inFlight = false
 
         if let failure {
@@ -143,6 +167,8 @@ final class FrameTextEvidenceProvider: CaptionEvidenceProvider {
         consecutiveFailures = 0
 
         guard let text, !text.isEmpty else { return }
+        // 时间轴本身已重建：即便 provider 没有收到 reset，也不能用新代次去解释旧抓帧时刻。
+        guard generation == clock.generation else { return }
 
         let start = clock.sourceTime(atHost: captureHost)
         let end = start + unit

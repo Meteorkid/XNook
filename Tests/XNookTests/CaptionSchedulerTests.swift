@@ -250,6 +250,32 @@ final class CaptionSchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.diagnostics.candidates, 0)
     }
 
+    /// 回归：时间轴重置前抓到的 OCR 可以整段落在 0 号区间之前（负时间戳）。
+    /// 旧实现会把 max(start,0)..<min(end,2) 这种倒置端点直接送进 Range，触发
+    /// “Range requires lowerBound <= upperBound” 运行时崩溃。
+    func testCandidateEntirelyBeforeBucketZeroIsIgnoredWithoutCrashing() {
+        let clock = anchoredClock(0)
+        let speech = StubProvider(id: "speech", level: .streaming, latency: 0.10)
+        let scheduler = makeScheduler(clock: clock, providers: [speech])
+
+        scheduler.ingest([
+            candidate(speech, start: -1.5, end: -0.5, text: "重置前的迟到 OCR", generation: clock.generation)
+        ])
+
+        XCTAssertEqual(scheduler.diagnostics.candidates, 1)
+        XCTAssertEqual(scheduler.currentLine, "")
+    }
+
+    func testAcceptedEvidenceMarksLineFreshness() {
+        let clock = anchoredClock(100)
+        let speech = StubProvider(id: "speech", level: .streaming, latency: 0.10)
+        let scheduler = makeScheduler(clock: clock, providers: [speech])
+
+        XCTAssertEqual(scheduler.lastEvidenceHost, 0)
+        scheduler.ingest([candidate(speech, start: 100, end: 101, text: "新证据", generation: clock.generation)])
+        XCTAssertGreaterThan(scheduler.lastEvidenceHost, 0)
+    }
+
     func testEvidenceFromPreviousGenerationIsDiscarded() {
         let clock = anchoredClock(100)
         let speech = StubProvider(id: "speech", level: .streaming, latency: 0.10)

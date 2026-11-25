@@ -96,7 +96,8 @@ final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         streamConfig.excludesCurrentProcessAudio = true
         streamConfig.sampleRate = 48_000
         streamConfig.channelCount = 2
-        // 不消费画面：最小分辨率 + 低帧率。SCK 的配置项必须给值，但不会产生实际解码负载。
+        // 不消费画面：最小分辨率 + 低帧率。屏幕输出仍然要挂（见 start()），
+        // 否则 SCK 会因找不到输出每秒丢帧并刷系统日志。
         streamConfig.width = 2
         streamConfig.height = 2
         streamConfig.minimumFrameInterval = config.videoFrameInterval
@@ -105,6 +106,11 @@ final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         let newStream = SCStream(filter: filter, configuration: streamConfig, delegate: self)
         do {
             try newStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+            // SCK 即使不消费画面也会生成视频帧。只挂 audio 输出时，帧会因
+            // “stream output NOT found” 被系统每秒丢弃一次并写入统一日志
+            // （实测 899 次/15 分钟）。挂一个 2×2、1 fps 的 screen 输出把帧接住，
+            // handler 第一行就按 type 丢弃，不产生解码或内存负担。
+            try newStream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
             try await newStream.startCapture()
         } catch {
             if Self.isUserDeclined(error) { throw TapError.permissionDenied }

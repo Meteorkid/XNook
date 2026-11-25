@@ -227,8 +227,11 @@ final class MediaManager {
         self.seekProvider = seekProvider
         timersEnabled = startMonitoring
         let available = startMonitoring && MediaRemoteBridge.isAvailable
+        // Perl 桥能读到完整播放信息时，本进程直接注册 MediaRemote 通知没有收益：
+        // 自签名进程的读取接口返回空，注册本身还会周期性产生错误日志。
+        let useSystemNotifications = available && !PerlMediaRemote.isAvailable
         isAvailable = available
-        mediaRemoteAvailable = available
+        mediaRemoteAvailable = useSystemNotifications
         // 歌词状态变化时重新评估 progressTimer：
         // 歌词加载完成后立刻启动 timer 推进，避免歌词卡在第一行不滚动
         self.lyricsManager.onLyricsStateChanged = { [weak self] in
@@ -279,8 +282,9 @@ final class MediaManager {
 
     private func startTimers() {
         // 慢速轮询：获取歌曲信息并校准位置，封面独立读取。
-        // .common mode：菜单跟踪、拖拽等 event tracking 期间保持歌词推进不冻结
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        // .common mode：菜单跟踪、拖拽等 event tracking 期间保持歌词推进不冻结。
+        // 2 秒一次足够让胶囊跟上切歌/暂停；1 秒会让 Perl 桥每天多起 8.6 万次进程。
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.fetchNowPlayingInfo()

@@ -17,7 +17,9 @@ struct MarqueeText: View {
     var body: some View {
         Group {
             if needsScroll && isAnimated && !systemReduceMotion && speed > 0 {
-                TimelineView(.animation) { context in
+                // 30fps 足够让 25pt/s 的滚动保持顺滑，同时避免 ProMotion 屏幕上
+                // 为了不到一像素的位移按 120fps 重建整行文本。
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
                     label
                         .offset(x: calculateOffset(at: context.date))
                 }

@@ -37,6 +37,7 @@ final class LicenseManager {
     }
 
     private convenience init() {
+        Self.migrateLegacyLicenseDirectoryIfNeeded()
         let store = FileLicenseStore(name: "session")
         let deviceStore = FileLicenseStore(name: "device")
         // 必须在构造会话之前判定：会话的 `init` 会调用 `checkAccess()` →
@@ -52,6 +53,31 @@ final class LicenseManager {
             api: api, store: store
         ))
         if needsLegacyMigration { migrateLegacyKeychainIfNeeded(into: store) }
+    }
+
+    /// 旧版把授权记录放在 `Application Support/X Nook/License`，而笔记、托盘、
+    /// 试用锚点都在 `Application Support/XNook`。统一到后者，避免备份/支持排查
+    /// 漏掉其中一半。迁移只复制、不删除：旧目录留着作为失败时的回退。
+    private static func migrateLegacyLicenseDirectoryIfNeeded() {
+        let files = FileManager.default
+        guard let support = files.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+        let legacy = support.appendingPathComponent("X Nook/License", isDirectory: true)
+        let destination = support.appendingPathComponent("XNook/License", isDirectory: true)
+        guard files.fileExists(atPath: legacy.path) else { return }
+        try? files.createDirectory(at: destination, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        for name in ["session.json", "device.json"] {
+            let source = legacy.appendingPathComponent(name)
+            let target = destination.appendingPathComponent(name)
+            guard files.fileExists(atPath: source.path),
+                  !files.fileExists(atPath: target.path) else { continue }
+            do {
+                try files.copyItem(at: source, to: target)
+                try files.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            } catch {
+                NSLog("[license] legacy directory migration failed for %@: %@", name, String(describing: error))
+            }
+        }
     }
 
     /// 旧版本把授权记录存在登录钥匙串里。第一次用文件存储时把旧条目搬过来，

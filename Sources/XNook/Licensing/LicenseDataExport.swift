@@ -30,8 +30,11 @@ enum LicenseDataExport {
             throw CocoaError(.fileWriteInvalidFileName)
         }
         try files.createDirectory(at: destination, withIntermediateDirectories: true)
+        // 授权凭据、设备令牌和试用锚点不进入导出包；其余业务数据才允许备份。
+        let excluded: Set<String> = ["License", ".state"]
         if files.fileExists(atPath: source.path) {
-            for item in try files.contentsOfDirectory(at: source, includingPropertiesForKeys: nil, options: .skipsHiddenFiles) {
+            for item in try files.contentsOfDirectory(at: source, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)
+            where !excluded.contains(item.lastPathComponent) {
                 try files.copyItem(at: item, to: destination.appendingPathComponent(item.lastPathComponent))
             }
         }

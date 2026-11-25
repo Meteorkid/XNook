@@ -58,6 +58,11 @@ final class CaptionManager {
     private var preTranscriptProvider: PreTranscriptProvider?
     private var tickTimer: Timer?
     private var logHandle: FileHandle?
+    private var logURL: URL?
+    private var logBytes: UInt64 = 0
+    /// 诊断日志上限。单文件 2 MB，保留 2 份历史；转写正文默认不落盘。
+    private let logMaxBytes: UInt64 = 2 * 1024 * 1024
+    private let logBackupCount = 2
     private var lastLoggedLine: String = ""
     /// 端到端延迟采样：音频区间右端 → 文字上屏的墙钟差。
     private var displayLagSamples: [TimeInterval] = []
@@ -183,7 +188,14 @@ final class CaptionManager {
             }
             if !text.isEmpty, text != self.lastLoggedLine {
                 self.lastLoggedLine = text
-                self.log("line[\(level?.rawValue ?? 0)] \(text)")
+                let latency = self.scheduler.currentLineEnd.map {
+                    String(format: " end=%.1f", $0)
+                } ?? ""
+                if self.logsTranscripts {
+                    self.log("line[\(level?.rawValue ?? 0)]\(latency) \(text)")
+                } else {
+                    self.log("line[\(level?.rawValue ?? 0)]\(latency) chars=\(text.count)")
+                }
             }
             if let level, level != .localCache, !text.isEmpty {
                 self.languageHintLine = text
@@ -263,10 +275,23 @@ final class CaptionManager {
         scheduler.reset()
         line = ""
         level = nil
+        lineIsFresh = false
         isPlaybackPaused = false
         state = .idle
         log("stopped")
     }
+
+    /// 当前行是否仍有新证据在支撑。用于区分「正在出字幕」和「暂停后残留的上一句」。
+    /// 判定基于宿主时钟，不受暂停冻结的源时间轴影响。
+    var isLineFresh: Bool {
+        guard !line.isEmpty, scheduler.lastEvidenceHost > 0 else { return false }
+        return SourceClock.hostNow() - scheduler.lastEvidenceHost < 8
+    }
+
+    /// 以 60 ms 调度周期刷新给 UI 的“字幕仍在产出”状态。
+    /// 不能只在 `line` 变化时算：暂停后没有新行，必须等时间过去后主动把 true 降为 false，
+    /// 否则 SwiftUI 不会重算，Ticker 会一直滚动。
+    private(set) var lineIsFresh = false
 
     /// 开关变化后整链重建：预转写来源是在 `start()` 里装配的，
     /// 只在运行中改偏好不会把它建出来。
@@ -500,6 +525,8 @@ final class CaptionManager {
                 // 它内部按 1.5 秒节流，实际开销可以忽略。
                 self.preTranscriptProvider?.pump()
                 self.expireCaptionLineIfNeeded()
+                let fresh = self.isLineFresh
+                if self.lineIsFresh != fresh { self.lineIsFresh = fresh }
                 self.frameProvider?.advance(
                     now: self.clock.sourceNow(),
                     unit: self.scheduler.config.unit
@@ -590,22 +617,61 @@ final class CaptionManager {
         guard logHandle == nil else { return }
         let directory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs/XNook", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
         let url = directory.appendingPathComponent("caption.log")
+        logURL = url
+        rotateLogIfNeeded(at: url)
         if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
+            FileManager.default.createFile(atPath: url.path, contents: nil,
+                attributes: [.posixPermissions: 0o600])
         }
+        // 旧版本留下的日志可能是 644；按期收紧到只允许当前用户读写。
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         logHandle = try? FileHandle(forWritingTo: url)
         logHandle?.seekToEndOfFile()
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        logBytes = (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// 超过上限时滚动：`caption.log` → `.1` → `.2`，最旧的一份删除。
+    private func rotateLogIfNeeded(at url: URL, force: Bool = false) {
+        let fileManager = FileManager.default
+        let size = ((try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.uint64Value ?? 0
+        guard force || size >= logMaxBytes else { return }
+        logHandle?.closeFile()
+        logHandle = nil
+        for index in stride(from: logBackupCount, through: 1, by: -1) {
+            let destination = url.appendingPathExtension("\(index)")
+            let source = index == 1 ? url : url.appendingPathExtension("\(index - 1)")
+            guard fileManager.fileExists(atPath: source.path) else { continue }
+            try? fileManager.removeItem(at: destination)
+            try? fileManager.moveItem(at: source, to: destination)
+            // 旧版本留下的日志可能是 644，滚动后同样需要收紧权限。
+            try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+        }
+        logBytes = 0
     }
 
     private func log(_ message: String) {
-        guard let handle = logHandle else { return }
+        guard logURL != nil else { return }
+        if logHandle == nil { openLogIfNeeded() }
         let stamp = ISO8601DateFormatter().string(from: Date())
         let text = "[\(stamp)] \(message)\n"
-        if let data = text.data(using: .utf8) {
-            handle.write(data)
+        guard let data = text.data(using: .utf8) else { return }
+        if logBytes + UInt64(data.count) > logMaxBytes, let url = logURL {
+            rotateLogIfNeeded(at: url, force: true)
+            openLogIfNeeded()
         }
+        guard let handle = logHandle else { return }
+        handle.write(data)
+        logBytes += UInt64(data.count)
+    }
+
+    /// 转写正文默认不落盘：它可能包含会议、私人播放内容。
+    /// 排障时可在终端显式开启：`defaults write com.meteorkid.xnook captionLogTranscripts -bool YES`。
+    private var logsTranscripts: Bool {
+        UserDefaults.standard.bool(forKey: "captionLogTranscripts")
     }
 
     /// 真实端到端延迟：这段音频「说完」到文字真正上屏，中间隔了多久。
